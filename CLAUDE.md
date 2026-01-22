@@ -2,8 +2,8 @@
 
 ## Claude Directives
 
-- Always run `git pull` before making any changes to ensure you have the latest code
-- Automatically commit and push changes when done with a task
+- Always run `git pull` before making any changes to ensure you have the latest code.
+- When working on a branch other than `master`, automatically commit and push changes when done with a task.
 
 ## Project Overview
 
