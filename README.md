@@ -2,6 +2,10 @@
 
 Build and manage immutable NixOS virtual machines on libvirt/KVM.
 
+> [!NOTE] 
+> This code is written using Claude Code and other AI tools. It is reviewed
+> and tested by a human being.
+
 ## Why Immutable VMs?
 
 Virtual machines accumulate state over time. Install packages, update
