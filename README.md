@@ -70,11 +70,12 @@ curl -L https://nixos.org/nix/install | sh -s -- --daemon
 > The Nix installer works fine on most Linux distributions out
 > of the box. If you run Fedora Atomic, or another OSTree distro, see [DEVELOPMENT.md](DEVELOPMENT.md)
 
-Enable flakes by adding to `~/.config/nix/nix.conf`:
+Create the nix config file `~/.config/nix/nix.conf`:
 
 ```
 mkdir -p ~/.config/nix
-echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+echo "experimental-features = nix-command flakes" \
+    >> ~/.config/nix/nix.conf
 ```
 
 ### Install just
