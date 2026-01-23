@@ -70,6 +70,78 @@ create name profile="core" memory="2048" vcpus="2" var_size="20G" network="nat":
     @echo "SSH as admin (sudo): ssh admin@<ip>"
     @echo "SSH as user (no sudo): ssh user@<ip>"
 
+# Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
+clone source dest memory="2048" vcpus="2" network="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source_machine_dir="{{machines_dir}}/{{source}}"
+    dest_machine_dir="{{machines_dir}}/{{dest}}"
+    source_vm_dir="{{output_dir}}/vms/{{source}}"
+    dest_vm_dir="{{output_dir}}/vms/{{dest}}"
+
+    # Validate source machine config exists
+    if [ ! -d "$source_machine_dir" ]; then
+        echo "Error: Source machine config not found: $source_machine_dir"
+        exit 1
+    fi
+
+    # Validate source var disk exists
+    if [ ! -f "$source_vm_dir/var.qcow2" ]; then
+        echo "Error: Source /var disk not found: $source_vm_dir/var.qcow2"
+        exit 1
+    fi
+
+    # Validate source VM is shut off
+    state=$({{VIRSH}} -c {{LIBVIRT_URI}} domstate {{source}} 2>/dev/null || echo "unknown")
+    if [ "$state" != "shut off" ] && [ "$state" != "unknown" ]; then
+        echo "Error: Source VM '{{source}}' must be shut off (current state: $state)"
+        echo "Run 'just stop {{source}}' first."
+        exit 1
+    fi
+
+    # Validate dest doesn't already exist
+    if [ -d "$dest_machine_dir" ]; then
+        echo "Error: Destination machine config already exists: $dest_machine_dir"
+        exit 1
+    fi
+    if [ -d "$dest_vm_dir" ]; then
+        echo "Error: Destination VM disks already exist: $dest_vm_dir"
+        exit 1
+    fi
+
+    echo "Cloning VM '{{source}}' -> '{{dest}}'"
+
+    # Initialize machine config (non-interactive)
+    {{JUST}} _init-machine-clone {{source}} {{dest}} "{{network}}"
+
+    # Copy var disk
+    echo "Copying /var disk..."
+    mkdir -p "$dest_vm_dir"
+    {{CP}} "$source_vm_dir/var.qcow2" "$dest_vm_dir/var.qcow2"
+
+    # Sync new identity onto copied var disk
+    {{JUST}} _sync-identity {{dest}}
+
+    # Create boot disk with same profile's base image
+    profile=$(cat "$dest_machine_dir/profile")
+    profile_image=$({{READLINK}} -f {{output_dir}}/profiles/$profile)/nixos.qcow2
+    if [ ! -f "$profile_image" ]; then
+        echo "Error: Profile image not found: $profile_image"
+        echo "Run 'just build $profile' first"
+        exit 1
+    fi
+    {{QEMU_IMG}} create -f qcow2 \
+        -b "$profile_image" \
+        -F qcow2 \
+        "$dest_vm_dir/boot.qcow2"
+
+    # Generate XML and define in libvirt
+    {{JUST}} _generate-xml {{dest}} {{memory}} {{vcpus}}
+    {{JUST}} _define {{dest}}
+
+    echo ""
+    echo "VM '{{dest}}' cloned from '{{source}}'. Start with: just start {{dest}}"
+
 # Initialize machine config directory (creates identity files if not present)
 _init-machine name profile="core" network="nat":
     #!/usr/bin/env bash
@@ -189,6 +261,64 @@ _init-machine name profile="core" network="nat":
     fi
 
     echo "Machine config ready: $machine_dir/"
+
+# Internal: initialize machine config for clone (non-interactive, copies from source)
+_init-machine-clone source dest network="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source_dir="{{machines_dir}}/{{source}}"
+    dest_dir="{{machines_dir}}/{{dest}}"
+    mkdir -p "$dest_dir"
+
+    # Copy config files from source
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf root_password_hash profile; do
+        if [ -f "$source_dir/$f" ]; then
+            cp "$source_dir/$f" "$dest_dir/$f"
+        fi
+    done
+
+    # Handle network: copy from source or use override
+    network_override="{{network}}"
+    if [ -n "$network_override" ]; then
+        # Store raw value; for "bridge" we copy source's bridge config
+        if [ "$network_override" = "bridge" ] && [ -f "$source_dir/network" ]; then
+            source_net=$(cat "$source_dir/network")
+            if [[ "$source_net" == bridge:* ]]; then
+                echo "$source_net" > "$dest_dir/network"
+            else
+                echo "bridge:br0" > "$dest_dir/network"
+            fi
+        else
+            echo "$network_override" > "$dest_dir/network"
+        fi
+    elif [ -f "$source_dir/network" ]; then
+        cp "$source_dir/network" "$dest_dir/network"
+    else
+        echo "nat" > "$dest_dir/network"
+    fi
+
+    # Generate fresh identity
+    cat /proc/sys/kernel/random/uuid | tr -d '-' > "$dest_dir/machine-id"
+    echo "Generated: $dest_dir/machine-id"
+
+    printf '52:54:00:%02x:%02x:%02x\n' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) > "$dest_dir/mac-address"
+    echo "Generated: $dest_dir/mac-address ($(cat "$dest_dir/mac-address"))"
+
+    cat /proc/sys/kernel/random/uuid > "$dest_dir/uuid"
+    echo "Generated: $dest_dir/uuid"
+
+    echo "{{dest}}" > "$dest_dir/hostname"
+    echo "Created: $dest_dir/hostname"
+
+    ssh-keygen -t ed25519 -f "$dest_dir/ssh_host_ed25519_key" -N "" -C "root@{{dest}}"
+    echo "Generated: $dest_dir/ssh_host_ed25519_key"
+
+    # Preserve permissions on sensitive files
+    if [ -f "$dest_dir/root_password_hash" ]; then
+        chmod 600 "$dest_dir/root_password_hash"
+    fi
+
+    echo "Machine config ready: $dest_dir/ (cloned from {{source}})"
 
 # Configure network mode for a VM (nat or bridge)
 network-config name network="":
