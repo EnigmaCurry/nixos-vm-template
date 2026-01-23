@@ -25,6 +25,9 @@ CP := env_var_or_default("CP", HOST_CMD + " cp")
 READLINK := env_var_or_default("READLINK", HOST_CMD + " readlink")
 SSH := env_var_or_default("SSH", HOST_CMD + " ssh")
 
+# libguestfs backend (direct avoids SELinux/libvirt conflicts on Fedora)
+export LIBGUESTFS_BACKEND := env_var_or_default("LIBGUESTFS_BACKEND", "direct")
+
 # Libvirt connection URI
 LIBVIRT_URI := env_var_or_default("LIBVIRT_URI", "qemu:///system")
 

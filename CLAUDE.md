@@ -187,6 +187,7 @@ The Justfile supports environment variable overrides for tool commands, useful f
 | `GUESTFISH` | `HOST_CMD + " guestfish"` | guestfish command |
 | `CP` | `HOST_CMD + " cp"` | cp command |
 | `READLINK` | `HOST_CMD + " readlink"` | readlink command |
+| `LIBGUESTFS_BACKEND` | `direct` | libguestfs backend (direct avoids SELinux issues) |
 | `LIBVIRT_URI` | `qemu:///system` | Libvirt connection URI |
 | `OVMF_CODE` | `/usr/share/edk2/ovmf/OVMF_CODE.fd` | OVMF firmware path |
 | `OVMF_VARS` | `/usr/share/edk2/ovmf/OVMF_VARS.fd` | OVMF variables template path |
