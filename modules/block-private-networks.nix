@@ -1,18 +1,24 @@
-# Block outbound traffic to private network CIDRs (RFC 1918)
+# Block outbound traffic to private/local network CIDRs
 { config, lib, pkgs, ... }:
 
 {
   config = {
     networking.firewall.extraCommands = ''
+      # IPv4 RFC 1918
       iptables -A OUTPUT -d 10.0.0.0/8 -j DROP
       iptables -A OUTPUT -d 172.16.0.0/12 -j DROP
       iptables -A OUTPUT -d 192.168.0.0/16 -j DROP
+      # IPv6 Unique Local (fc00::/7) and Link-Local (fe80::/10)
+      ip6tables -A OUTPUT -d fc00::/7 -j DROP
+      ip6tables -A OUTPUT -d fe80::/10 -j DROP
     '';
 
     networking.firewall.extraStopCommands = ''
       iptables -D OUTPUT -d 10.0.0.0/8 -j DROP 2>/dev/null || true
       iptables -D OUTPUT -d 172.16.0.0/12 -j DROP 2>/dev/null || true
       iptables -D OUTPUT -d 192.168.0.0/16 -j DROP 2>/dev/null || true
+      ip6tables -D OUTPUT -d fc00::/7 -j DROP 2>/dev/null || true
+      ip6tables -D OUTPUT -d fe80::/10 -j DROP 2>/dev/null || true
     '';
   };
 }
