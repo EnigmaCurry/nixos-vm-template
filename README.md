@@ -84,6 +84,8 @@ curl -L https://nixos.org/nix/install | sh -s -- --daemon
 > distributions out of the box. If you run Fedora Atomic, or another
 > OSTree distro, see [DEVELOPMENT.md](DEVELOPMENT.md)
 
+### Enable Nix Flakes support
+
 Create the nix config file `~/.config/nix/nix.conf`:
 
 ```
