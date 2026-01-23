@@ -4,6 +4,7 @@
 {
   imports = [
     ./dev.nix
+    ../modules/block-private-networks.nix
   ];
 
   config = {
