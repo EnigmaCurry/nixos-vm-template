@@ -30,7 +30,7 @@
       ];
 
       # Available profiles (each adds packages on top of core modules)
-      profiles = [ "base" "core" "docker" "dev" "claude" ];
+      profiles = [ "base" "core" "docker" "dev" "claude" "open-code" ];
 
       # Build a VM image for a given system and profile
       mkProfileImage = system: profile:
