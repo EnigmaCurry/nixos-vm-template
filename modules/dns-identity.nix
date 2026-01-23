@@ -46,13 +46,16 @@
 
           if [ -n "$nameservers" ]; then
             echo "Setting DNS from /var/identity/resolv.conf: $nameservers"
-            # Try common interface names
-            if ${pkgs.systemd}/bin/resolvectl dns enp1s0 $nameservers 2>/dev/null; then
-              echo "DNS configured on enp1s0"
-            elif ${pkgs.systemd}/bin/resolvectl dns eth0 $nameservers 2>/dev/null; then
-              echo "DNS configured on eth0"
-            else
-              echo "Warning: Could not set custom DNS servers"
+            # Apply DNS to all managed non-loopback interfaces
+            configured=false
+            for iface in $(${pkgs.systemd}/bin/networkctl list --no-legend | awk '{print $2}' | grep -v '^lo$'); do
+              if ${pkgs.systemd}/bin/resolvectl dns "$iface" $nameservers 2>/dev/null; then
+                echo "DNS configured on $iface"
+                configured=true
+              fi
+            done
+            if [ "$configured" = false ]; then
+              echo "Warning: Could not set custom DNS on any interface"
             fi
           else
             echo "No nameservers found in /var/identity/resolv.conf"
