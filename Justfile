@@ -530,6 +530,20 @@ _sync-identity name:
     # Build guestfish commands to update identity files
     gf_cmds="run : mount /dev/sda1 /"
 
+    # Update hostname and machine-id
+    hostname=$(cat "$machine_dir/hostname")
+    machine_id=$(cat "$machine_dir/machine-id")
+    gf_cmds="$gf_cmds : write /identity/hostname '$hostname'"
+    gf_cmds="$gf_cmds : write /identity/machine-id '$machine_id'"
+
+    # Update SSH host key
+    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key /identity/"
+    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key.pub /identity/"
+    gf_cmds="$gf_cmds : chmod 0600 /identity/ssh_host_ed25519_key"
+    gf_cmds="$gf_cmds : chmod 0644 /identity/ssh_host_ed25519_key.pub"
+    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key"
+    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key.pub"
+
     # Update authorized_keys files
     if [ -s "$machine_dir/admin_authorized_keys" ]; then
         gf_cmds="$gf_cmds : copy-in $machine_dir/admin_authorized_keys /identity/"
