@@ -7,6 +7,11 @@
       # Allow responses to connections initiated from outside (e.g. SSH from host)
       iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
       ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+      # Allow DNS so systemd-resolved can reach upstream resolvers
+      iptables -A OUTPUT -p udp --dport 53 -j ACCEPT
+      iptables -A OUTPUT -p tcp --dport 53 -j ACCEPT
+      ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
+      ip6tables -A OUTPUT -p tcp --dport 53 -j ACCEPT
       # IPv4 RFC 1918
       iptables -A OUTPUT -d 10.0.0.0/8 -j DROP
       iptables -A OUTPUT -d 172.16.0.0/12 -j DROP
@@ -19,6 +24,10 @@
     networking.firewall.extraStopCommands = ''
       iptables -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
       ip6tables -D OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
+      iptables -D OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+      iptables -D OUTPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
+      ip6tables -D OUTPUT -p udp --dport 53 -j ACCEPT 2>/dev/null || true
+      ip6tables -D OUTPUT -p tcp --dport 53 -j ACCEPT 2>/dev/null || true
       iptables -D OUTPUT -d 10.0.0.0/8 -j DROP 2>/dev/null || true
       iptables -D OUTPUT -d 172.16.0.0/12 -j DROP 2>/dev/null || true
       iptables -D OUTPUT -d 192.168.0.0/16 -j DROP 2>/dev/null || true
