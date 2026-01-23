@@ -39,7 +39,8 @@ predictably, and can be recreated identically at any time.
 
 ## Features
 
-- Build script to create your own customized NixOS images
+- Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
+- It is a build script to create your own customized NixOS VM images
 - Thinly provisioned storage - many VMs can share a common base image
 - Immutable, container-like root filesystem (read-only)
 - Even `/etc` is read-only, you need to rebuild the image to reconfigure it
@@ -62,13 +63,26 @@ predictably, and can be recreated identically at any time.
 
 ### Install Nix
 
+Prefer your OS package:
+
 ```bash
+## Normal Fedora workstation/server (not Atomic nor OSTree based)
+sudo dnf install nix
+sudo systemctl enable --now nix-daemon
+```
+
+Or use the nix installer, but it only works on non-SELinux
+distributions:
+
+```
+## Generic Nix installer
 curl -L https://nixos.org/nix/install | sh -s -- --daemon
 ```
 
 > [!NOTE] 
-> The Nix installer works fine on most Linux distributions out
-> of the box. If you run Fedora Atomic, or another OSTree distro, see [DEVELOPMENT.md](DEVELOPMENT.md)
+> The Nix installer works fine on most non-SELinux
+> distributions out of the box. If you run Fedora Atomic, or another
+> OSTree distro, see [DEVELOPMENT.md](DEVELOPMENT.md)
 
 Create the nix config file `~/.config/nix/nix.conf`:
 
@@ -100,21 +114,21 @@ Choose the instructions for your distribution:
 #### Fedora
 
 ```bash
-sudo dnf install libvirt qemu-kvm virt-manager guestfs-tools edk2-ovmf
+sudo dnf install git libvirt qemu-kvm virt-manager guestfs-tools edk2-ovmf
 sudo systemctl enable --now libvirtd
 ```
 
 #### Debian / Ubuntu
 
 ```bash
-sudo apt install libvirt-daemon-system qemu-kvm virt-manager libguestfs-tools ovmf
+sudo apt install git libvirt-daemon-system qemu-kvm virt-manager libguestfs-tools ovmf
 sudo systemctl enable --now libvirtd
 ```
 
 #### Arch Linux
 
 ```bash
-sudo pacman -S libvirt qemu-full virt-manager guestfs-tools edk2-ovmf dnsmasq
+sudo pacman -S git libvirt qemu-full virt-manager guestfs-tools edk2-ovmf dnsmasq
 sudo systemctl enable --now libvirtd
 ```
 
@@ -149,8 +163,8 @@ mkdir -p ~/.config/nix
 echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
 
 # Clone this repository into the new user's home directory
-git clone https://github.com/EnigmaCurry/nixos-vm-template
-cd nixos-vm-template
+git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
+cd ~/nixos-vm-template
 ```
 
 This keeps your VM configurations and secrets isolated from your main user account. All subsequent commands in this guide should be run as this dedicated user.
@@ -158,9 +172,8 @@ This keeps your VM configurations and secrets isolated from your main user accou
 ## Quick Start
 
 ```bash
-# Clone the repository
-git clone https://github.com/EnigmaCurry/nixos-vm-template
-cd nixos-vm-template
+# Make sure you're in the project directory
+cd ~/nixos-vm-template
 
 # Create a VM named "test" with the default "core" profile
 just create test
