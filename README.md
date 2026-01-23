@@ -211,6 +211,7 @@ just build docker       # Build the "docker" profile
 | Command | Description |
 |---------|-------------|
 | `just create <name> [profile] [memory] [vcpus] [var_size] [network]` | Create a new VM |
+| `just clone <source> <dest> [memory] [vcpus] [network]` | Clone a VM (copy /var, fresh identity) |
 | `just start <name>` | Start a VM |
 | `just stop <name>` | Gracefully stop a VM |
 | `just force-stop <name>` | Force stop a VM |
@@ -244,6 +245,23 @@ The `network` parameter can be `nat` (default) or `bridge`. See [Bridged Network
 - **`just recreate <name>`** - Deletes everything and starts fresh. Both the boot disk
   and `/var` disk are replaced. All data is lost. Use this when you want a
   clean slate.
+
+### Cloning
+
+`just clone <source> <dest>` duplicates a VM by copying its `/var` disk
+(preserving all data, home directories, and application state) while
+generating fresh identity files (machine-id, MAC address, UUID, hostname,
+SSH host key). The source VM must be shut off.
+
+```bash
+just clone webserver webserver2              # Clone with default resources
+just clone webserver webserver2 4096 4       # Clone with 4GB RAM, 4 CPUs
+just clone webserver webserver2 2048 2 nat   # Clone and override network mode
+```
+
+The cloned VM inherits the source's profile, SSH authorized keys, firewall
+ports, DNS configuration, and root password hash. It gets its own unique
+identity so both VMs can run simultaneously without conflicts.
 
 ### VM Information
 
