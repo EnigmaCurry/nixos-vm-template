@@ -354,16 +354,19 @@ Set `PVE_DISK_FORMAT` based on your storage backend:
 
 The `network` parameter maps to Proxmox bridges:
 
-| machines/\<name\>/network | Proxmox net0 bridge |
-|---------------------------|---------------------|
+| Network parameter | Proxmox net0 bridge |
+|-------------------|---------------------|
 | `nat` | `$PVE_BRIDGE` (default `vmbr0`) |
 | `bridge:<name>` | `<name>` directly |
+
+For Proxmox, use `bridge:<name>` to specify a bridge directly (the
+interactive `bridge` menu only lists local bridges, not remote PVE bridges):
 
 ```bash
 # Use default bridge (vmbr0)
 BACKEND=proxmox just create myvm core 2048 2 30G nat
 
-# Use a specific bridge
+# Use a specific Proxmox bridge
 BACKEND=proxmox just create myvm core 2048 2 30G bridge:vmbr1
 ```
 
@@ -412,8 +415,9 @@ just build docker       # Build the "docker" profile
 just create webserver docker 4096 4 50G   # Create "webserver" with docker profile, 4GB RAM, 4 CPUs, 50GB /var
 just create devbox dev 8192 8             # Create "devbox" with dev profile, 8GB RAM, 8 CPUs
 
-just network-config webserver nat         # Switch "webserver" to NAT networking
-just network-config webserver bridge      # Switch "webserver" to bridged networking
+just network-config webserver nat         # Switch to NAT networking
+just network-config webserver bridge      # Interactive bridge selection (local bridges)
+just network-config webserver bridge:br0  # Specify bridge directly
 
 just passwd webserver                     # Set root password (interactive, leave blank to disable)
 

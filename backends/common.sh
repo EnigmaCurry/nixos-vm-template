@@ -224,8 +224,12 @@ network_config() {
     if [[ "$network" == "nat" ]]; then
         echo "nat" > "$machine_dir/network"
         echo "Network configured: nat"
+    elif [[ "$network" == bridge:* ]]; then
+        # Direct bridge specification (e.g., bridge:vmbr0, bridge:br0)
+        echo "$network" > "$machine_dir/network"
+        echo "Network configured: $network"
     elif [[ "$network" == "bridge" ]]; then
-        # List available bridges (excluding virbr0, docker bridges)
+        # Interactive bridge selection (lists local bridges)
         mapfile -t bridges < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-)' || true)
         if [ ${#bridges[@]} -eq 0 ]; then
             echo "Error: No bridge interfaces found (excluding virbr0 and docker bridges)."
@@ -260,7 +264,7 @@ network_config() {
         echo "bridge:$selected_bridge" > "$machine_dir/network"
         echo "Network configured: bridge:$selected_bridge"
     else
-        echo "Error: Invalid network config '$network'. Use 'nat' or 'bridge'"
+        echo "Error: Invalid network config '$network'. Use 'nat', 'bridge', or 'bridge:<name>'"
         exit 1
     fi
 }
