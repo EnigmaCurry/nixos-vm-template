@@ -294,10 +294,21 @@ backend_create_disks() {
     pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/var.qcow2 $PVE_STORAGE"
 
     # Attach disks and set boot order
+    # Parse actual volume names from unused disk entries (format varies by storage type)
     echo "Attaching disks and configuring boot..."
+    local boot_vol var_vol
+    boot_vol=$(pve_ssh "qm config $vmid" | grep "^unused0:" | sed 's/^unused0: //')
+    var_vol=$(pve_ssh "qm config $vmid" | grep "^unused1:" | sed 's/^unused1: //')
+
+    if [ -z "$boot_vol" ] || [ -z "$var_vol" ]; then
+        echo "Error: Could not find imported disks in VM config"
+        echo "Check 'qm config $vmid' on the Proxmox node"
+        exit 1
+    fi
+
     pve_ssh "qm set $vmid \
-        --virtio0 ${PVE_STORAGE}:vm-${vmid}-disk-1 \
-        --virtio1 ${PVE_STORAGE}:vm-${vmid}-disk-2 \
+        --virtio0 $boot_vol \
+        --virtio1 $var_vol \
         --boot order=virtio0"
 
     # Cleanup staging files on PVE node
