@@ -54,9 +54,6 @@
       linkConfig.Unmanaged = "yes";
     };
 
-    # NVIDIA container toolkit for GPU passthrough to containers
-    hardware.nvidia-container-toolkit.enable = true;
-
     # Add admin user to docker group for non-root access
     users.users.${config.core.adminUser}.extraGroups = [ "docker" ];
 
