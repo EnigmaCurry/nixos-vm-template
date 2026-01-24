@@ -837,11 +837,16 @@ clone_vm() {
     echo "$memory" > "$dest_machine_dir/memory"
     echo "$vcpus" > "$dest_machine_dir/vcpus"
 
-    # Allocate VMID for clone
+    # Determine VMID: user-specified > auto-allocate
     local dest_vmid
-    dest_vmid=$(pve_next_vmid)
+    if [ -n "${PVE_VMID:-}" ]; then
+        dest_vmid="$PVE_VMID"
+        echo "Using user-specified VMID: $dest_vmid"
+    else
+        dest_vmid=$(pve_next_vmid)
+        echo "Allocated VMID for clone: $dest_vmid"
+    fi
     echo "$dest_vmid" > "$dest_machine_dir/vmid"
-    echo "Allocated VMID for clone: $dest_vmid"
 
     # Use qm clone for full clone
     echo "Cloning VM on Proxmox ($source_vmid -> $dest_vmid)..."
