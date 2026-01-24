@@ -5,6 +5,9 @@
   imports = [ ./docker.nix ];
 
   config = {
+    # Allow unfree NVIDIA driver packages
+    nixpkgs.config.allowUnfree = true;
+
     # NVIDIA container toolkit for GPU passthrough to containers
     hardware.nvidia-container-toolkit.enable = true;
 
