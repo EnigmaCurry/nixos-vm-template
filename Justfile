@@ -4,7 +4,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 set dotenv-load
 
 BACKEND := env_var_or_default("BACKEND", "libvirt")
-backend_script := "backends/" + BACKEND + ".sh"
+backend_script := if BACKEND == "common" { error("BACKEND cannot be 'common'") } else { "backends/" + BACKEND + ".sh" }
 
 # Default recipe - show available commands
 [private]

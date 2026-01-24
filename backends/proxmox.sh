@@ -7,7 +7,7 @@ set -euo pipefail
 
 # Source common functions
 BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$BACKEND_DIR/../common.sh"
+source "$BACKEND_DIR/common.sh"
 
 # Backend-specific environment defaults
 PVE_HOST="${PVE_HOST:-}"
@@ -1079,4 +1079,17 @@ ssh_vm() {
     fi
     echo "Connecting to $name at $ip as $ssh_user..."
     $SSH -o StrictHostKeyChecking=accept-new "$ssh_user"@"$ip"
+}
+
+# List available backups on Proxmox backup storage
+list_backups() {
+    _pve_validate
+    echo "Backups on Proxmox storage '$PVE_BACKUP_STORAGE':"
+    local backups
+    backups=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_BACKUP_STORAGE/content --content backup --output-format json" 2>/dev/null || echo "[]")
+    if [ "$backups" = "[]" ] || [ -z "$backups" ]; then
+        echo "  (none)"
+        return 0
+    fi
+    echo "$backups" | jq -r '.[] | "  \(.volid)  VMID=\(.vmid)  \(.size / 1048576 | floor)MB  \(.ctime | todate)"'
 }

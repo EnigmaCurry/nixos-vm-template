@@ -6,7 +6,7 @@ set -euo pipefail
 
 # Source common functions
 BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$BACKEND_DIR/../common.sh"
+source "$BACKEND_DIR/common.sh"
 
 # Backend-specific environment defaults
 VIRSH="${VIRSH:-${HOST_CMD:+$HOST_CMD }${SUDO:+$SUDO }virsh}"
@@ -843,4 +843,15 @@ ssh_vm() {
     fi
     echo "Connecting to $name at $ip as $ssh_user..."
     $SSH -o StrictHostKeyChecking=accept-new "$ssh_user"@"$ip"
+}
+
+# List available backups
+list_backups() {
+    local backup_dir="$OUTPUT_DIR/backups"
+    if [ ! -d "$backup_dir" ] || [ -z "$(ls -A "$backup_dir" 2>/dev/null)" ]; then
+        echo "No backups found in $backup_dir/"
+        return 0
+    fi
+    echo "Available backups in $backup_dir/:"
+    ls -lh "$backup_dir"/*.tar.* 2>/dev/null | awk '{print "  " $NF " (" $5 ")"}'
 }
