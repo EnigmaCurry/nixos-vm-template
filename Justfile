@@ -23,7 +23,7 @@ list-profiles:
     @source {{backend_script}} && list_profiles
 
 # Create a new VM: build profile, create machine config, create disks, generate config, define
-create name profile="core" memory="2048" vcpus="2" var_size="20G" network="nat":
+create name profile="core" memory="2048" vcpus="2" var_size="30G" network="nat":
     @source {{backend_script}} && create_vm "{{name}}" "{{profile}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
@@ -55,7 +55,7 @@ purge name:
     @source {{backend_script}} && purge_vm "{{name}}"
 
 # Recreate a VM from its existing machine config (force stop, replace disks, start)
-recreate name var_size="20G" network="":
+recreate name var_size="30G" network="":
     @source {{backend_script}} && recreate_vm "{{name}}" "{{var_size}}" "{{network}}"
 
 # Upgrade a VM to a new image (preserves /var data)
