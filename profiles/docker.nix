@@ -11,15 +11,24 @@
     # Trust the Docker bridge so container traffic passes the firewall
     networking.firewall.trustedInterfaces = [ "docker0" ];
 
-    # Allow forwarding for Docker containers to reach the internet
-    networking.firewall.extraCommands = ''
-      iptables -A FORWARD -i docker0 -j ACCEPT
-      iptables -A FORWARD -o docker0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    '';
-    networking.firewall.extraStopCommands = ''
-      iptables -D FORWARD -i docker0 -j ACCEPT 2>/dev/null || true
-      iptables -D FORWARD -o docker0 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT 2>/dev/null || true
-    '';
+    # Disable bridge netfilter so container bridge traffic bypasses iptables.
+    # Docker enables br_netfilter at startup for inter-container isolation,
+    # but it causes bridge traffic to be misrouted through iptables INPUT
+    # where interface matching fails. Basic container networking (outbound
+    # NAT, port publishing via userland proxy) works without it.
+    systemd.services.disable-bridge-nf = {
+      description = "Disable bridge netfilter for Docker networking";
+      after = [ "docker.service" ];
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables
+        echo 0 > /proc/sys/net/bridge/bridge-nf-call-ip6tables
+      '';
+    };
 
     # Add admin user to docker group for non-root access
     users.users.${config.core.adminUser}.extraGroups = [ "docker" ];
