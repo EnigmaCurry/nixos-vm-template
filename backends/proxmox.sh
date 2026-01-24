@@ -1086,10 +1086,10 @@ list_backups() {
     _pve_validate
     echo "Backups on Proxmox storage '$PVE_BACKUP_STORAGE':"
     local backups
-    backups=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_BACKUP_STORAGE/content --content backup --output-format json" 2>/dev/null || echo "[]")
-    if [ "$backups" = "[]" ] || [ -z "$backups" ]; then
+    backups=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_BACKUP_STORAGE/content --content backup --output-format json")
+    if [ -z "$backups" ] || [ "$backups" = "[]" ]; then
         echo "  (none)"
         return 0
     fi
-    echo "$backups" | jq -r '.[] | "  \(.volid)  VMID=\(.vmid)  \(.size / 1048576 | floor)MB  \(.ctime | todate)"'
+    echo "$backups" | jq -r '.[] | "  \(.volid)  VMID=\(.vmid // "?")  \(.size // 0 | . / 1048576 | floor)MB  \(.ctime // 0 | todate)"'
 }
