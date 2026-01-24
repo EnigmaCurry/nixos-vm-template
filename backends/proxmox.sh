@@ -107,6 +107,53 @@ pve_next_vmid() {
     pve_ssh "pvesh get /cluster/nextid"
 }
 
+# --- Firewall Helpers ---
+
+# Sync Proxmox VM-level firewall rules from tcp_ports/udp_ports identity files
+pve_sync_firewall() {
+    local name="$1"
+    local machine_dir="$MACHINES_DIR/$name"
+    local vmid
+    vmid=$(pve_get_vmid "$name")
+
+    echo "Configuring Proxmox firewall for VM '$name' (VMID: $vmid)..."
+
+    # Enable VM-level firewall with default DROP policy for inbound
+    pve_ssh "pvesh set /nodes/$PVE_NODE/qemu/$vmid/firewall/options --enable 1 --policy_in DROP --policy_out ACCEPT"
+
+    # Delete all existing rules
+    local existing_rules
+    existing_rules=$(pve_ssh "pvesh get /nodes/$PVE_NODE/qemu/$vmid/firewall/rules --output-format json" 2>/dev/null || echo "[]")
+    local rule_count
+    rule_count=$(echo "$existing_rules" | jq 'length')
+    if [ "$rule_count" -gt 0 ]; then
+        # Delete rules from highest position to lowest to avoid index shifting
+        for ((i=rule_count-1; i>=0; i--)); do
+            pve_ssh "pvesh delete /nodes/$PVE_NODE/qemu/$vmid/firewall/rules/$i" 2>/dev/null || true
+        done
+    fi
+
+    # Add TCP port rules
+    if [ -s "$machine_dir/tcp_ports" ]; then
+        while IFS= read -r line; do
+            line=$(echo "$line" | sed 's/#.*//' | xargs)
+            [ -z "$line" ] && continue
+            pve_ssh "pvesh create /nodes/$PVE_NODE/qemu/$vmid/firewall/rules --type in --action ACCEPT --proto tcp --dport $line --enable 1"
+        done < "$machine_dir/tcp_ports"
+    fi
+
+    # Add UDP port rules
+    if [ -s "$machine_dir/udp_ports" ]; then
+        while IFS= read -r line; do
+            line=$(echo "$line" | sed 's/#.*//' | xargs)
+            [ -z "$line" ] && continue
+            pve_ssh "pvesh create /nodes/$PVE_NODE/qemu/$vmid/firewall/rules --type in --action ACCEPT --proto udp --dport $line --enable 1"
+        done < "$machine_dir/udp_ports"
+    fi
+
+    echo "Proxmox firewall configured."
+}
+
 # --- Backend Primitives ---
 
 # Create VM disks and transfer to Proxmox
@@ -322,6 +369,9 @@ backend_create_disks() {
     # Cleanup local flattened boot disk
     rm -f "$OUTPUT_DIR/vms/$name/boot-flat.qcow2"
 
+    # Configure Proxmox firewall rules from tcp_ports/udp_ports
+    pve_sync_firewall "$name"
+
     echo "Created VM '$name' on Proxmox (VMID: $vmid)"
     echo "  Boot disk imported to $PVE_STORAGE"
     echo "  Var disk imported to $PVE_STORAGE ($var_size)"
@@ -461,6 +511,9 @@ backend_sync_identity() {
     trap - EXIT
 
     echo "Identity files synced."
+
+    # Sync Proxmox firewall rules
+    pve_sync_firewall "$name"
 
     # Restart VM if it was running
     if [ "$was_running" = true ]; then
