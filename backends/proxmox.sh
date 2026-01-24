@@ -133,22 +133,22 @@ pve_sync_firewall() {
         done
     fi
 
-    # Add TCP port rules
+    # Add TCP port rules (use fd 3 so ssh doesn't consume stdin)
     if [ -s "$machine_dir/tcp_ports" ]; then
-        while IFS= read -r line; do
+        while IFS= read -r line <&3; do
             line=$(echo "$line" | sed 's/#.*//' | xargs)
             [ -z "$line" ] && continue
             pve_ssh "pvesh create /nodes/$PVE_NODE/qemu/$vmid/firewall/rules --type in --action ACCEPT --proto tcp --dport $line --enable 1"
-        done < "$machine_dir/tcp_ports"
+        done 3< "$machine_dir/tcp_ports"
     fi
 
-    # Add UDP port rules
+    # Add UDP port rules (use fd 3 so ssh doesn't consume stdin)
     if [ -s "$machine_dir/udp_ports" ]; then
-        while IFS= read -r line; do
+        while IFS= read -r line <&3; do
             line=$(echo "$line" | sed 's/#.*//' | xargs)
             [ -z "$line" ] && continue
             pve_ssh "pvesh create /nodes/$PVE_NODE/qemu/$vmid/firewall/rules --type in --action ACCEPT --proto udp --dport $line --enable 1"
-        done < "$machine_dir/udp_ports"
+        done 3< "$machine_dir/udp_ports"
     fi
 
     # Allow ICMP ping
