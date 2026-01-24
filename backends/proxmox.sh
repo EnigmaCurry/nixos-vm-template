@@ -13,6 +13,7 @@ source "$BACKEND_DIR/../common.sh"
 PVE_HOST="${PVE_HOST:-}"
 PVE_NODE="${PVE_NODE:-$PVE_HOST}"
 PVE_SSH_USER="${PVE_SSH_USER:-root}"
+PVE_SSH_PORT="${PVE_SSH_PORT:-22}"
 PVE_SSH_KEY="${PVE_SSH_KEY:-}"
 PVE_SSH_PORT="${PVE_SSH_PORT:-22}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
@@ -39,7 +40,7 @@ _pve_validate() {
 # SSH wrapper for PVE node
 pve_ssh() {
     _pve_validate
-    local ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+    local ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$PVE_SSH_PORT")
     if [ -n "$PVE_SSH_KEY" ]; then
         ssh_opts+=(-i "$PVE_SSH_KEY")
     fi
@@ -51,9 +52,9 @@ pve_rsync() {
     _pve_validate
     local rsync_opts=(-avz --progress)
     if [ -n "$PVE_SSH_KEY" ]; then
-        rsync_opts+=(-e "ssh -i $PVE_SSH_KEY -o StrictHostKeyChecking=accept-new")
+        rsync_opts+=(-e "ssh -p $PVE_SSH_PORT -i $PVE_SSH_KEY -o StrictHostKeyChecking=accept-new")
     else
-        rsync_opts+=(-e "ssh -o StrictHostKeyChecking=accept-new")
+        rsync_opts+=(-e "ssh -p $PVE_SSH_PORT -o StrictHostKeyChecking=accept-new")
     fi
     rsync "${rsync_opts[@]}" "$@"
 }
