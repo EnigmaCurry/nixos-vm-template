@@ -1,8 +1,8 @@
 # nixos-vm-template
 
-Build and manage immutable NixOS virtual machines on libvirt/KVM.
+Build and manage immutable NixOS virtual machines on libvirt/KVM or Proxmox VE.
 
-> [!NOTE] 
+> [!NOTE]
 > This code is written using Claude Code and other AI tools. It is reviewed
 > and tested by a human being.
 
@@ -40,24 +40,48 @@ predictably, and can be recreated identically at any time.
 ## Features
 
 - Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
+- **Two backends**: local libvirt/KVM or remote Proxmox VE
 - It is a build script to create your own customized NixOS VM images
-- Thinly provisioned storage - many VMs can share a common base image
 - Immutable, container-like root filesystem (read-only)
 - Even `/etc` is read-only, you need to rebuild the image to reconfigure it
 - Separate `/var` disk for all mutable state
-- Bind mounted `/home` to `/var/home` (persistent read/write user data)
-- Snapshots (QCOW2)
-- Backups (`/var` disk archive exported to `.tar.zst` file)
+- Bind mounted `/home` to `/var/home` and `/root` to `/var/root` (persistent)
+- Snapshots and backups
 - Multiple VM profiles to customize the VM role (base, core, docker, dev)
 - UEFI boot with systemd-boot
 - SSH key-only authentication
+- QEMU guest agent for IP detection and guest commands
 
-## Requirements
+## Backends
 
-- Linux host with KVM support
-- libvirt and QEMU
+This project supports two backends, selected via the `BACKEND` environment variable:
+
+| Backend | Description | Default |
+|---------|-------------|---------|
+| `libvirt` | Local libvirt/KVM with QCOW2 backing files | Yes |
+| `proxmox` | Remote Proxmox VE via SSH | No |
+
+```bash
+# Use libvirt (default)
+just create myvm
+
+# Use Proxmox
+BACKEND=proxmox just create myvm
+```
+
+You can set `BACKEND` in a `.env` file in the project root to avoid
+repeating it:
+
+```bash
+echo "BACKEND=proxmox" >> .env
+```
+
+## Requirements (Common)
+
+- Linux build machine with KVM support
 - `nix` package manager (with flakes enabled)
 - `just` (command runner)
+- `qemu-img` and `guestfish` (for disk creation)
 
 ## Installation
 
@@ -79,7 +103,7 @@ distributions:
 curl -L https://nixos.org/nix/install | sh -s -- --daemon
 ```
 
-> [!NOTE] 
+> [!NOTE]
 > The Nix installer works fine on most non-SELinux
 > distributions out of the box. If you run Fedora Atomic, or another
 > OSTree distro, see [DEVELOPMENT.md](DEVELOPMENT.md)
@@ -109,9 +133,12 @@ nix profile install nixpkgs#just
 cargo install just
 ```
 
-### Install libvirt and dependencies
+## Libvirt Backend
 
-Choose the instructions for your distribution:
+### Additional Requirements
+
+- libvirt and QEMU
+- OVMF (UEFI firmware)
 
 #### Fedora
 
@@ -146,35 +173,9 @@ sudo ufw route allow in on virbr0
 sudo ufw route allow out on virbr0
 ```
 
-### Create a dedicated user account (recommended)
-
-When you create VMs, the build script generates sensitive files in the `machines/` directory, including SSH host keys. It's recommended to create a dedicated user account for managing your VMs, so these files are protected from other users reading them:
+### Quick Start (Libvirt)
 
 ```bash
-# Create a new user (e.g., "libvirt-admin")
-sudo useradd -m -s /bin/bash libvirt-admin
-
-# Add the user to the libvirt group
-sudo usermod -aG libvirt libvirt-admin
-
-# Switch to the new user
-sudo -iu libvirt-admin
-
-# Enable nix flakes
-mkdir -p ~/.config/nix
-echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
-
-# Clone this repository into the new user's home directory
-git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
-cd ~/nixos-vm-template
-```
-
-This keeps your VM configurations and secrets isolated from your main user account. All subsequent commands in this guide should be run as this dedicated user.
-
-## Quick Start
-
-```bash
-# Make sure you're in the project directory
 cd ~/nixos-vm-template
 
 # Create a VM named "test" with the default "core" profile
@@ -187,8 +188,193 @@ just start test
 just status test
 
 # SSH into the VM
-ssh admin@<ip>   # Has sudo access
-ssh user@<ip>    # No sudo access
+just ssh test              # As 'user' (no sudo)
+just ssh admin@test        # As 'admin' (has sudo)
+```
+
+### Libvirt Storage
+
+The libvirt backend uses QCOW2 backing files for thin provisioning.
+Multiple VMs sharing the same profile share a single base image, with
+each VM's boot disk storing only the delta (copy-on-write).
+
+### Bridged Networking (Libvirt)
+
+By default, VMs use NAT networking via libvirt's `virbr0` bridge. This
+gives VMs internet access but they're not directly accessible from
+other machines on your LAN.
+
+For bridged networking, VMs connect directly to your physical network
+and get IP addresses from your network's DHCP server. This requires
+setting up a bridge interface on the host.
+
+#### Setting Up a Bridge with NetworkManager
+
+First, identify your physical network interface:
+
+```bash
+ip link show
+# Look for your ethernet interface (e.g., enp6s0, eth0, eno1)
+```
+
+Create the bridge and attach your physical interface to it:
+
+```bash
+# Create the bridge
+sudo nmcli connection add type bridge ifname br0 con-name br0
+
+# Add your physical interface to the bridge (replace enp6s0 with your interface)
+sudo nmcli connection add type bridge-slave ifname enp6s0 master br0 con-name br0-slave
+
+# Find your current connection name for the physical interface
+nmcli -t -f NAME,DEVICE connection show --active | grep enp6s0
+
+# Bring down the old connection and bring up the bridge
+# WARNING: This will briefly disconnect your network!
+sudo nmcli connection down "Wired connection 1" && sudo nmcli connection up br0
+```
+
+#### Creating a Bridged VM
+
+```bash
+just create myvm core 2048 2 20G bridge
+```
+
+You'll be prompted to select from available bridge interfaces.
+
+#### Changing Network Mode
+
+```bash
+just network-config myvm bridge
+just upgrade myvm             # Apply the change
+```
+
+## Proxmox VE Backend
+
+The Proxmox backend builds VM images locally, then transfers them to a
+remote Proxmox VE node via SSH. All Proxmox operations use `qm` and
+`pvesh` commands over SSH — no API tokens needed.
+
+### Additional Requirements
+
+**Build machine:** `rsync`, `ssh`, `jq`
+
+**Proxmox node:** SSH access as root, `nbd` kernel module (for identity
+sync), `qemu-nbd` (standard on PVE)
+
+### Configuration
+
+Set these in your `.env` file or as environment variables:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `PVE_HOST` | Yes | - | Proxmox host/IP for SSH |
+| `PVE_NODE` | Yes | `$PVE_HOST` | PVE node name (must match Proxmox hostname) |
+| `PVE_SSH_USER` | No | `root` | SSH user on PVE node |
+| `PVE_SSH_PORT` | No | `22` | SSH port on PVE node |
+| `PVE_SSH_KEY` | No | (ssh default) | SSH private key path |
+| `PVE_STORAGE` | No | `local` | Target storage for VM disks |
+| `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |
+| `PVE_DISK_FORMAT` | No | `qcow2` | Disk format for import (qcow2 or raw) |
+| `PVE_BACKUP_STORAGE` | No | `local` | Storage for vzdump backups |
+| `PVE_VMID` | No | (auto) | Specify VMID for next create |
+
+Example `.env`:
+
+```bash
+BACKEND=proxmox
+PVE_HOST=192.168.1.100
+PVE_NODE=pve
+PVE_SSH_PORT=22
+PVE_SSH_KEY=/home/user/.ssh/id_ed25519
+PVE_STORAGE=local-zfs
+PVE_BRIDGE=vmbr0
+PVE_DISK_FORMAT=qcow2
+PVE_BACKUP_STORAGE=pbs
+```
+
+### Quick Start (Proxmox)
+
+```bash
+cd ~/nixos-vm-template
+
+# Create a VM named "test" with the default "core" profile
+BACKEND=proxmox just create test
+
+# Start the VM
+BACKEND=proxmox just start test
+
+# Check status (requires QEMU guest agent to report IP)
+BACKEND=proxmox just status test
+
+# SSH into the VM
+BACKEND=proxmox just ssh test
+```
+
+### How It Works
+
+1. **Build**: Nix builds the NixOS image locally as a QCOW2 file
+2. **Flatten**: The boot disk is flattened (backing file removed) for transfer
+3. **Transfer**: `rsync` sends the boot and var disks to a staging directory on PVE
+4. **Import**: `qm importdisk` imports the disks into the configured storage
+5. **Configure**: The VM is created with OVMF UEFI, q35 machine type, serial console, and virtio disks
+
+### VMID Management
+
+Each VM's Proxmox VMID is stored in `machines/<name>/vmid`. By default,
+VMIDs are auto-allocated from Proxmox via `pvesh get /cluster/nextid`.
+To specify a VMID manually:
+
+```bash
+PVE_VMID=200 BACKEND=proxmox just create myvm
+```
+
+The script validates that the VMID is either available or already
+belongs to a VM with the same name.
+
+### Identity Sync
+
+The `just upgrade` command syncs identity files to the VM's `/var` disk
+without downloading it. It uses `qemu-nbd` on the PVE node to mount the
+var disk in place, rsyncs only the small identity files, then unmounts.
+This works regardless of var disk size.
+
+### Disk Format
+
+Set `PVE_DISK_FORMAT` based on your storage backend:
+
+| Storage Type | Recommended Format | Why |
+|--------------|-------------------|-----|
+| Directory/NFS | `qcow2` | Thin provisioning, snapshot support |
+| ZFS | `raw` | ZFS handles thin provisioning natively |
+| LVM-thin | `raw` | Storage layer provides thin + snapshots |
+| Ceph/RBD | `raw` | Ceph handles it natively |
+
+### Proxmox Networking
+
+The `network` parameter maps to Proxmox bridges:
+
+| machines/\<name\>/network | Proxmox net0 bridge |
+|---------------------------|---------------------|
+| `nat` | `$PVE_BRIDGE` (default `vmbr0`) |
+| `bridge:<name>` | `<name>` directly |
+
+```bash
+# Use default bridge (vmbr0)
+BACKEND=proxmox just create myvm core 2048 2 30G nat
+
+# Use a specific bridge
+BACKEND=proxmox just create myvm core 2048 2 30G bridge:vmbr1
+```
+
+### Backups (Proxmox)
+
+Proxmox backups use `vzdump` and are stored on `PVE_BACKUP_STORAGE`:
+
+```bash
+BACKEND=proxmox just backup myvm       # Create vzdump backup
+BACKEND=proxmox just backups           # List backups (managed VMs only)
+BACKEND=proxmox just restore-backup myvm  # Restore from backup
 ```
 
 ## Commands
@@ -234,8 +420,6 @@ just passwd webserver                     # Set root password (interactive, leav
 just upgrade webserver                    # Rebuild and apply changes (preserves /var data)
 ```
 
-The `network` parameter can be `nat` (default) or `bridge`. See [Bridged Networking](#bridged-networking) for details.
-
 ### Upgrade vs Recreate
 
 - **`just upgrade <name>`** - Updates the VM to a new image while preserving all data
@@ -267,14 +451,9 @@ identity so both VMs can run simultaneously without conflicts.
 
 | Command | Description |
 |---------|-------------|
-| `just list` | List all VMs |
+| `just list` | List managed VMs |
 | `just status <name>` | Show VM status and IP address |
 | `just list-machines` | List all machine configs |
-
-```bash
-just list               # Show all VMs and their states
-just status webserver   # Get IP address and status of "webserver"
-```
 
 ### Snapshots
 
@@ -289,50 +468,23 @@ just snapshot webserver before-upgrade    # Create snapshot named "before-upgrad
 just restore-snapshot webserver before-upgrade   # Restore to that snapshot
 ```
 
-Snapshots capture the `/var` disk and UEFI NVRAM state. The root filesystem
-is immutable, so there's nothing to snapshot there. Note that `upgrade` and
-`recreate` will delete all snapshots.
+Note that `upgrade` and `recreate` will delete all snapshots.
 
 ### Backups
 
 | Command                      | Description                             |
 |------------------------------|-----------------------------------------|
 | `just backup <name>`         | Create backup of VM                     |
+| `just backups`               | List available backups                  |
 | `just restore-backup <name>` | Restore backup of VM (choose from list) |
-
-```bash
-just backup webserver           # Create timestamped backup in output/backups/
-just restore-backup webserver   # Interactive restore from available backups
-```
-
-Backup files are `.tar.zst` archives that contain the unique VM data
-for `/var` only. They are not full OS images. When restoring a backup
-you must rebuild the OS with nix (`just build` and/or `just upgrade <vm>`).
-
-```
-# Showing contents of an example archive:
-
-$ zstdcat output/backups/test-20260121-171147.tar.zst | tar -tv
-drwxr-xr-x enigma/enigma     0 2026-01-21 17:04 ./
--rw-r--r-- qemu/qemu 8745189376 2026-01-21 17:11 ./var.qcow2
--rw-r--r-- qemu/qemu     196704 2026-01-21 17:04 ./boot.qcow2
--rw-r--r-- qemu/qemu     524358 2026-01-21 17:11 ./OVMF_VARS.qcow2
-```
-
-Notice the `boot.qcow2` is pretty tiny, that's because it's
-incomplete, and that's fine. `boot.qcow2` is just an overlay device on
-top of the shared base image from `just build`. The important part is
-that the archive has a full back up `/var`. The VM archive can be
-restored on any computer, and the full OS image can be rebuilt by
-running `just build` and/or `just upgrade <vm>`. After this, the
-`boot.qcow2` will be re-created from scratch, discarding the version
-from the archive.
 
 ### Maintenance
 
 | Command               | Description                      |
 |-----------------------|----------------------------------|
 | `just console <name>` | Attach to VM serial console      |
+| `just ssh <name>`     | SSH into VM (as user)            |
+| `just ssh admin@<name>` | SSH into VM (as admin, has sudo) |
 | `just clean`          | Remove built images and VM disks |
 | `just shell`          | Enter Nix development shell      |
 
@@ -351,9 +503,9 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `profile` - Which profile to use
 - `hostname` - VM hostname
 - `machine-id` - Unique machine identifier
-- `uuid` - Libvirt VM UUID (preserves DHCP lease across upgrades)
+- `uuid` - VM UUID (preserves DHCP lease across upgrades)
 - `mac-address` - Network MAC address
-- `network` - Network mode (`nat` or `bridge`)
+- `network` - Network mode (`nat` or `bridge:<name>`)
 - `ssh_host_ed25519_key` - SSH host key
 - `admin_authorized_keys` - SSH public keys for admin user
 - `user_authorized_keys` - SSH public keys for regular user
@@ -361,23 +513,26 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `udp_ports` - UDP ports to open in firewall (one per line)
 - `root_password_hash` - Root password hash for console login (empty = disabled)
 - `resolv.conf` - DNS configuration (default: Cloudflare 1.1.1.1, 1.0.0.1)
+- `vmid` - Proxmox VMID (proxmox backend only)
 
 These files are generated during `just create` and preserved across
 `just upgrade` and `just recreate`.
 
 ### Custom Firewall Ports
 
-To open additional ports for a specific VM, create `tcp_ports` and/or
-`udp_ports` files in the machine config directory before running
-`just create` or `just recreate`:
+To open additional ports for a specific VM, edit `tcp_ports` and/or
+`udp_ports` in the machine config directory:
 
 ```bash
 # Open TCP ports 8080 and 3000
-echo "8080" > machines/myvm/tcp_ports
+echo "8080" >> machines/myvm/tcp_ports
 echo "3000" >> machines/myvm/tcp_ports
 
 # Open UDP port 53
-echo "53" > machines/myvm/udp_ports
+echo "53" >> machines/myvm/udp_ports
+
+# Apply changes
+just upgrade myvm
 ```
 
 Lines starting with `#` are treated as comments.
@@ -394,89 +549,13 @@ just upgrade myvm             # Apply the change
 ```
 
 The password hash is stored in `machines/<name>/root_password_hash`.
-When this file is empty, root password login is disabled. When it
-contains a hash, root can log in at the VM console with that password.
-This does not affect SSH access, which always uses key-based
-authentication.
-
-## Bridged Networking
-
-By default, VMs use NAT networking via libvirt's `virbr0` bridge. This
-gives VMs internet access but they're not directly accessible from
-other machines on your LAN.
-
-For bridged networking, VMs connect directly to your physical network
-and get IP addresses from your network's DHCP server. This requires
-setting up a bridge interface on the host.
-
-### Setting Up a Bridge with NetworkManager
-
-First, identify your physical network interface:
-
-```bash
-ip link show
-# Look for your ethernet interface (e.g., enp6s0, eth0, eno1)
-```
-
-Create the bridge and attach your physical interface to it:
-
-```bash
-# Create the bridge
-sudo nmcli connection add type bridge ifname br0 con-name br0
-
-# Add your physical interface to the bridge (replace enp6s0 with your interface)
-sudo nmcli connection add type bridge-slave ifname enp6s0 master br0 con-name br0-slave
-
-# Find your current connection name for the physical interface
-nmcli -t -f NAME,DEVICE connection show --active | grep enp6s0
-
-# Bring down the old connection and bring up the bridge
-# WARNING: This will briefly disconnect your network!
-sudo nmcli connection down "Wired connection 1" && sudo nmcli connection up br0
-```
-
-After this, your host's IP address will be on `br0` instead of your
-physical interface. Verify with:
-
-```bash
-ip addr show br0
-```
-
-### Creating a Bridged VM
-
-Once `br0` is configured, create a VM with bridged networking:
-
-```bash
-just create myvm core 2048 2 20G bridge
-```
-
-You'll be prompted to select from available bridge interfaces. The VM
-will get an IP address from your network's DHCP server and be
-accessible from other machines on your LAN.
-
-### Changing Network Mode
-
-To change an existing VM from NAT to bridged (or vice versa):
-
-```bash
-# Interactive mode - prompts for network type and bridge selection
-just network-config myvm
-
-# Or specify directly
-just network-config myvm bridge
-
-# Apply the change (preserves /var data)
-just upgrade myvm
-```
-
-The VM will be briefly stopped during the upgrade, then restarted with
-the new network configuration.
+When this file is empty, root password login is disabled.
 
 ## Architecture
 
 ```
 VM Disk Layout:
-  vda (boot) - Read-only root filesystem (QCOW2 with backing file)
+  vda (boot) - Read-only root filesystem
   vdb (var)  - Read-write /var filesystem
 
 Filesystem Mounts:
@@ -484,7 +563,46 @@ Filesystem Mounts:
   /boot  - Read-only (EFI partition on vda)
   /var   - Read-write (from vdb)
   /home  - Bind mount of /var/home
+  /root  - Bind mount of /var/root
   /tmp   - tmpfs
+```
+
+### Libvirt Specifics
+
+- Boot disk uses QCOW2 with backing file (thin provisioning)
+- Multiple VMs share a single base image
+- OVMF UEFI firmware with QCOW2 NVRAM (supports snapshots)
+
+### Proxmox Specifics
+
+- Boot disk flattened and imported via `qm importdisk`
+- Serial console (no VGA framebuffer)
+- QEMU guest agent enabled for IP detection
+- Identity sync via `qemu-nbd` mount on PVE node
+
+## Create a Dedicated User Account (Recommended)
+
+When you create VMs, the build script generates sensitive files in the
+`machines/` directory, including SSH host keys. It's recommended to
+create a dedicated user account for managing your VMs:
+
+```bash
+# Create a new user
+sudo useradd -m -s /bin/bash vm-admin
+
+# Add to libvirt group (libvirt backend only)
+sudo usermod -aG libvirt vm-admin
+
+# Switch to the new user
+sudo -iu vm-admin
+
+# Enable nix flakes
+mkdir -p ~/.config/nix
+echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
+
+# Clone this repository
+git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
+cd ~/nixos-vm-template
 ```
 
 ## Development
