@@ -827,7 +827,13 @@ restore_backup_vm() {
 
 # SSH into a VM as the user account
 ssh_vm() {
-    local name="$1"
+    local input="$1"
+    local ssh_user="user"
+    local name="$input"
+    if [[ "$input" == *@* ]]; then
+        ssh_user="${input%%@*}"
+        name="${input#*@}"
+    fi
     local ip
     ip=$(backend_get_ip "$name")
     if [ -z "$ip" ]; then
@@ -835,6 +841,6 @@ ssh_vm() {
         echo "Is the VM running? Check with: just status $name"
         exit 1
     fi
-    echo "Connecting to $name at $ip as user..."
-    $SSH -o StrictHostKeyChecking=accept-new user@"$ip"
+    echo "Connecting to $name at $ip as $ssh_user..."
+    $SSH -o StrictHostKeyChecking=accept-new "$ssh_user"@"$ip"
 }

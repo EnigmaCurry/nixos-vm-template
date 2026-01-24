@@ -74,7 +74,7 @@ list-machines:
 console name:
     @source {{backend_script}} && backend_console "{{name}}"
 
-# SSH into a VM as the user account
+# SSH into a VM (accepts [user@]name, defaults to 'user')
 ssh name:
     @source {{backend_script}} && ssh_vm "{{name}}"
 
