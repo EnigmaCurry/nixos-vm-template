@@ -365,16 +365,12 @@ backend_sync_identity() {
         exit 1
     fi
 
-    # Resolve the storage path for the disk
-    # For directory-based storage (e.g., local): /var/lib/vz/images/$vmid/vm-$vmid-disk-N.qcow2
-    # For LVM/ZFS: need different handling
-    var_disk_path=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_STORAGE/content/$var_disk_ref --output-format json 2>/dev/null | jq -r '.path // empty'" 2>/dev/null || echo "")
+    # Resolve the volume ID to a filesystem path using pvesm
+    var_disk_path=$(pve_ssh "pvesm path '$var_disk_ref'")
 
     if [ -z "$var_disk_path" ]; then
-        # Fallback: construct path for directory-based storage
-        local disk_file
-        disk_file=$(echo "$var_disk_ref" | sed "s|${PVE_STORAGE}:||")
-        var_disk_path="/var/lib/vz/images/$vmid/$disk_file"
+        echo "Error: Could not resolve path for volume '$var_disk_ref'"
+        exit 1
     fi
 
     echo "Var disk path: $var_disk_path"
