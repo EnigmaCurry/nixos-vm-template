@@ -196,7 +196,14 @@ just ssh admin@test        # As 'admin' (has sudo)
 
 The libvirt backend uses QCOW2 backing files for thin provisioning.
 Multiple VMs sharing the same profile share a single base image, with
-each VM's boot disk storing only the delta (copy-on-write).
+each VM's boot disk storing only the delta (copy-on-write). This means
+ten VMs built from the same profile consume roughly the space of one
+full image plus their individual deltas.
+
+The Proxmox backend does not use backing files — each VM receives a
+full (flattened) copy of the boot disk. Storage-level deduplication
+(e.g., ZFS) can offset this, but there is no per-profile thin
+provisioning at the QCOW2 layer.
 
 ### Bridged Networking (Libvirt)
 
