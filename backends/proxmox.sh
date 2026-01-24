@@ -379,6 +379,10 @@ backend_sync_identity() {
     # Use qemu-nbd on the PVE node to mount and sync identity
     local mount_point="/mnt/nixos-var-sync-$$"
     pve_ssh "modprobe nbd max_part=8 2>/dev/null || true"
+    # Disconnect any stale nbd connection from a previous failed run
+    pve_ssh "umount /dev/nbd0p1 2>/dev/null || true"
+    pve_ssh "qemu-nbd -d /dev/nbd0 2>/dev/null || true"
+    sleep 1
     pve_ssh "mkdir -p $mount_point"
 
     # Detect disk format from extension
