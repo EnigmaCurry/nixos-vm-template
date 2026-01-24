@@ -378,12 +378,23 @@ backend_sync_identity() {
 
     # Use qemu-nbd on the PVE node to mount and sync identity
     local mount_point="/mnt/nixos-var-sync-$$"
-    pve_ssh "modprobe nbd max_part=8 2>/dev/null || true"
-    # Disconnect any stale nbd connection from a previous failed run
-    pve_ssh "umount /dev/nbd0p1 2>/dev/null || true"
-    pve_ssh "qemu-nbd -d /dev/nbd0 2>/dev/null || true"
-    sleep 1
+    pve_ssh "modprobe nbd max_part=16 2>/dev/null || true"
     pve_ssh "mkdir -p $mount_point"
+
+    # Find a free nbd device
+    local nbd_dev
+    nbd_dev=$(pve_ssh "for dev in /sys/block/nbd*; do
+        if [ -f \"\$dev/size\" ] && [ \"\$(cat \"\$dev/size\")\" = \"0\" ]; then
+            echo \"/dev/\$(basename \"\$dev\")\"
+            break
+        fi
+    done")
+
+    if [ -z "$nbd_dev" ]; then
+        echo "Error: No free nbd device found on PVE node"
+        exit 1
+    fi
+    echo "Using nbd device: $nbd_dev"
 
     # Detect disk format from extension
     local disk_format="qcow2"
@@ -392,11 +403,11 @@ backend_sync_identity() {
     fi
 
     # Connect nbd and mount
-    pve_ssh "qemu-nbd -f $disk_format -c /dev/nbd0 '$var_disk_path'"
+    pve_ssh "qemu-nbd -f $disk_format -c $nbd_dev '$var_disk_path'"
     sleep 2
-    pve_ssh "partprobe /dev/nbd0 2>/dev/null || true"
+    pve_ssh "partprobe $nbd_dev 2>/dev/null || true"
     sleep 1
-    pve_ssh "mount /dev/nbd0p1 $mount_point"
+    pve_ssh "mount ${nbd_dev}p1 $mount_point"
 
     # Ensure identity directory exists on the mounted disk
     pve_ssh "mkdir -p $mount_point/identity"
@@ -439,7 +450,7 @@ backend_sync_identity() {
 
     # Unmount and disconnect nbd
     pve_ssh "umount $mount_point"
-    pve_ssh "qemu-nbd -d /dev/nbd0"
+    pve_ssh "qemu-nbd -d $nbd_dev"
     pve_ssh "rmdir $mount_point 2>/dev/null || true"
 
     # Cleanup temp dir
