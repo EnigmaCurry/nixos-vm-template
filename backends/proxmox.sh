@@ -14,6 +14,7 @@ PVE_HOST="${PVE_HOST:-}"
 PVE_NODE="${PVE_NODE:-$PVE_HOST}"
 PVE_SSH_USER="${PVE_SSH_USER:-root}"
 PVE_SSH_KEY="${PVE_SSH_KEY:-}"
+PVE_SSH_PORT="${PVE_SSH_PORT:-22}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr0}"
 PVE_STAGING_DIR="${PVE_STAGING_DIR:-/tmp/nixos-vm-staging}"
@@ -42,7 +43,7 @@ pve_ssh() {
     if [ -n "$PVE_SSH_KEY" ]; then
         ssh_opts+=(-i "$PVE_SSH_KEY")
     fi
-    ssh "${ssh_opts[@]}" "${PVE_SSH_USER}@${PVE_HOST}" "$@"
+    ssh "${ssh_opts[@]}" "${PVE_SSH_USER}@${PVE_HOST}" -p "${PVE_SSH_PORT}" "$@"
 }
 
 # rsync wrapper to PVE node
