@@ -380,8 +380,14 @@ backend_sync_identity() {
     pve_ssh "modprobe nbd max_part=8 2>/dev/null || true"
     pve_ssh "mkdir -p $mount_point"
 
+    # Detect disk format from extension
+    local disk_format="qcow2"
+    if [[ "$var_disk_path" == *.raw ]]; then
+        disk_format="raw"
+    fi
+
     # Connect nbd and mount
-    pve_ssh "qemu-nbd -c /dev/nbd0 '$var_disk_path'"
+    pve_ssh "qemu-nbd -f $disk_format -c /dev/nbd0 '$var_disk_path'"
     sleep 2
     pve_ssh "partprobe /dev/nbd0 2>/dev/null || true"
     sleep 1
