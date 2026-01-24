@@ -49,13 +49,11 @@ pve_ssh() {
 # rsync wrapper to PVE node
 pve_rsync() {
     _pve_validate
-    local rsync_opts=(-avz --progress)
+    local ssh_cmd="ssh -p ${PVE_SSH_PORT} -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
     if [ -n "$PVE_SSH_KEY" ]; then
-        rsync_opts+=(-e "ssh -p $PVE_SSH_PORT -i $PVE_SSH_KEY -o StrictHostKeyChecking=accept-new")
-    else
-        rsync_opts+=(-e "ssh -p $PVE_SSH_PORT -o StrictHostKeyChecking=accept-new")
+        ssh_cmd+=" -i ${PVE_SSH_KEY}"
     fi
-    rsync "${rsync_opts[@]}" "$@"
+    rsync -avz --progress -e "$ssh_cmd" "$@"
 }
 
 # Get VMID for a machine by name (stored in machines/<name>/vmid)
