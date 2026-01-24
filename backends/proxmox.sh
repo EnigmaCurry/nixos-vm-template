@@ -151,6 +151,9 @@ pve_sync_firewall() {
         done < "$machine_dir/udp_ports"
     fi
 
+    # Allow ICMP ping
+    pve_ssh "pvesh create /nodes/$PVE_NODE/qemu/$vmid/firewall/rules --type in --action ACCEPT --proto icmp --enable 1"
+
     echo "Proxmox firewall configured."
 }
 
