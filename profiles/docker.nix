@@ -7,6 +7,40 @@
   config = {
     # Enable Docker daemon
     virtualisation.docker.enable = true;
+    virtualisation.docker.extraOptions = "--config-file /run/docker-daemon.json";
+
+    # Generate Docker daemon.json from per-VM DNS identity before Docker starts
+    systemd.services.docker-dns-config = {
+      description = "Generate Docker daemon.json from identity DNS";
+      before = [ "docker.service" ];
+      requiredBy = [ "docker.service" ];
+      after = [ "var.mount" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        nameservers=""
+        if [ -f /var/identity/resolv.conf ]; then
+          while IFS= read -r line; do
+            case "$line" in
+              nameserver\ *)
+                ns="''${line#nameserver }"
+                if [ -n "$nameservers" ]; then
+                  nameservers="$nameservers, \"$ns\""
+                else
+                  nameservers="\"$ns\""
+                fi
+                ;;
+            esac
+          done < /var/identity/resolv.conf
+        fi
+        if [ -z "$nameservers" ]; then
+          nameservers="\"1.1.1.1\", \"1.0.0.1\""
+        fi
+        echo "{\"dns\": [$nameservers]}" > /run/docker-daemon.json
+      '';
+    };
 
     # Trust the Docker bridge so container traffic passes the firewall
     networking.firewall.trustedInterfaces = [ "docker0" ];
