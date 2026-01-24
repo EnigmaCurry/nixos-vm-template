@@ -31,6 +31,14 @@
     depends = [ "/var" ];
   };
 
+  # /root is a bind mount of /var/root (persistent root home directory)
+  fileSystems."/root" = {
+    device = "/var/root";
+    fsType = "none";
+    options = [ "bind" ];
+    depends = [ "/var" ];
+  };
+
   # /tmp as tmpfs (root is read-only)
   fileSystems."/tmp" = {
     device = "tmpfs";
@@ -38,8 +46,9 @@
     options = [ "mode=1777" "strictatime" "nosuid" "nodev" "size=50%" ];
   };
 
-  # Ensure /var/home exists on first boot
+  # Ensure /var/home and /var/root exist on first boot
   systemd.tmpfiles.rules = [
     "d /var/home 0755 root root -"
+    "d /var/root 0700 root root -"
   ];
 }
