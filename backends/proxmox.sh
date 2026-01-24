@@ -17,6 +17,7 @@ PVE_SSH_PORT="${PVE_SSH_PORT:-22}"
 PVE_SSH_KEY="${PVE_SSH_KEY:-}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr0}"
+PVE_DISK_FORMAT="${PVE_DISK_FORMAT:-qcow2}"
 PVE_STAGING_DIR="${PVE_STAGING_DIR:-/tmp/nixos-vm-staging}"
 
 QEMU_IMG="${QEMU_IMG:-${HOST_CMD:+$HOST_CMD }qemu-img}"
@@ -288,10 +289,10 @@ backend_create_disks() {
 
     # Import disks
     echo "Importing boot disk..."
-    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/boot.qcow2 $PVE_STORAGE"
+    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/boot.qcow2 $PVE_STORAGE --format $PVE_DISK_FORMAT"
 
     echo "Importing var disk..."
-    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/var.qcow2 $PVE_STORAGE"
+    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/var.qcow2 $PVE_STORAGE --format $PVE_DISK_FORMAT"
 
     # Attach disks and set boot order
     # Parse actual volume names from unused disk entries (format varies by storage type)
@@ -949,7 +950,7 @@ upgrade_vm() {
 
     # Import new boot disk
     echo "Importing new boot disk..."
-    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/boot.qcow2 $PVE_STORAGE"
+    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/boot.qcow2 $PVE_STORAGE --format $PVE_DISK_FORMAT"
 
     # Find the new unused disk and attach it
     local new_disk
