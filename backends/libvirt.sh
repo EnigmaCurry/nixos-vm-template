@@ -531,6 +531,11 @@ clone_vm() {
 destroy_vm() {
     local name="$1"
 
+    if [ ! -d "$MACHINES_DIR/$name" ]; then
+        echo "Error: No machine config found for '$name'"
+        exit 1
+    fi
+
     echo "WARNING: This will destroy VM '$name' and delete all its disks."
     echo "All data in /var and home directories will be PERMANENTLY LOST."
     echo "(Machine config in $MACHINES_DIR/$name/ will be preserved)"
@@ -555,6 +560,11 @@ destroy_vm() {
 # Completely remove a VM including its machine config
 purge_vm() {
     local name="$1"
+
+    if [ ! -d "$MACHINES_DIR/$name" ]; then
+        echo "Error: No machine config found for '$name'"
+        exit 1
+    fi
 
     echo "WARNING: This will COMPLETELY remove VM '$name'."
     echo "All data in /var and home directories will be PERMANENTLY LOST."
