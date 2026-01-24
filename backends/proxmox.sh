@@ -213,12 +213,20 @@ backend_create_disks() {
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
 
-    # Allocate VMID
-    echo "Allocating VMID from Proxmox..."
+    # Determine VMID: user-specified > existing file > auto-allocate
     local vmid
-    vmid=$(pve_next_vmid)
+    if [ -n "${PVE_VMID:-}" ]; then
+        vmid="$PVE_VMID"
+        echo "Using user-specified VMID: $vmid"
+    elif [ -f "$machine_dir/vmid" ]; then
+        vmid=$(cat "$machine_dir/vmid")
+        echo "Using existing VMID: $vmid"
+    else
+        echo "Allocating VMID from Proxmox..."
+        vmid=$(pve_next_vmid)
+        echo "Allocated VMID: $vmid"
+    fi
     echo "$vmid" > "$machine_dir/vmid"
-    echo "Allocated VMID: $vmid"
 
     # Parse network configuration
     local network_config bridge
