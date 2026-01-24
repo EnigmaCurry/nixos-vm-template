@@ -18,6 +18,7 @@ PVE_SSH_KEY="${PVE_SSH_KEY:-}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr0}"
 PVE_DISK_FORMAT="${PVE_DISK_FORMAT:-qcow2}"
+PVE_BACKUP_STORAGE="${PVE_BACKUP_STORAGE:-local}"
 PVE_STAGING_DIR="${PVE_STAGING_DIR:-/tmp/nixos-vm-staging}"
 
 QEMU_IMG="${QEMU_IMG:-${HOST_CMD:+$HOST_CMD }qemu-img}"
@@ -997,7 +998,7 @@ backup_vm() {
     vmid=$(pve_get_vmid "$name")
 
     echo "Creating backup of VM '$name' (VMID: $vmid) via vzdump..."
-    pve_ssh "vzdump $vmid --mode snapshot --compress zstd --storage $PVE_STORAGE"
+    pve_ssh "vzdump $vmid --mode snapshot --compress zstd --storage $PVE_BACKUP_STORAGE"
     echo ""
     echo "Backup complete. List backups with: BACKEND=proxmox just backups"
 }
@@ -1022,7 +1023,7 @@ restore_backup_vm() {
     if [ -z "$backup_file" ]; then
         echo "Available backups on Proxmox for VMID $vmid:"
         local backups
-        backups=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_STORAGE/content --content backup --vmid $vmid --output-format json" 2>/dev/null || echo "[]")
+        backups=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_BACKUP_STORAGE/content --content backup --vmid $vmid --output-format json" 2>/dev/null || echo "[]")
 
         if [ "$backups" = "[]" ] || [ -z "$backups" ]; then
             echo "  No backups found."
