@@ -13,6 +13,7 @@
     jq
     dig
     just
+    pciutils
   ];
 
   # Enable firewall - blocks all incoming by default
