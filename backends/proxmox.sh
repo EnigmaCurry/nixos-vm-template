@@ -42,7 +42,7 @@ pve_ssh() {
     _pve_validate
     local ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$PVE_SSH_PORT")
     if [ -n "$PVE_SSH_KEY" ]; then
-        ssh_opts+=(-i "$PVE_SSH_KEY")
+        ssh_opts+=(-o IdentitiesOnly=yes -i "$PVE_SSH_KEY")
     fi
     ssh "${ssh_opts[@]}" "${PVE_SSH_USER}@${PVE_HOST}" "$@"
 }
@@ -52,7 +52,7 @@ pve_rsync() {
     _pve_validate
     local ssh_cmd="ssh -p ${PVE_SSH_PORT} -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
     if [ -n "$PVE_SSH_KEY" ]; then
-        ssh_cmd+=" -i ${PVE_SSH_KEY}"
+        ssh_cmd+=" -o IdentitiesOnly=yes -i ${PVE_SSH_KEY}"
     fi
     rsync -avz --progress -e "$ssh_cmd" "$@"
 }
