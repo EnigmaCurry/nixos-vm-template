@@ -266,7 +266,7 @@ backend_create_disks() {
         --agent 1 \
         --cores $vcpus \
         --memory $memory \
-        --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0 \
+        --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0,format=${PVE_DISK_FORMAT} \
         --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
 
     # Flatten boot disk (remove backing file reference)
