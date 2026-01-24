@@ -11,23 +11,13 @@
     # Trust the Docker bridge so container traffic passes the firewall
     networking.firewall.trustedInterfaces = [ "docker0" ];
 
-    # Disable bridge netfilter so container bridge traffic bypasses iptables.
-    # Docker enables br_netfilter at startup for inter-container isolation,
-    # but it causes bridge traffic to be misrouted through iptables INPUT
-    # where interface matching fails. Basic container networking (outbound
-    # NAT, port publishing via userland proxy) works without it.
-    systemd.services.disable-bridge-nf = {
-      description = "Disable bridge netfilter for Docker networking";
-      after = [ "docker.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        echo 0 > /proc/sys/net/bridge/bridge-nf-call-iptables
-        echo 0 > /proc/sys/net/bridge/bridge-nf-call-ip6tables
-      '';
+    # Prevent systemd-networkd from managing Docker's veth interfaces.
+    # The catch-all "99-ethernet-default-dhcp" in immutable.nix matches
+    # Type=ether which includes veth pairs. networkd trying to DHCP on
+    # veth interfaces breaks Docker container networking entirely.
+    systemd.network.networks."10-docker-veth" = {
+      matchConfig.Driver = "veth";
+      linkConfig.Unmanaged = "yes";
     };
 
     # Add admin user to docker group for non-root access
