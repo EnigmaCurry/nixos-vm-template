@@ -226,6 +226,17 @@ backend_create_disks() {
         vmid=$(pve_next_vmid)
         echo "Allocated VMID: $vmid"
     fi
+
+    # Validate VMID: must be available or belong to a VM with the same name
+    local existing_name
+    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+    if [ -n "$existing_name" ]; then
+        if [ "$existing_name" != "$name" ]; then
+            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')"
+            exit 1
+        fi
+    fi
+
     echo "$vmid" > "$machine_dir/vmid"
 
     # Parse network configuration
