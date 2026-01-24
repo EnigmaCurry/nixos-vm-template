@@ -590,7 +590,34 @@ backend_status() {
 # List all VMs on Proxmox node
 backend_list() {
     _pve_validate
-    pve_ssh "qm list"
+    # Collect managed VMIDs from machines directory
+    local managed_vmids=()
+    for vmid_file in "$MACHINES_DIR"/*/vmid; do
+        [ -f "$vmid_file" ] || continue
+        managed_vmids+=($(cat "$vmid_file"))
+    done
+
+    if [ ${#managed_vmids[@]} -eq 0 ]; then
+        echo "No managed VMs found."
+        return 0
+    fi
+
+    printf "%-8s %-20s %-10s %s\n" "VMID" "NAME" "STATUS" "MEM(MB)"
+    for vmid in "${managed_vmids[@]}"; do
+        local name status mem
+        local config
+        config=$(pve_ssh "qm status $vmid --verbose" 2>/dev/null || echo "")
+        if [ -z "$config" ]; then
+            name="(unknown)"
+            status="not found"
+            mem="-"
+        else
+            status=$(echo "$config" | grep "^status:" | awk '{print $2}')
+            name=$(echo "$config" | grep "^name:" | awk '{print $2}')
+            mem=$(echo "$config" | grep "^maxmem:" | awk '{print $2 / 1048576}' || echo "-")
+        fi
+        printf "%-8s %-20s %-10s %s\n" "$vmid" "$name" "$status" "$mem"
+    done
 }
 
 # Get IP address for a VM (via QEMU guest agent)
@@ -1081,15 +1108,40 @@ ssh_vm() {
     $SSH -o StrictHostKeyChecking=accept-new "$ssh_user"@"$ip"
 }
 
-# List available backups on Proxmox backup storage
+# List available backups on Proxmox backup storage (only managed VMs)
 list_backups() {
     _pve_validate
-    echo "Backups on Proxmox storage '$PVE_BACKUP_STORAGE':"
+
+    # Collect managed VMIDs
+    local managed_vmids=()
+    for vmid_file in "$MACHINES_DIR"/*/vmid; do
+        [ -f "$vmid_file" ] || continue
+        managed_vmids+=($(cat "$vmid_file"))
+    done
+
+    if [ ${#managed_vmids[@]} -eq 0 ]; then
+        echo "No managed VMs found."
+        return 0
+    fi
+
+    # Build jq filter for managed VMIDs
+    local vmid_filter
+    vmid_filter=$(printf '%s,' "${managed_vmids[@]}")
+    vmid_filter="[${vmid_filter%,}]"
+
+    echo "Backups on Proxmox storage '$PVE_BACKUP_STORAGE' (managed VMs only):"
     local backups
     backups=$(pve_ssh "pvesh get /nodes/$PVE_NODE/storage/$PVE_BACKUP_STORAGE/content --content backup --output-format json")
     if [ -z "$backups" ] || [ "$backups" = "[]" ]; then
         echo "  (none)"
         return 0
     fi
-    echo "$backups" | jq -r '.[] | "  \(.volid)  VMID=\(.vmid // "?")  \(.size // 0 | . / 1048576 | floor)MB  \(.ctime // 0 | todate)"'
+    local filtered
+    filtered=$(echo "$backups" | jq -r --argjson ids "$vmid_filter" \
+        '[.[] | select(.vmid as $v | $ids | index($v))]')
+    if [ "$filtered" = "[]" ] || [ -z "$filtered" ]; then
+        echo "  (none)"
+        return 0
+    fi
+    echo "$filtered" | jq -r '.[] | "  \(.volid)  VMID=\(.vmid // "?")  \(.size // 0 | . / 1048576 | floor)MB  \(.ctime // 0 | todate)"'
 }
