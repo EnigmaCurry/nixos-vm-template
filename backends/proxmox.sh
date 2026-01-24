@@ -449,14 +449,8 @@ backend_sync_identity() {
     fi
     echo "Using nbd device: $nbd_dev"
 
-    # Detect disk format from extension
-    local disk_format="qcow2"
-    if [[ "$var_disk_path" == *.raw ]]; then
-        disk_format="raw"
-    fi
-
     # Connect nbd and mount
-    pve_ssh "qemu-nbd -f $disk_format -c $nbd_dev '$var_disk_path'"
+    pve_ssh "qemu-nbd -f $PVE_DISK_FORMAT -c $nbd_dev '$var_disk_path'"
     sleep 2
     pve_ssh "partprobe $nbd_dev 2>/dev/null || true"
     sleep 1
