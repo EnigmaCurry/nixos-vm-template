@@ -504,8 +504,10 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 - **base** - Minimal NixOS system
 - **core** - Base + SSH server with admin/user accounts
 - **docker** - Core + Docker (admin user has docker access)
+- **docker-nvidia** - Docker + NVIDIA drivers and container toolkit (for GPU passthrough)
 - **dev** - Core + development tools and Docker (both users have docker access)
 - **claude** - Dev + Claude Code CLI (Anthropic's AI coding assistant)
+- **open-code** - Dev + Open Code CLI (open-source AI coding assistant)
 
 ## Machine Configuration
 
