@@ -883,8 +883,10 @@ destroy_vm() {
     fi
 
     echo "Destroying VM: $name"
-    backend_force_stop "$name"
-    backend_undefine "$name"
+    if [ -f "$MACHINES_DIR/$name/vmid" ]; then
+        backend_force_stop "$name"
+        backend_undefine "$name"
+    fi
     rm -rf "$OUTPUT_DIR/vms/$name"
     backend_cleanup "$name"
     echo "VM '$name' has been removed from Proxmox."
@@ -906,8 +908,10 @@ purge_vm() {
     fi
 
     echo "Purging VM: $name"
-    backend_force_stop "$name"
-    backend_undefine "$name"
+    if [ -f "$MACHINES_DIR/$name/vmid" ]; then
+        backend_force_stop "$name"
+        backend_undefine "$name"
+    fi
     rm -rf "$OUTPUT_DIR/vms/$name"
     backend_cleanup "$name"
     rm -rf "$MACHINES_DIR/$name"
