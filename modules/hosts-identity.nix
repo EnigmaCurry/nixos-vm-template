@@ -2,9 +2,8 @@
 #
 # This module:
 # 1. Creates a placeholder /etc/hosts file in the base image
-# 2. Creates /run/hosts early via tmpfiles (before bind mount)
+# 2. At boot, builds /run/hosts with hostname + extra hosts
 # 3. Bind mounts /run/hosts over /etc/hosts
-# 4. Updates /run/hosts with hostname + extra hosts from /var/identity/hosts
 #
 # Place extra host entries in machines/<name>/hosts, one per line like /etc/hosts.
 { config, lib, pkgs, ... }:
@@ -21,24 +20,17 @@
       mode = "0644";
     };
 
-    # Create /run/hosts early so the bind mount has something to mount
-    systemd.tmpfiles.rules = [
-      "f /run/hosts 0644 root root -"
-    ];
-
-    # Bind mount /etc/hosts from /run/hosts
-    fileSystems."/etc/hosts" = {
-      device = "/run/hosts";
-      options = [ "bind" "nofail" ];
-      depends = [ "/" ];
-    };
-
-    # Service to build /etc/hosts at boot
+    # Service to build and mount /etc/hosts at boot
     systemd.services.hosts-identity = {
       description = "Build /etc/hosts from /var/identity";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "network.target" "nss-lookup.target" ];
-      after = [ "local-fs.target" "var.mount" "systemd-tmpfiles-setup.service" ];
+      wantedBy = [ "sysinit.target" ];
+      before = [ "network-pre.target" "nss-lookup.target" ];
+      after = [ "local-fs.target" "var.mount" ];
+      wants = [ "local-fs.target" ];
+
+      unitConfig = {
+        DefaultDependencies = false;
+      };
 
       serviceConfig = {
         Type = "oneshot";
@@ -76,6 +68,9 @@ EOF
         fi
 
         chmod 0644 /run/hosts
+
+        # Bind mount over /etc/hosts
+        ${pkgs.util-linux}/bin/mount --bind /run/hosts /etc/hosts
       '';
     };
   };
