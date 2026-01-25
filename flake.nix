@@ -26,6 +26,7 @@
         ./modules/identity.nix
         ./modules/firewall-identity.nix
         ./modules/dns-identity.nix
+        ./modules/hosts-identity.nix
         ./modules/root-password.nix
         ./modules/guest-agent.nix
       ];

@@ -43,7 +43,7 @@ Since /etc is read-only, per-VM configuration files must use the **placeholder +
 
 3. Use a systemd service to populate the source file before the bind mount.
 
-See `modules/identity.nix` for machine-id and `modules/dns-identity.nix` for resolv.conf as examples.
+See `modules/identity.nix` for machine-id, `modules/dns-identity.nix` for resolv.conf, and `modules/hosts-identity.nix` for /etc/hosts as examples.
 
 ### Machine Identity
 
@@ -52,6 +52,7 @@ Host-specific identity files are stored in `machines/<name>/` and copied to `/va
 - `machine-id` - Unique machine identifier
 - `ssh_host_ed25519_key` - SSH host key
 - `resolv.conf` - DNS configuration
+- `hosts` - Extra /etc/hosts entries (optional, one per line like /etc/hosts)
 - `tcp_ports` / `udp_ports` - Firewall port configuration
 - `admin_authorized_keys` / `user_authorized_keys` - SSH public keys
 

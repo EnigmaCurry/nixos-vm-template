@@ -126,6 +126,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/resolv.conf"
     fi
 
+    # Copy hosts file if present
+    if [ -s "$machine_dir/hosts" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/hosts /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/hosts"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -202,6 +209,13 @@ backend_sync_identity() {
         gf_cmds="$gf_cmds : copy-in $machine_dir/resolv.conf /identity/"
         gf_cmds="$gf_cmds : chmod 0644 /identity/resolv.conf"
         gf_cmds="$gf_cmds : chown 0 0 /identity/resolv.conf"
+    fi
+
+    # Update hosts file
+    if [ -s "$machine_dir/hosts" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/hosts /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/hosts"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
     fi
 
     # Update root password hash

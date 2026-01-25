@@ -166,7 +166,7 @@ init_machine_clone() {
     mkdir -p "$dest_dir"
 
     # Copy config files from source
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf root_password_hash profile; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash profile; do
         if [ -f "$source_dir/$f" ]; then
             cp "$source_dir/$f" "$dest_dir/$f"
         fi

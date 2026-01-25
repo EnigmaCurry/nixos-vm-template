@@ -255,6 +255,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/resolv.conf"
     fi
 
+    # Copy hosts file if present
+    if [ -s "$machine_dir/hosts" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/hosts /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/hosts"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -476,7 +483,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir
-    for f in ssh_host_ed25519_key ssh_host_ed25519_key.pub admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf root_password_hash; do
+    for f in ssh_host_ed25519_key ssh_host_ed25519_key.pub admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
@@ -495,6 +502,7 @@ backend_sync_identity() {
     pve_ssh "chmod 0644 $mount_point/identity/tcp_ports 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/udp_ports 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/resolv.conf 2>/dev/null || true"
+    pve_ssh "chmod 0644 $mount_point/identity/hosts 2>/dev/null || true"
     pve_ssh "chmod 0600 $mount_point/identity/root_password_hash 2>/dev/null || true"
     pve_ssh "chown -R 0:0 $mount_point/identity/"
 
