@@ -18,8 +18,8 @@
       export NPM_CONFIG_PREFIX="$HOME/.npm-global"
       export PATH="$HOME/.npm-global/bin:$PATH"
 
-      # Install claude-code on first login
-      if [ ! -x "$HOME/.npm-global/bin/claude" ]; then
+      # Install claude-code on first login (skip for root)
+      if [ "$(id -u)" != "0" ] && [ ! -x "$HOME/.npm-global/bin/claude" ]; then
         echo "Installing Claude Code..."
         mkdir -p "$HOME/.npm-global"
         npm install -g @anthropic-ai/claude-code
