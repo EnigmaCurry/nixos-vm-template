@@ -28,7 +28,8 @@ create name profile="core" memory="2048" vcpus="2" var_size="30G" network="nat":
     @source {{backend_script}} && create_vm "{{name}}" "{{profile}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
-clone source dest memory="2048" vcpus="2" network="":
+# Memory/vcpus default to source VM's values if not specified
+clone source dest memory="" vcpus="" network="":
     @source {{backend_script}} && clone_vm "{{source}}" "{{dest}}" "{{memory}}" "{{vcpus}}" "{{network}}"
 
 # Configure network mode for a VM (nat or bridge)
