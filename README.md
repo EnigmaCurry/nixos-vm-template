@@ -506,8 +506,11 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 - **docker** - Core + Docker (admin user has docker access)
 - **docker-nvidia** - Docker + NVIDIA drivers and container toolkit (for GPU passthrough)
 - **dev** - Core + development tools and Docker (both users have docker access)
+- **dev-nvidia** - Dev + NVIDIA GPU support
 - **claude** - Dev + Claude Code CLI (Anthropic's AI coding assistant)
+- **claude-nvidia** - Claude + NVIDIA GPU support
 - **open-code** - Dev + Open Code CLI (open-source AI coding assistant)
+- **open-code-nvidia** - Open Code + NVIDIA GPU support
 
 ## Machine Configuration
 
