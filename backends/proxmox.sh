@@ -791,8 +791,8 @@ create_vm() {
 clone_vm() {
     local source="$1"
     local dest="$2"
-    local memory="${3:-2048}"
-    local vcpus="${4:-2}"
+    local memory="${3:-}"
+    local vcpus="${4:-}"
     local network="${5:-}"
 
     local source_machine_dir="$MACHINES_DIR/$source"
@@ -804,6 +804,14 @@ clone_vm() {
     if [ ! -d "$source_machine_dir" ]; then
         echo "Error: Source machine config not found: $source_machine_dir"
         exit 1
+    fi
+
+    # Default memory/vcpus from source machine config
+    if [ -z "$memory" ]; then
+        memory=$(cat "$source_machine_dir/memory" 2>/dev/null || echo "2048")
+    fi
+    if [ -z "$vcpus" ]; then
+        vcpus=$(cat "$source_machine_dir/vcpus" 2>/dev/null || echo "2")
     fi
 
     # Validate source has a VMID
