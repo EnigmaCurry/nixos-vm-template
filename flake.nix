@@ -32,7 +32,7 @@
       ];
 
       # Available profiles (each adds packages on top of core modules)
-      profiles = [ "base" "core" "nix" "docker" "docker-nvidia" "dev" "dev-nvidia" "claude" "claude-nvidia" "claude-nix" "open-code" "open-code-nvidia" "open-code-nix" ];
+      profiles = [ "base" "core" "nix" "docker" "docker-nvidia" "dev" "dev-nvidia" "dev-nix" "claude" "claude-nvidia" "claude-nix" "open-code" "open-code-nvidia" "open-code-nix" ];
 
       # Build a VM image for a given system and profile
       mkProfileImage = system: profile:
