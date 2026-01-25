@@ -23,13 +23,13 @@
 
     # Create /run/hosts early so the bind mount has something to mount
     systemd.tmpfiles.rules = [
-      "f /run/hosts 0644 root root - 127.0.0.1 localhost\\n::1 localhost"
+      "f /run/hosts 0644 root root -"
     ];
 
     # Bind mount /etc/hosts from /run/hosts
     fileSystems."/etc/hosts" = {
       device = "/run/hosts";
-      options = [ "bind" ];
+      options = [ "bind" "nofail" ];
       depends = [ "/" ];
     };
 
