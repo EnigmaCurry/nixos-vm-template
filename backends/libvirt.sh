@@ -97,14 +97,6 @@ backend_create_disks() {
     gf_cmds="$gf_cmds : chmod 0644 /identity/user_authorized_keys"
     gf_cmds="$gf_cmds : chown 0 0 /identity/user_authorized_keys"
 
-    # Copy SSH host key
-    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key /identity/"
-    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key.pub /identity/"
-    gf_cmds="$gf_cmds : chmod 0600 /identity/ssh_host_ed25519_key"
-    gf_cmds="$gf_cmds : chmod 0644 /identity/ssh_host_ed25519_key.pub"
-    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key"
-    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key.pub"
-
     # Copy TCP ports file if present
     if [ -s "$machine_dir/tcp_ports" ]; then
         gf_cmds="$gf_cmds : copy-in $machine_dir/tcp_ports /identity/"
@@ -168,14 +160,6 @@ backend_sync_identity() {
     machine_id=$(cat "$machine_dir/machine-id")
     gf_cmds="$gf_cmds : write /identity/hostname '$hostname'"
     gf_cmds="$gf_cmds : write /identity/machine-id '$machine_id'"
-
-    # Update SSH host key
-    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key /identity/"
-    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key.pub /identity/"
-    gf_cmds="$gf_cmds : chmod 0600 /identity/ssh_host_ed25519_key"
-    gf_cmds="$gf_cmds : chmod 0644 /identity/ssh_host_ed25519_key.pub"
-    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key"
-    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key.pub"
 
     # Update authorized_keys files
     if [ -s "$machine_dir/admin_authorized_keys" ]; then
@@ -518,6 +502,13 @@ clone_vm() {
 
     # Sync new identity onto copied var disk
     backend_sync_identity "$dest"
+
+    # Delete SSH host keys so clone generates fresh keys on first boot
+    echo "Removing SSH host keys (will be regenerated on first boot)..."
+    $GUESTFISH -a "$dest_vm_dir/var.qcow2" \
+        run : mount /dev/sda1 / : \
+        rm-f /identity/ssh_host_ed25519_key : \
+        rm-f /identity/ssh_host_ed25519_key.pub
 
     # Create boot disk with same profile's base image
     local profile profile_image

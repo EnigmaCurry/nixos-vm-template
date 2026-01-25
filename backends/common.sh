@@ -101,12 +101,6 @@ init_machine() {
         echo "Created: $machine_dir/hostname"
     fi
 
-    # Generate SSH host key if not present
-    if [ ! -f "$machine_dir/ssh_host_ed25519_key" ]; then
-        ssh-keygen -t ed25519 -f "$machine_dir/ssh_host_ed25519_key" -N "" -C "root@$name"
-        echo "Generated: $machine_dir/ssh_host_ed25519_key"
-    fi
-
     # Prompt for admin authorized_keys if not present
     if [ ! -f "$machine_dir/admin_authorized_keys" ]; then
         echo ""
@@ -202,9 +196,6 @@ init_machine_clone() {
 
     echo "$dest" > "$dest_dir/hostname"
     echo "Created: $dest_dir/hostname"
-
-    ssh-keygen -t ed25519 -f "$dest_dir/ssh_host_ed25519_key" -N "" -C "root@$dest"
-    echo "Generated: $dest_dir/ssh_host_ed25519_key"
 
     # Preserve permissions on sensitive files
     if [ -f "$dest_dir/root_password_hash" ]; then
