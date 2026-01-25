@@ -26,28 +26,19 @@
       RemainAfterExit = true;
     };
     script = ''
-      # Ensure /var/nix directories exist on the mounted /var disk
+      # Create directories on /var (which is writable)
+      mkdir -p /sysroot/var/nix/base
       mkdir -p /sysroot/var/nix/upper
       mkdir -p /sysroot/var/nix/work
 
-      # Create mount point for the original read-only /nix
-      mkdir -p /sysroot/nix.base
-
-      # Bind mount the original /nix to /nix.base (read-only)
-      mount --bind /sysroot/nix /sysroot/nix.base
-      mount -o remount,ro,bind /sysroot/nix.base
+      # Bind mount the original /nix to /var/nix/base (read-only)
+      mount --bind /sysroot/nix /sysroot/var/nix/base
+      mount -o remount,ro,bind /sysroot/var/nix/base
 
       # Mount overlay on /nix with base image as lower layer
       mount -t overlay overlay \
-        -o lowerdir=/sysroot/nix.base,upperdir=/sysroot/var/nix/upper,workdir=/sysroot/var/nix/work \
+        -o lowerdir=/sysroot/var/nix/base,upperdir=/sysroot/var/nix/upper,workdir=/sysroot/var/nix/work \
         /sysroot/nix
     '';
-  };
-
-  # Declare /nix.base mount so NixOS knows about it after boot
-  fileSystems."/nix.base" = {
-    device = "/nix.base";
-    fsType = "none";
-    options = [ "bind" "ro" "nofail" ];
   };
 }
