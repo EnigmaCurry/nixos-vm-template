@@ -226,14 +226,6 @@ backend_create_disks() {
     gf_cmds="$gf_cmds : chmod 0644 /identity/user_authorized_keys"
     gf_cmds="$gf_cmds : chown 0 0 /identity/user_authorized_keys"
 
-    # Copy SSH host key
-    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key /identity/"
-    gf_cmds="$gf_cmds : copy-in $machine_dir/ssh_host_ed25519_key.pub /identity/"
-    gf_cmds="$gf_cmds : chmod 0600 /identity/ssh_host_ed25519_key"
-    gf_cmds="$gf_cmds : chmod 0644 /identity/ssh_host_ed25519_key.pub"
-    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key"
-    gf_cmds="$gf_cmds : chown 0 0 /identity/ssh_host_ed25519_key.pub"
-
     # Copy TCP ports file if present
     if [ -s "$machine_dir/tcp_ports" ]; then
         gf_cmds="$gf_cmds : copy-in $machine_dir/tcp_ports /identity/"
@@ -482,8 +474,8 @@ backend_sync_identity() {
     echo -n "$hostname" > "$tmp_identity/hostname"
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
-    # Copy identity files to temp dir
-    for f in ssh_host_ed25519_key ssh_host_ed25519_key.pub admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash; do
+    # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
@@ -493,8 +485,6 @@ backend_sync_identity() {
     pve_rsync "$tmp_identity/" "${PVE_SSH_USER}@${PVE_HOST}:${mount_point}/identity/"
 
     # Fix permissions on PVE node
-    pve_ssh "chmod 0600 $mount_point/identity/ssh_host_ed25519_key 2>/dev/null || true"
-    pve_ssh "chmod 0644 $mount_point/identity/ssh_host_ed25519_key.pub 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/admin_authorized_keys 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/user_authorized_keys 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/hostname 2>/dev/null || true"
@@ -873,6 +863,29 @@ clone_vm() {
 
     # Sync fresh identity onto cloned var disk
     backend_sync_identity "$dest"
+
+    # Delete SSH host keys so clone generates fresh keys on first boot
+    echo "Removing SSH host keys (will be regenerated on first boot)..."
+    local var_disk_ref var_disk_path mount_point nbd_dev
+    var_disk_ref=$(pve_ssh "qm config $dest_vmid" | grep "^virtio1:" | sed 's/^virtio1: //' | cut -d',' -f1)
+    var_disk_path=$(pve_ssh "pvesm path '$var_disk_ref'")
+    mount_point="/mnt/nixos-ssh-cleanup-$$"
+    pve_ssh "mkdir -p $mount_point"
+    nbd_dev=$(pve_ssh "for dev in /sys/block/nbd*; do
+        if [ -f \"\$dev/size\" ] && [ \"\$(cat \"\$dev/size\")\" = \"0\" ]; then
+            echo \"/dev/\$(basename \"\$dev\")\"
+            break
+        fi
+    done")
+    pve_ssh "qemu-nbd -f $PVE_DISK_FORMAT -c $nbd_dev '$var_disk_path'"
+    sleep 2
+    pve_ssh "partprobe $nbd_dev 2>/dev/null || true"
+    sleep 1
+    pve_ssh "mount ${nbd_dev}p1 $mount_point"
+    pve_ssh "rm -f $mount_point/identity/ssh_host_ed25519_key $mount_point/identity/ssh_host_ed25519_key.pub"
+    pve_ssh "umount $mount_point"
+    pve_ssh "qemu-nbd -d $nbd_dev"
+    pve_ssh "rmdir $mount_point 2>/dev/null || true"
 
     echo ""
     echo "VM '$dest' cloned from '$source' (VMID: $dest_vmid)."
