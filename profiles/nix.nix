@@ -12,6 +12,9 @@
   # Our overlay on /nix handles the actual write layer
   boot.nixStoreMountOpts = [ ];
 
+  # Load overlay kernel module in initrd
+  boot.initrd.kernelModules = [ "overlay" ];
+
   # Set up overlay for /nix in initrd using systemd (stage 1)
   # This runs after root and /var are mounted but before switch-root
   boot.initrd.systemd.services.nix-overlay = {
