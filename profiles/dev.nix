@@ -2,9 +2,9 @@
 { config, lib, pkgs, ... }:
 
 {
-  # Import nix profile (core + mutable /nix), docker, rust, and python
+  # Import core profile (base + ssh), docker, rust, and python
   imports = [
-    ./nix.nix
+    ./core.nix
     ./docker-dev.nix
     ./rust.nix
     ./python.nix
