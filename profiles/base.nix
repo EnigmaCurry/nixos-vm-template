@@ -2,6 +2,11 @@
 { config, lib, pkgs, ... }:
 
 {
+  # Create /bin/bash symlink during image build (for scripts with #!/bin/bash)
+  system.activationScripts.binbash = lib.stringAfter [ "binsh" ] ''
+    ln -sfn ${pkgs.bashInteractive}/bin/bash /bin/bash
+  '';
+
   # Minimal packages for all VMs
   environment.systemPackages = with pkgs; [
     vim
