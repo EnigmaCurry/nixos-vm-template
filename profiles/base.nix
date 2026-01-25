@@ -14,6 +14,7 @@
     dig
     just
     pciutils
+    parted
   ];
 
   # Enable firewall - blocks all incoming by default
