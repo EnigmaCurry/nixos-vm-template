@@ -176,6 +176,7 @@ sudo ufw route allow out on virbr0
 ### Quick Start (Libvirt)
 
 ```bash
+git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
 cd ~/nixos-vm-template
 
 # Create a VM named "test" with the default "core" profile
@@ -303,6 +304,7 @@ PVE_BACKUP_STORAGE=pbs
 ### Quick Start (Proxmox)
 
 ```bash
+git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
 cd ~/nixos-vm-template
 
 # Create a VM named "test" with the default "core" profile
@@ -596,31 +598,6 @@ Filesystem Mounts:
 - Serial console (no VGA framebuffer)
 - QEMU guest agent enabled for IP detection
 - Identity sync via `qemu-nbd` mount on PVE node
-
-## Create a Dedicated User Account (Recommended)
-
-When you create VMs, the build script generates sensitive files in the
-`machines/` directory, including SSH host keys. It's recommended to
-create a dedicated user account for managing your VMs:
-
-```bash
-# Create a new user
-sudo useradd -m -s /bin/bash vm-admin
-
-# Add to libvirt group (libvirt backend only)
-sudo usermod -aG libvirt vm-admin
-
-# Switch to the new user
-sudo -iu vm-admin
-
-# Enable nix flakes
-mkdir -p ~/.config/nix
-echo "experimental-features = nix-command flakes" >> ~/.config/nix/nix.conf
-
-# Clone this repository
-git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
-cd ~/nixos-vm-template
-```
 
 ## Troubleshooting
 
