@@ -529,6 +529,7 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `udp_ports` - UDP ports to open in firewall (one per line)
 - `root_password_hash` - Root password hash for console login (empty = disabled)
 - `resolv.conf` - DNS configuration (default: Cloudflare 1.1.1.1, 1.0.0.1)
+- `hosts` - Extra /etc/hosts entries (optional)
 - `vmid` - Proxmox VMID (proxmox backend only)
 
 These files are generated during `just create` and preserved across
