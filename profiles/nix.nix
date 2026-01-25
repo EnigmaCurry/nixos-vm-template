@@ -8,9 +8,9 @@
     ./core.nix
   ];
 
-  # Disable NixOS's automatic read-only bind mount of /nix/store
-  # This would override our overlay
-  nix.readOnlyStore = false;
+  # Make /nix/store writable - remove default ro,nosuid,nodev options
+  # Our overlay on /nix handles the actual write layer
+  boot.nixStoreMountOpts = [ ];
 
   # Set up overlay for /nix in initrd using systemd (stage 1)
   # This runs after root and /var are mounted but before switch-root
