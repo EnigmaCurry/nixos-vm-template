@@ -505,10 +505,7 @@ clone_vm() {
 
     # Delete SSH host keys so clone generates fresh keys on first boot
     echo "Removing SSH host keys (will be regenerated on first boot)..."
-    $GUESTFISH -a "$dest_vm_dir/var.qcow2" \
-        run : mount /dev/sda1 / : \
-        rm-f /identity/ssh_host_ed25519_key : \
-        rm-f /identity/ssh_host_ed25519_key.pub
+    eval "$GUESTFISH -a $dest_vm_dir/var.qcow2 run : mount /dev/sda1 / : rm-f /identity/ssh_host_ed25519_key : rm-f /identity/ssh_host_ed25519_key.pub"
 
     # Create boot disk with same profile's base image
     local profile profile_image
