@@ -2,6 +2,10 @@
 { config, lib, pkgs, ... }:
 
 {
+  # Enable zram compressed swap
+  vm.zram.enable = true;
+  vm.zram.memoryPercent = 50;
+
   # Import core profile (base + ssh), docker, rust, and python
   imports = [
     ./core.nix
