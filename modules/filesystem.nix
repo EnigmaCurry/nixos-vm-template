@@ -21,6 +21,7 @@
     fsType = "ext4";
     options = [ "rw" "noatime" ];
     neededForBoot = true;
+    autoResize = true;  # Automatically grow filesystem on boot if disk was resized
   };
 
   # /home is a bind mount of /var/home
