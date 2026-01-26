@@ -128,6 +128,10 @@ clean:
 shell:
     @source {{backend_script}} && dev_shell
 
+# Test connection to the backend (libvirt or proxmox)
+test-connection:
+    @source {{backend_script}} && test_connection
+
 _completion_profile:
     @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done
 

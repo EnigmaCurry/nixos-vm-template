@@ -12,9 +12,6 @@ source "$BACKEND_DIR/common.sh"
 # Backend-specific environment defaults
 PVE_HOST="${PVE_HOST:-}"
 PVE_NODE="${PVE_NODE:-$PVE_HOST}"
-PVE_SSH_USER="${PVE_SSH_USER:-root}"
-PVE_SSH_PORT="${PVE_SSH_PORT:-22}"
-PVE_SSH_KEY="${PVE_SSH_KEY:-}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr0}"
 PVE_DISK_FORMAT="${PVE_DISK_FORMAT:-qcow2}"
@@ -25,6 +22,56 @@ QEMU_IMG="${QEMU_IMG:-${HOST_CMD:+$HOST_CMD }qemu-img}"
 GUESTFISH="${GUESTFISH:-${HOST_CMD:+$HOST_CMD }guestfish}"
 export LIBGUESTFS_BACKEND="${LIBGUESTFS_BACKEND:-direct}"
 
+# --- Connection Test ---
+
+# Test SSH connection to Proxmox node
+test_connection() {
+    if [ -z "$PVE_HOST" ]; then
+        echo "Error: PVE_HOST is not set."
+        echo ""
+        echo "Set it via environment variable or .env file:"
+        echo "  export PVE_HOST=pve"
+        echo ""
+        echo "Configure SSH connection in ~/.ssh/config:"
+        echo "  Host pve"
+        echo "      HostName 192.168.1.100"
+        echo "      User root"
+        exit 1
+    fi
+
+    echo "Testing SSH connection to Proxmox ($PVE_HOST)..."
+    echo ""
+
+    # Test basic SSH connectivity
+    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$PVE_HOST" "echo 'SSH connection: OK'" 2>/dev/null; then
+        echo ""
+        echo "SSH connection FAILED."
+        echo ""
+        echo "Troubleshooting:"
+        echo "  1. Verify SSH config in ~/.ssh/config for host '$PVE_HOST'"
+        echo "  2. Ensure ssh-agent is running: eval \$(ssh-agent) && ssh-add"
+        echo "  3. Test manually: ssh $PVE_HOST"
+        exit 1
+    fi
+
+    # Test PVE commands are available
+    echo ""
+    if ssh -o BatchMode=yes "$PVE_HOST" "command -v pvesh >/dev/null && echo 'Proxmox tools: OK'" 2>/dev/null; then
+        # Get node info
+        local node_info
+        node_info=$(ssh -o BatchMode=yes "$PVE_HOST" "pvesh get /nodes/\$(hostname)/status --output-format json 2>/dev/null" || echo "{}")
+        local pve_version
+        pve_version=$(ssh -o BatchMode=yes "$PVE_HOST" "pveversion 2>/dev/null" || echo "unknown")
+        echo "PVE version: $pve_version"
+    else
+        echo "Warning: Proxmox tools (pvesh) not found on remote host."
+        echo "This may not be a Proxmox VE node."
+    fi
+
+    echo ""
+    echo "Connection test passed."
+}
+
 # --- SSH Helpers ---
 
 # Validate that PVE_HOST is set
@@ -32,30 +79,29 @@ _pve_validate() {
     if [ -z "$PVE_HOST" ]; then
         echo "Error: PVE_HOST is not set."
         echo "Set it via environment variable or .env file:"
-        echo "  export PVE_HOST=192.168.1.100"
-        echo "  BACKEND=proxmox PVE_HOST=192.168.1.100 just create myvm"
+        echo "  export PVE_HOST=pve"
+        echo "  BACKEND=proxmox PVE_HOST=pve just create myvm"
+        echo ""
+        echo "Configure SSH connection in ~/.ssh/config:"
+        echo "  Host pve"
+        echo "      HostName 192.168.1.100"
+        echo "      User root"
         exit 1
     fi
 }
 
 # SSH wrapper for PVE node
+# Uses SSH config for connection settings (user, port, key via ssh-agent)
 pve_ssh() {
     _pve_validate
-    local ssh_opts=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -p "$PVE_SSH_PORT")
-    if [ -n "$PVE_SSH_KEY" ]; then
-        ssh_opts+=(-o IdentitiesOnly=yes -i "$PVE_SSH_KEY")
-    fi
-    ssh "${ssh_opts[@]}" "${PVE_SSH_USER}@${PVE_HOST}" "$@"
+    ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$PVE_HOST" "$@"
 }
 
 # rsync wrapper to PVE node
+# Uses SSH config for connection settings (user, port, key via ssh-agent)
 pve_rsync() {
     _pve_validate
-    local ssh_cmd="ssh -p ${PVE_SSH_PORT} -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-    if [ -n "$PVE_SSH_KEY" ]; then
-        ssh_cmd+=" -o IdentitiesOnly=yes -i ${PVE_SSH_KEY}"
-    fi
-    rsync -avz --progress -e "$ssh_cmd" "$@"
+    rsync -avz --progress -e "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" "$@"
 }
 
 # Get VMID for a machine by name (stored in machines/<name>/vmid)
@@ -334,11 +380,11 @@ backend_create_disks() {
     # rsync disks to PVE node
     echo "Transferring boot disk to Proxmox..."
     pve_rsync "$OUTPUT_DIR/vms/$name/boot-flat.qcow2" \
-        "${PVE_SSH_USER}@${PVE_HOST}:${PVE_STAGING_DIR}/$name/boot.qcow2"
+        "${PVE_HOST}:${PVE_STAGING_DIR}/$name/boot.qcow2"
 
     echo "Transferring var disk to Proxmox..."
     pve_rsync "$OUTPUT_DIR/vms/$name/var.qcow2" \
-        "${PVE_SSH_USER}@${PVE_HOST}:${PVE_STAGING_DIR}/$name/var.qcow2"
+        "${PVE_HOST}:${PVE_STAGING_DIR}/$name/var.qcow2"
 
     # Import disks
     echo "Importing boot disk..."
@@ -483,7 +529,7 @@ backend_sync_identity() {
     done
 
     # rsync identity files to PVE node
-    pve_rsync "$tmp_identity/" "${PVE_SSH_USER}@${PVE_HOST}:${mount_point}/identity/"
+    pve_rsync "$tmp_identity/" "${PVE_HOST}:${mount_point}/identity/"
 
     # Fix permissions on PVE node
     pve_ssh "chmod 0644 $mount_point/identity/admin_authorized_keys 2>/dev/null || true"
@@ -1076,7 +1122,7 @@ upgrade_vm() {
     pve_ssh "mkdir -p $PVE_STAGING_DIR/$name"
     echo "Transferring new boot disk to Proxmox..."
     pve_rsync "$OUTPUT_DIR/vms/$name/boot-flat.qcow2" \
-        "${PVE_SSH_USER}@${PVE_HOST}:${PVE_STAGING_DIR}/$name/boot.qcow2"
+        "${PVE_HOST}:${PVE_STAGING_DIR}/$name/boot.qcow2"
 
     # Detach old boot disk
     pve_ssh "qm set $vmid --delete virtio0" || true

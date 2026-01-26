@@ -271,17 +271,37 @@ remote Proxmox VE node via SSH. All Proxmox operations use `qm` and
 **Proxmox node:** SSH access as root, `nbd` kernel module (for identity
 sync), `qemu-nbd` (standard on PVE)
 
-### Configuration
+### SSH Configuration
+
+The Proxmox backend connects via SSH. Configure your connection in
+`~/.ssh/config` and use ssh-agent for key authentication:
+
+```
+Host pve
+    HostName 192.168.1.100
+    User root
+    Port 22
+```
+
+Then set `PVE_HOST` to the SSH config host name:
+
+```bash
+# Start ssh-agent and add your key
+eval $(ssh-agent)
+ssh-add ~/.ssh/id_ed25519
+
+# Test the connection
+ssh pve
+```
+
+### Environment Variables
 
 Set these in your `.env` file or as environment variables:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PVE_HOST` | Yes | - | Proxmox host/IP for SSH |
+| `PVE_HOST` | Yes | - | SSH config host name (or hostname/IP for simple setups) |
 | `PVE_NODE` | Yes | `$PVE_HOST` | PVE node name (must match Proxmox hostname) |
-| `PVE_SSH_USER` | No | `root` | SSH user on PVE node |
-| `PVE_SSH_PORT` | No | `22` | SSH port on PVE node |
-| `PVE_SSH_KEY` | No | (ssh default) | SSH private key path |
 | `PVE_STORAGE` | No | `local` | Target storage for VM disks |
 | `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |
 | `PVE_DISK_FORMAT` | No | `qcow2` | Disk format for import (qcow2 or raw) |
@@ -292,10 +312,8 @@ Example `.env`:
 
 ```bash
 BACKEND=proxmox
-PVE_HOST=192.168.1.100
+PVE_HOST=pve
 PVE_NODE=pve
-PVE_SSH_PORT=22
-PVE_SSH_KEY=/home/user/.ssh/id_ed25519
 PVE_STORAGE=local-zfs
 PVE_BRIDGE=vmbr0
 PVE_DISK_FORMAT=qcow2
@@ -307,6 +325,9 @@ PVE_BACKUP_STORAGE=pbs
 ```bash
 git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
 cd ~/nixos-vm-template
+
+# Test SSH connection to Proxmox
+BACKEND=proxmox just test-connection
 
 # Create a VM named "test" with the default "core" profile
 BACKEND=proxmox just create test
@@ -516,6 +537,7 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 
 | Command               | Description                      |
 |-----------------------|----------------------------------|
+| `just test-connection` | Test connection to backend (libvirt or proxmox) |
 | `just console <name>` | Attach to VM serial console      |
 | `just ssh <name>`     | SSH into VM (as user)            |
 | `just ssh admin@<name>` | SSH into VM (as admin, has sudo) |

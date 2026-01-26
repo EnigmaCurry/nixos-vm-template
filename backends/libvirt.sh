@@ -30,6 +30,54 @@ _detect_ovmf_vars() {
 OVMF_CODE="${OVMF_CODE:-$(_detect_ovmf_code)}"
 OVMF_VARS="${OVMF_VARS:-$(_detect_ovmf_vars)}"
 
+# --- Connection Test ---
+
+# Test connection to libvirt
+test_connection() {
+    echo "Testing libvirt connection ($LIBVIRT_URI)..."
+    echo ""
+
+    # Test virsh connectivity
+    if ! $VIRSH -c "$LIBVIRT_URI" version >/dev/null 2>&1; then
+        echo "Libvirt connection FAILED."
+        echo ""
+        echo "Troubleshooting:"
+        echo "  1. Ensure libvirtd is running: sudo systemctl start libvirtd"
+        echo "  2. Check your user is in the libvirt group: groups \$USER"
+        echo "  3. Try: virsh -c $LIBVIRT_URI version"
+        exit 1
+    fi
+
+    echo "Libvirt connection: OK"
+    $VIRSH -c "$LIBVIRT_URI" version
+    echo ""
+
+    # Check OVMF firmware
+    if [ -n "$OVMF_CODE" ] && [ -f "$OVMF_CODE" ]; then
+        echo "OVMF firmware: OK ($OVMF_CODE)"
+    else
+        echo "Warning: OVMF firmware not found."
+        echo "UEFI VMs may not work. Install edk2-ovmf (Fedora) or ovmf (Debian/Ubuntu)."
+    fi
+
+    # Check qemu-img
+    if $QEMU_IMG --version >/dev/null 2>&1; then
+        echo "qemu-img: OK"
+    else
+        echo "Warning: qemu-img not found."
+    fi
+
+    # Check guestfish
+    if $GUESTFISH --version >/dev/null 2>&1; then
+        echo "guestfish: OK"
+    else
+        echo "Warning: guestfish not found. Install guestfs-tools."
+    fi
+
+    echo ""
+    echo "Connection test passed."
+}
+
 # --- Backend primitives ---
 
 # Create VM disks and copy identity from machine config
