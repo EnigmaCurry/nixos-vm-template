@@ -473,8 +473,9 @@ just resize-var myvm 100G           # Direct: resize just the /var disk to 100G
 just resize-var myvm 100            # Same as above (G suffix is default)
 ```
 
-**Disk size notes:**
-- Sizes without a suffix default to gigabytes (e.g., `50` means `50G`)
+**Notes:**
+- Memory is specified in MB (e.g., `4096` = 4GB RAM)
+- Disk sizes without a suffix default to gigabytes (e.g., `50` means `50G`)
 - Only increasing disk size is supported (shrinking is not allowed)
 - The partition and filesystem are automatically grown on next boot
 - No data is lost during resize
