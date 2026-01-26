@@ -1,7 +1,7 @@
 ---
 name: setup-context
 description: Set up a new nixos-vm-template context for managing VMs on a hypervisor (libvirt or proxmox). Use this when the user wants to configure a new VM management context, create an alias, or set up environment variables for a backend.
-allowed-tools: Read, Write, AskUserQuestion
+allowed-tools: Read, Write, AskUserQuestion, Bash
 ---
 
 # Setup Context Skill
@@ -66,14 +66,17 @@ PVE_BRIDGE=vmbr0
 PVE_BACKUP_STORAGE=local
 ```
 
-### Step 4: Confirm Setup
+### Step 4: Test Connection
 
-Tell the user the `.env` file has been created and they can now use `just` commands.
+After creating the `.env` file, run the connection test:
 
-For proxmox, suggest testing SSH connectivity:
 ```bash
-ssh pve
+just test-connection
 ```
+
+**Important:** Warn the user that they may need to authenticate multiple times during the test (SSH key passphrase prompts if not using ssh-agent, or host key verification).
+
+If the test passes, tell the user the setup is complete and they can now use `just` commands.
 
 ## Variable Reference
 
