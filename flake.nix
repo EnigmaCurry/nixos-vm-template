@@ -29,6 +29,7 @@
         ./modules/hosts-identity.nix
         ./modules/root-password.nix
         ./modules/guest-agent.nix
+        ./modules/zram.nix
       ];
 
       # Available profiles (each adds packages on top of core modules)
