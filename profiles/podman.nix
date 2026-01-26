@@ -8,9 +8,8 @@
     # Enable Podman
     virtualisation.podman = {
       enable = true;
-      # Enable Docker CLI compatibility (podman responds to docker commands)
-      dockerCompat = true;
-      # Default OCI runtime
+      # Note: dockerCompat is not enabled as it conflicts with Docker
+      # Use 'podman' command directly instead of 'docker'
       defaultNetwork.settings.dns_enabled = true;
     };
 
