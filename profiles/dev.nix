@@ -21,17 +21,28 @@
     neovim
 
     # Shell utilities
+    bashInteractive
     tmux
     ripgrep
     fd
     jq
     tree
+    gettext
+    moreutils
+    inotify-tools
+    w3m
 
     # Development tools
     gnumake
+    openssl
+    xdg-utils
 
     # Network tools
     wget
     netcat
+    sshfs
+    wireguard-tools
+    ipcalc
+    apacheHttpd  # htpasswd, ab, etc.
   ];
 }
