@@ -1,6 +1,26 @@
 { config, lib, pkgs, ... }:
 
 {
+  # Include cloud-utils for growpart
+  environment.systemPackages = [ pkgs.cloud-utils ];
+
+  # Grow /var partition and filesystem on boot if disk was resized
+  systemd.services.grow-var-partition = {
+    description = "Grow /var partition to fill disk";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "local-fs.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      # Grow partition to fill available space
+      ${pkgs.cloud-utils}/bin/growpart /dev/vdb 1 || true
+      # Resize filesystem (online resize supported for ext4)
+      ${pkgs.e2fsprogs}/bin/resize2fs /dev/vdb1 || true
+    '';
+  };
+
   # Root filesystem is read-only
   fileSystems."/" = {
     device = lib.mkDefault "/dev/vda2";
