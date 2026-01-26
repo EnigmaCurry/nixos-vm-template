@@ -44,5 +44,9 @@
     wireguard-tools
     ipcalc
     apacheHttpd  # htpasswd, ab, etc.
+
+    # VM tools
+    qemu
+    libguestfs-with-appliance
   ];
 }
