@@ -10,6 +10,5 @@
 
   environment.systemPackages = with pkgs; [
     distrobox
-    host-spawn
   ];
 }
