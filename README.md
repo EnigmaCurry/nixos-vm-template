@@ -414,6 +414,8 @@ just build docker       # Build the "docker" profile
 | `just stop <name>` | Gracefully stop a VM |
 | `just force-stop <name>` | Force stop a VM |
 | `just upgrade <name>` | Rebuild image, preserve /var data |
+| `just resize <name>` | Interactively resize memory, vcpus, and /var disk |
+| `just resize-var <name> <size>` | Resize just the /var disk |
 | `just recreate <name> [var_size] [network]` | Fresh start, replace all disks (data lost) |
 | `just network-config <name> [network]` | Change network mode (nat or bridge) |
 | `just passwd <name>` | Set or clear root password for console access |
@@ -459,6 +461,23 @@ just clone webserver webserver2 2048 2 nat   # Clone and override network mode
 The cloned VM inherits the source's profile, SSH authorized keys, firewall
 ports, DNS configuration, and root password hash. It gets its own unique
 identity so both VMs can run simultaneously without conflicts.
+
+### Resizing
+
+VMs can be resized after creation to adjust memory, vCPUs, and /var disk
+size. The VM must be stopped before resizing.
+
+```bash
+just resize myvm                    # Interactive: prompts for new memory, vcpus, disk size
+just resize-var myvm 100G           # Direct: resize just the /var disk to 100G
+just resize-var myvm 100            # Same as above (G suffix is default)
+```
+
+**Disk size notes:**
+- Sizes without a suffix default to gigabytes (e.g., `50` means `50G`)
+- Only increasing disk size is supported (shrinking is not allowed)
+- The partition and filesystem are automatically grown on next boot
+- No data is lost during resize
 
 ### VM Information
 
