@@ -51,6 +51,7 @@ predictably, and can be recreated identically at any time.
 - UEFI boot with systemd-boot
 - SSH key-only authentication
 - QEMU guest agent for IP detection and guest commands
+- Optional zram compressed swap for memory overcommit
 
 ## Backends
 
@@ -537,6 +538,52 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 - **open-code** - Dev + Open Code CLI (open-source AI coding assistant)
 - **open-code-nvidia** - Open Code + NVIDIA GPU support
 - **open-code-nix** - Open Code + mutable /nix filesystem
+
+## Zram Compressed Swap
+
+Zram creates a compressed swap device in RAM, allowing the system to handle
+memory pressure by compressing inactive pages rather than killing processes
+(OOM). This is useful for development workloads that may have unpredictable
+memory spikes.
+
+**Enabled by default in:** `dev`, `dev-nvidia`, `dev-nix`, `claude`, `claude-nvidia`, `claude-nix`, `open-code`, `open-code-nvidia`, `open-code-nix`
+
+### Configuration Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `vm.zram.enable` | `false` | Enable zram compressed swap |
+| `vm.zram.memoryPercent` | `100` | Percentage of RAM to use for zram (e.g., 50 = half of RAM) |
+| `vm.zram.algorithm` | `zstd` | Compression algorithm (`zstd`, `lz4`, `lzo`) |
+
+When enabled, swappiness is set to 100 to prefer compressing memory over
+OOM killing.
+
+### Enabling in a Custom Profile
+
+To enable zram in your own profile, add to your profile's nix file:
+
+```nix
+{
+  vm.zram.enable = true;
+  vm.zram.memoryPercent = 50;  # Use half of RAM for compressed swap
+}
+```
+
+### Effective Memory
+
+With typical 3:1 compression ratios, a 4GB VM can handle additional memory
+pressure before OOM:
+
+| `memoryPercent` | Zram Size | Effective Capacity |
+|-----------------|-----------|-------------------|
+| 50 | 2GB | ~5.5GB (4GB + ~1.5GB compressed) |
+| 75 | 3GB | ~6.25GB (4GB + ~2.25GB compressed) |
+| 100 | 4GB | ~7GB (4GB + ~3GB compressed) |
+
+Higher values provide more headroom but consume more RAM for the zram device
+itself. The default of 50% in dev profiles balances memory efficiency with
+safety margin.
 
 ## Machine Configuration
 
