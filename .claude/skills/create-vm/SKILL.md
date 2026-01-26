@@ -24,30 +24,36 @@ Ask the user for the following settings:
 
 1. **Name** (required) - Free text input, single word VM name. Do not offer multiple choice, let them type it.
 
-2. **Profile** - Multiple choice from the output of `just list-profiles`. Common profiles:
+2. **VMID** (Proxmox only) - If the backend is `proxmox`, ask whether to use automatic or manual VMID:
+   - Automatic (recommended) - Let Proxmox allocate the next available VMID
+   - Manual - Type a specific VMID (integer, typically 100-999999)
+
+   Skip this question entirely for libvirt backend.
+
+3. **Profile** - Multiple choice from the output of `just list-profiles`. Common profiles:
    - `core` - Base system with SSH (recommended for most uses)
    - `docker` - Core + Docker
    - `dev` - Development environment with Docker and Podman
 
-3. **Memory** - RAM in MB. Offer choices:
+4. **Memory** - RAM in MB. Offer choices:
    - 1024 (1 GB)
    - 4096 (4 GB)
    - 8192 (8 GB)
    - Or type a custom value
 
-4. **vCPUs** - Number of virtual CPU cores. Offer choices:
+5. **vCPUs** - Number of virtual CPU cores. Offer choices:
    - 1
    - 2
    - 4
    - Or type a custom value (any integer >= 1)
 
-5. **Var Size** - Size of /var partition in gigabytes. Offer choices:
+6. **Var Size** - Size of /var partition in gigabytes. Offer choices:
    - 20
    - 50
    - 100
    - Or type a custom value (any integer >= 1)
 
-6. **Network** - Depends on the backend:
+7. **Network** - Depends on the backend:
    - **libvirt**: Offer `nat` or `bridge`
    - **proxmox**: Offer `bridge:vmbr0`, `bridge:vmbr1`, or type custom
 
@@ -60,6 +66,12 @@ just create {NAME} {PROFILE} {MEMORY} {VCPUS} {VAR_SIZE} {NETWORK}
 ```
 
 For var_size, append `G` to the number (e.g., `20G`, `50G`).
+
+**Proxmox with manual VMID**: If the user specified a manual VMID, prefix the command with the `PVE_VMID` environment variable:
+
+```bash
+PVE_VMID={VMID} just create {NAME} {PROFILE} {MEMORY} {VCPUS} {VAR_SIZE} {NETWORK}
+```
 
 ### Step 5: Report Results
 
