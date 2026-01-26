@@ -6,10 +6,11 @@
   vm.zram.enable = true;
   vm.zram.memoryPercent = 50;
 
-  # Import core profile (base + ssh), docker, rust, and python
+  # Import core profile (base + ssh), docker, podman, rust, and python
   imports = [
     ./core.nix
     ./docker-dev.nix
+    ./podman-dev.nix
     ./rust.nix
     ./python.nix
   ];

@@ -397,7 +397,7 @@ BACKEND=proxmox just restore-backup myvm  # Restore from backup
 | Command | Description |
 |---------|-------------|
 | `just build [profile]` | Build a profile image (default: core) |
-| `just build-all` | Build all profiles (base, core, docker, dev) |
+| `just build-all` | Build main profiles (base, core, docker, dev, claude) |
 | `just list-profiles` | List available profiles |
 
 ```bash
@@ -529,7 +529,9 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 - **nix** - Core + mutable /nix filesystem (enables running nix commands)
 - **docker** - Core + Docker (admin user has docker access)
 - **docker-nvidia** - Docker + NVIDIA drivers and container toolkit (for GPU passthrough)
-- **dev** - Core + development tools and Docker (both users have docker access)
+- **podman** - Core + Podman (rootless containers for all users)
+- **podman-dev** - Podman + distrobox and host-spawn
+- **dev** - Core + development tools, Docker, and Podman (both users have container access)
 - **dev-nvidia** - Dev + NVIDIA GPU support
 - **dev-nix** - Dev + mutable /nix filesystem
 - **claude** - Dev + Claude Code CLI (Anthropic's AI coding assistant)

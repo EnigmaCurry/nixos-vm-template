@@ -20,4 +20,17 @@
       description = "Username for the regular account (no sudo access)";
     };
   };
+
+  config = {
+    # Subuid/subgid allocation for user namespaces (rootless containers, etc.)
+    users.users.${config.core.adminUser} = {
+      subUidRanges = [{ startUid = 100000; count = 65536; }];
+      subGidRanges = [{ startGid = 100000; count = 65536; }];
+    };
+
+    users.users.${config.core.regularUser} = {
+      subUidRanges = [{ startUid = 200000; count = 65536; }];
+      subGidRanges = [{ startGid = 200000; count = 65536; }];
+    };
+  };
 }
