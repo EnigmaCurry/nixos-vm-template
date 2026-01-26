@@ -24,8 +24,8 @@ list-profiles:
     @source {{backend_script}} && list_profiles
 
 # Create a new VM: build profile, create machine config, create disks, generate config, define
-create name profile="core" memory="2048" vcpus="2" var_size="30G" network="nat":
-    @source {{backend_script}} && create_vm "{{name}}" "{{profile}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
+create new_name profile="core" memory="2048" vcpus="2" var_size="30G" network="nat":
+    @source {{backend_script}} && create_vm "{{new_name}}" "{{profile}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
 # Memory/vcpus default to source VM's values if not specified
@@ -127,3 +127,12 @@ clean:
 # Enter development shell
 shell:
     @source {{backend_script}} && dev_shell
+
+_completion_profile:
+    @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done
+
+_completion_network:
+    @printf "nat\nbridge\n"
+
+_completion_name:
+    @shopt -s nullglob; for f in machines/*; do basename $f; done
