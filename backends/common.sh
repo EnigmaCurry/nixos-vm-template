@@ -6,6 +6,17 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# Normalize disk size: add 'G' suffix if no unit specified
+# Examples: "30" -> "30G", "30G" -> "30G", "500M" -> "500M"
+normalize_size() {
+    local size="$1"
+    if [[ "$size" =~ ^[0-9]+$ ]]; then
+        echo "${size}G"
+    else
+        echo "$size"
+    fi
+}
+
 # Environment defaults
 HOST_CMD="${HOST_CMD:-}"
 SUDO="${SUDO:-$(id -nG 2>/dev/null | grep -qw libvirt && printf '' || printf 'sudo')}"

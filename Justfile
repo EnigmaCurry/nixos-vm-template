@@ -64,6 +64,14 @@ recreate name var_size="30G" network="":
 upgrade name:
     @source {{backend_script}} && upgrade_vm "{{name}}"
 
+# Resize VM resources interactively (memory, vcpus, /var disk)
+resize name:
+    @source {{backend_script}} && resize_vm "{{name}}"
+
+# Resize just the /var disk for a VM (VM must be stopped)
+resize-var name size:
+    @source {{backend_script}} && resize_var "{{name}}" "{{size}}"
+
 # Set or clear the root password for a VM
 passwd name:
     @source {{backend_script}} && set_password "{{name}}"

@@ -35,7 +35,8 @@ OVMF_VARS="${OVMF_VARS:-$(_detect_ovmf_vars)}"
 # Create VM disks and copy identity from machine config
 backend_create_disks() {
     local name="$1"
-    local var_size="${2:-20G}"
+    local var_size
+    var_size=$(normalize_size "${2:-30G}")
     local machine_dir="$MACHINES_DIR/$name"
 
     if [ ! -d "$machine_dir" ]; then
@@ -430,7 +431,8 @@ create_vm() {
     local profile="${2:-core}"
     local memory="${3:-2048}"
     local vcpus="${4:-2}"
-    local var_size="${5:-20G}"
+    local var_size
+    var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
 
     build_profile "$profile"
@@ -599,7 +601,8 @@ purge_vm() {
 # Recreate a VM from its existing machine config
 recreate_vm() {
     local name="$1"
-    local var_size="${2:-20G}"
+    local var_size
+    var_size=$(normalize_size "${2:-30G}")
     local network="${3:-}"
 
     local machine_dir="$MACHINES_DIR/$name"
@@ -703,6 +706,160 @@ upgrade_vm() {
     echo "VM '$name' upgraded and started. /var data preserved."
     echo "SSH as admin (sudo): ssh admin@<ip>"
     echo "SSH as user (no sudo): ssh user@<ip>"
+}
+
+# Resize the /var disk for a VM
+resize_var() {
+    local name="$1"
+    local new_size
+    new_size=$(normalize_size "$2")
+    local var_disk="$OUTPUT_DIR/vms/$name/var.qcow2"
+
+    if [ ! -f "$var_disk" ]; then
+        echo "Error: /var disk not found: $var_disk"
+        exit 1
+    fi
+
+    # Check if VM is running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' must be stopped before resizing."
+        echo "Run 'just stop $name' first."
+        exit 1
+    fi
+
+    # Get current size in bytes
+    local current_size_bytes
+    current_size_bytes=$($QEMU_IMG info --output=json "$var_disk" | jq -r '.["virtual-size"]')
+    local current_size_human
+    current_size_human=$(numfmt --to=iec "$current_size_bytes" 2>/dev/null || echo "$current_size_bytes bytes")
+
+    # Convert new size to bytes for comparison
+    local new_size_bytes
+    new_size_bytes=$(numfmt --from=iec "$new_size" 2>/dev/null || echo "0")
+    if [ "$new_size_bytes" -le "$current_size_bytes" ]; then
+        echo "Error: New size ($new_size) must be larger than current size ($current_size_human)"
+        echo "Shrinking disks is not supported."
+        exit 1
+    fi
+
+    echo "Current /var disk size: $current_size_human"
+    echo "New size: $new_size"
+    echo ""
+    echo "NOTE: This will resize the QCOW2 disk image."
+    echo "The filesystem inside will be grown automatically."
+    read -p "Continue? [y/N] " confirm
+    if [[ "$confirm" != [yY] && "$confirm" != [yY][eE][sS] ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+
+    echo "Resizing /var disk..."
+    $QEMU_IMG resize "$var_disk" "$new_size"
+
+    # Use guestfish to grow the partition and filesystem
+    echo "Growing partition and filesystem..."
+    $GUESTFISH -a "$var_disk" <<EOF
+run
+part-resize /dev/sda 1 -1
+e2fsck-f /dev/sda1
+resize2fs /dev/sda1
+EOF
+
+    echo ""
+    echo "Resize complete. Start VM with: just start $name"
+}
+
+# Interactively resize VM resources (memory, vcpus, /var disk)
+resize_vm() {
+    local name="$1"
+    local machine_dir="$MACHINES_DIR/$name"
+
+    if [ ! -d "$machine_dir" ]; then
+        echo "Error: Machine config not found: $machine_dir"
+        exit 1
+    fi
+
+    # Check if VM is running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' must be stopped before resizing."
+        echo "Run 'just stop $name' first."
+        exit 1
+    fi
+
+    # Get current values
+    local current_memory current_vcpus current_disk_bytes current_disk_human
+    current_memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
+    current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
+    local var_disk="$OUTPUT_DIR/vms/$name/var.qcow2"
+    if [ -f "$var_disk" ]; then
+        current_disk_bytes=$($QEMU_IMG info --output=json "$var_disk" | jq -r '.["virtual-size"]')
+        current_disk_human=$(numfmt --to=iec "$current_disk_bytes" 2>/dev/null || echo "unknown")
+    else
+        current_disk_bytes=0
+        current_disk_human="unknown"
+    fi
+
+    echo "Current VM configuration for '$name':"
+    echo "  Memory: ${current_memory} MB"
+    echo "  vCPUs:  ${current_vcpus}"
+    echo "  /var:   ${current_disk_human}"
+    echo ""
+
+    # Prompt for new values
+    read -p "New memory in MB [$current_memory]: " new_memory
+    new_memory="${new_memory:-$current_memory}"
+
+    read -p "New vCPUs [$current_vcpus]: " new_vcpus
+    new_vcpus="${new_vcpus:-$current_vcpus}"
+
+    read -p "New /var disk size [$current_disk_human]: " new_disk
+    new_disk="${new_disk:-$current_disk_human}"
+    new_disk=$(normalize_size "$new_disk")
+
+    # Validate disk size increase
+    local new_disk_bytes
+    new_disk_bytes=$(numfmt --from=iec "$new_disk" 2>/dev/null || echo "0")
+    if [ "$new_disk_bytes" -lt "$current_disk_bytes" ]; then
+        echo "Error: New disk size ($new_disk) must be >= current size ($current_disk_human)"
+        echo "Shrinking disks is not supported."
+        exit 1
+    fi
+
+    echo ""
+    echo "New configuration:"
+    echo "  Memory: ${new_memory} MB"
+    echo "  vCPUs:  ${new_vcpus}"
+    echo "  /var:   ${new_disk}"
+    read -p "Apply changes? [y/N] " confirm
+    if [[ "$confirm" != [yY] && "$confirm" != [yY][eE][sS] ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+
+    # Update machine config
+    echo "$new_memory" > "$machine_dir/memory"
+    echo "$new_vcpus" > "$machine_dir/vcpus"
+
+    # Resize disk if needed
+    if [ "$new_disk_bytes" -gt "$current_disk_bytes" ] && [ -f "$var_disk" ]; then
+        echo "Resizing /var disk..."
+        $QEMU_IMG resize "$var_disk" "$new_disk"
+        echo "Growing partition and filesystem..."
+        $GUESTFISH -a "$var_disk" <<EOF
+run
+part-resize /dev/sda 1 -1
+e2fsck-f /dev/sda1
+resize2fs /dev/sda1
+EOF
+    fi
+
+    # Regenerate libvirt XML and redefine
+    echo "Updating VM definition..."
+    backend_generate_config "$name" "$new_memory" "$new_vcpus"
+    $VIRSH -c "$LIBVIRT_URI" define "$LIBVIRT_DIR/$name.xml"
+
+    echo ""
+    echo "Resize complete. Start VM with: just start $name"
 }
 
 # Backup a VM (suspend, copy disks, compress)

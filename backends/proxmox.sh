@@ -162,7 +162,8 @@ pve_sync_firewall() {
 # Create VM disks and transfer to Proxmox
 backend_create_disks() {
     local name="$1"
-    local var_size="${2:-20G}"
+    local var_size
+    var_size=$(normalize_size "${2:-30G}")
     local machine_dir="$MACHINES_DIR/$name"
 
     if [ ! -d "$machine_dir" ]; then
@@ -767,7 +768,8 @@ create_vm() {
     local profile="${2:-core}"
     local memory="${3:-2048}"
     local vcpus="${4:-2}"
-    local var_size="${5:-20G}"
+    local var_size
+    var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
 
     build_profile "$profile"
@@ -962,7 +964,8 @@ purge_vm() {
 # Recreate a VM from its existing machine config
 recreate_vm() {
     local name="$1"
-    local var_size="${2:-20G}"
+    local var_size
+    var_size=$(normalize_size "${2:-30G}")
     local network="${3:-}"
 
     local machine_dir="$MACHINES_DIR/$name"
@@ -1113,6 +1116,149 @@ upgrade_vm() {
     echo "VM '$name' upgraded and started. /var data preserved."
     echo "SSH as admin (sudo): ssh admin@<ip>"
     echo "SSH as user (no sudo): ssh user@<ip>"
+}
+
+# Resize the /var disk for a VM
+resize_var() {
+    local name="$1"
+    local new_size
+    new_size=$(normalize_size "$2")
+    _pve_validate
+    local vmid
+    vmid=$(pve_get_vmid "$name")
+
+    # Check if VM is running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' must be stopped before resizing."
+        echo "Run 'BACKEND=proxmox just stop $name' first."
+        exit 1
+    fi
+
+    # Get current disk info
+    echo "Fetching current disk configuration..."
+    local disk_info current_size_str
+    disk_info=$(pve_ssh "qm config $vmid" | grep "^virtio1" || true)
+    if [ -z "$disk_info" ]; then
+        echo "Error: /var disk (virtio1) not found for VM '$name'"
+        exit 1
+    fi
+
+    # Extract current size (e.g., "size=30G" -> "30G")
+    current_size_str=$(echo "$disk_info" | grep -oP 'size=\K[0-9]+[KMGT]?' || echo "unknown")
+    local current_size_bytes new_size_bytes
+    current_size_bytes=$(numfmt --from=iec "$current_size_str" 2>/dev/null || echo "0")
+    new_size_bytes=$(numfmt --from=iec "$new_size" 2>/dev/null || echo "0")
+
+    if [ "$new_size_bytes" -le "$current_size_bytes" ]; then
+        echo "Error: New size ($new_size) must be larger than current size ($current_size_str)"
+        echo "Shrinking disks is not supported."
+        exit 1
+    fi
+
+    echo "Current /var disk size: $current_size_str"
+    echo "New size: $new_size"
+    echo ""
+    echo "NOTE: This will resize the disk on Proxmox."
+    echo "The filesystem inside will be grown automatically on next boot."
+    read -p "Continue? [y/N] " confirm
+    if [[ "$confirm" != [yY] && "$confirm" != [yY][eE][sS] ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+
+    echo "Resizing /var disk..."
+    pve_ssh "qm resize $vmid virtio1 $new_size"
+
+    echo ""
+    echo "Resize complete. Start VM with: BACKEND=proxmox just start $name"
+}
+
+# Interactively resize VM resources (memory, vcpus, /var disk)
+resize_vm() {
+    local name="$1"
+    local machine_dir="$MACHINES_DIR/$name"
+    _pve_validate
+
+    if [ ! -d "$machine_dir" ]; then
+        echo "Error: Machine config not found: $machine_dir"
+        exit 1
+    fi
+
+    local vmid
+    vmid=$(pve_get_vmid "$name")
+
+    # Check if VM is running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' must be stopped before resizing."
+        echo "Run 'BACKEND=proxmox just stop $name' first."
+        exit 1
+    fi
+
+    # Get current values
+    local current_memory current_vcpus current_disk_str
+    current_memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
+    current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
+
+    # Get current disk size from Proxmox
+    local disk_info
+    disk_info=$(pve_ssh "qm config $vmid" | grep "^virtio1" || true)
+    current_disk_str=$(echo "$disk_info" | grep -oP 'size=\K[0-9]+[KMGT]?' || echo "unknown")
+    local current_disk_bytes
+    current_disk_bytes=$(numfmt --from=iec "$current_disk_str" 2>/dev/null || echo "0")
+
+    echo "Current VM configuration for '$name' (VMID: $vmid):"
+    echo "  Memory: ${current_memory} MB"
+    echo "  vCPUs:  ${current_vcpus}"
+    echo "  /var:   ${current_disk_str}"
+    echo ""
+
+    # Prompt for new values
+    read -p "New memory in MB [$current_memory]: " new_memory
+    new_memory="${new_memory:-$current_memory}"
+
+    read -p "New vCPUs [$current_vcpus]: " new_vcpus
+    new_vcpus="${new_vcpus:-$current_vcpus}"
+
+    read -p "New /var disk size [$current_disk_str]: " new_disk
+    new_disk="${new_disk:-$current_disk_str}"
+    new_disk=$(normalize_size "$new_disk")
+
+    # Validate disk size increase
+    local new_disk_bytes
+    new_disk_bytes=$(numfmt --from=iec "$new_disk" 2>/dev/null || echo "0")
+    if [ "$new_disk_bytes" -lt "$current_disk_bytes" ]; then
+        echo "Error: New disk size ($new_disk) must be >= current size ($current_disk_str)"
+        echo "Shrinking disks is not supported."
+        exit 1
+    fi
+
+    echo ""
+    echo "New configuration:"
+    echo "  Memory: ${new_memory} MB"
+    echo "  vCPUs:  ${new_vcpus}"
+    echo "  /var:   ${new_disk}"
+    read -p "Apply changes? [y/N] " confirm
+    if [[ "$confirm" != [yY] && "$confirm" != [yY][eE][sS] ]]; then
+        echo "Aborted."
+        exit 1
+    fi
+
+    # Update machine config
+    echo "$new_memory" > "$machine_dir/memory"
+    echo "$new_vcpus" > "$machine_dir/vcpus"
+
+    # Update Proxmox VM config
+    echo "Updating VM configuration..."
+    pve_ssh "qm set $vmid --memory $new_memory --cores $new_vcpus"
+
+    # Resize disk if needed
+    if [ "$new_disk_bytes" -gt "$current_disk_bytes" ]; then
+        echo "Resizing /var disk..."
+        pve_ssh "qm resize $vmid virtio1 $new_disk"
+    fi
+
+    echo ""
+    echo "Resize complete. Start VM with: BACKEND=proxmox just start $name"
 }
 
 # Backup a VM using vzdump
