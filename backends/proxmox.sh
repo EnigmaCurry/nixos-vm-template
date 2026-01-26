@@ -1053,14 +1053,8 @@ upgrade_vm() {
 
     echo "Upgrading VM '$name' to latest $profile image (preserving /var data)"
 
-    # Stop VM
-    backend_force_stop "$name"
-    # Wait for stop
-    local wait_count=0
-    while backend_is_running "$name" && [ $wait_count -lt 30 ]; do
-        sleep 1
-        wait_count=$((wait_count + 1))
-    done
+    # Stop VM (graceful first, then force)
+    stop_graceful_or_force "$name"
 
     # Build new profile image
     build_profile "$profile"

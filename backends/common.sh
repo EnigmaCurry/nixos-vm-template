@@ -357,6 +357,39 @@ list_machines() {
 }
 
 
+# Stop a VM gracefully, falling back to force stop after timeout
+# Requires backend_stop, backend_force_stop, and backend_is_running to be defined
+stop_graceful_or_force() {
+    local name="$1"
+    local timeout="${2:-60}"  # default 60 seconds
+
+    if ! backend_is_running "$name"; then
+        return 0
+    fi
+
+    echo "Attempting graceful shutdown..."
+    backend_stop "$name" 2>/dev/null || true
+
+    local waited=0
+    while backend_is_running "$name" && [ $waited -lt $timeout ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    if backend_is_running "$name"; then
+        echo "Graceful shutdown timed out after ${timeout}s, forcing stop..."
+        backend_force_stop "$name"
+        # Wait for force stop to complete
+        waited=0
+        while backend_is_running "$name" && [ $waited -lt 10 ]; do
+            sleep 1
+            waited=$((waited + 1))
+        done
+    else
+        echo "VM stopped gracefully."
+    fi
+}
+
 # Clean built images and VM disks (keeps machine configs)
 clean() {
     rm -rf "$OUTPUT_DIR"

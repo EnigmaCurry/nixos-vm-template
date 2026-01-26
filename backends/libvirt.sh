@@ -680,7 +680,7 @@ upgrade_vm() {
 
     echo "Upgrading VM '$name' to latest $profile image (preserving /var data)"
 
-    backend_force_stop "$name"
+    stop_graceful_or_force "$name"
     $VIRSH -c "$LIBVIRT_URI" undefine "$name" --nvram --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" 2>/dev/null || true
