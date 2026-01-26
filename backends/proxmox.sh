@@ -1054,7 +1054,7 @@ upgrade_vm() {
     echo "Upgrading VM '$name' to latest $profile image (preserving /var data)"
 
     # Stop VM (graceful first, then force)
-    stop_graceful_or_force "$name"
+    stop_graceful "$name"
 
     # Build new profile image
     build_profile "$profile"
