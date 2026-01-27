@@ -31,6 +31,7 @@
     moreutils
     inotify-tools
     w3m
+    asciinema
 
     # Development tools
     gnumake
@@ -47,6 +48,7 @@
 
     # VM tools
     qemu
+    libguestfs
     libguestfs-with-appliance
   ];
 }
