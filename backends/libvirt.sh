@@ -265,8 +265,21 @@ backend_sync_identity() {
 # Generate libvirt XML for a VM
 backend_generate_config() {
     local name="$1"
-    local memory="${2:-2048}"
-    local vcpus="${3:-2}"
+    local memory="${2:-}"
+    local vcpus="${3:-}"
+
+    # Read from machine config if not provided
+    local machine_dir="$MACHINES_DIR/$name"
+    if [ -z "$memory" ]; then
+        memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
+    fi
+    if [ -z "$vcpus" ]; then
+        vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
+    fi
+
+    # Save memory/vcpus to machine config for future reference
+    echo "$memory" > "$machine_dir/memory"
+    echo "$vcpus" > "$machine_dir/vcpus"
 
     echo "Generating libvirt XML for: $name"
     mkdir -p "$LIBVIRT_DIR"
