@@ -1,5 +1,5 @@
 # Development profile - includes development tools
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, sway-home, swayHomeInputs, nix-flatpak, ... }:
 
 {
   # Enable zram compressed swap
@@ -51,4 +51,29 @@
     libguestfs
     libguestfs-with-appliance
   ];
+
+  # Home-manager configuration using sway-home modules
+  home-manager = {
+    useGlobalPkgs = true;
+    useUserPackages = true;
+
+    # Pass inputs that sway-home modules expect
+    extraSpecialArgs = {
+      inputs = swayHomeInputs;
+      userName = config.core.regularUser;
+    };
+
+    # Configure home-manager for the regular user
+    users.${config.core.regularUser} = { pkgs, ... }: {
+      imports = [
+        nix-flatpak.homeManagerModules.nix-flatpak
+        sway-home.homeModules.home
+        sway-home.homeModules.emacs
+        sway-home.homeModules.rust
+      ];
+
+      # Let home-manager manage itself
+      programs.home-manager.enable = true;
+    };
+  };
 }
