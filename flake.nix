@@ -7,9 +7,18 @@
       url = "github:nix-community/nixos-generators";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    sway-home = {
+      url = "github:EnigmaCurry/sway-home?dir=home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-flatpak.url = "github:gmodena/nix-flatpak";
   };
 
-  outputs = { self, nixpkgs, nixos-generators, ... }:
+  outputs = { self, nixpkgs, nixos-generators, home-manager, sway-home, nix-flatpak, ... }@inputs:
     let
       # Systems we support
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
@@ -40,7 +49,12 @@
         nixos-generators.nixosGenerate {
           inherit system;
           format = "qcow";
+          specialArgs = {
+            inherit sway-home nix-flatpak;
+            swayHomeInputs = sway-home.inputs;
+          };
           modules = coreModules ++ [
+            home-manager.nixosModules.home-manager
             ./profiles/${profile}.nix
             { nixpkgs.hostPlatform = system; }
           ];
@@ -50,7 +64,12 @@
       mkNixosConfig = system: profile:
         nixpkgs.lib.nixosSystem {
           inherit system;
+          specialArgs = {
+            inherit sway-home nix-flatpak;
+            swayHomeInputs = sway-home.inputs;
+          };
           modules = coreModules ++ [
+            home-manager.nixosModules.home-manager
             ./profiles/${profile}.nix
             { nixpkgs.hostPlatform = system; }
           ];
