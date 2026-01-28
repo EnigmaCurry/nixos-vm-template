@@ -12,7 +12,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     sway-home = {
-      url = "github:EnigmaCurry/sway-home";
+      url = "github:EnigmaCurry/sway-home?dir=home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nix-flatpak.url = "github:gmodena/nix-flatpak";
