@@ -60,6 +60,10 @@ purge name:
 recreate name var_size="30G" network="":
     @source {{backend_script}} && recreate_vm "{{name}}" "{{var_size}}" "{{network}}"
 
+# Update nix flake.lock
+update:
+    nix flake update
+
 # Upgrade a VM to a new image (preserves /var data)
 upgrade name:
     @source {{backend_script}} && upgrade_vm "{{name}}"
