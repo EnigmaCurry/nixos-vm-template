@@ -43,8 +43,41 @@
       ".ssh/authorized_keys"
     ];
 
-    # Open SSH port in firewall (immutable mode uses firewall-identity.nix instead)
-    networking.firewall.allowedTCPPorts = [ 22 ];
+    # Service to open firewall ports from /etc/firewall-ports (seeded at VM creation)
+    # This mirrors firewall-identity.nix but reads from /etc/ instead of /var/identity/
+    systemd.services.firewall-ports = {
+      description = "Open firewall ports from /etc/firewall-ports";
+      after = [ "firewall.service" ];
+      wants = [ "firewall.service" ];
+      wantedBy = [ "multi-user.target" ];
+
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+
+      script = ''
+        # Open TCP ports
+        if [ -f /etc/firewall-ports/tcp_ports ]; then
+          while read -r port; do
+            [[ -z "$port" || "$port" =~ ^# ]] && continue
+            echo "Opening TCP port: $port"
+            ${pkgs.iptables}/bin/iptables -I nixos-fw -p tcp --dport "$port" -j nixos-fw-accept 2>/dev/null || true
+            ${pkgs.iptables}/bin/ip6tables -I nixos-fw -p tcp --dport "$port" -j nixos-fw-accept 2>/dev/null || true
+          done < /etc/firewall-ports/tcp_ports
+        fi
+
+        # Open UDP ports
+        if [ -f /etc/firewall-ports/udp_ports ]; then
+          while read -r port; do
+            [[ -z "$port" || "$port" =~ ^# ]] && continue
+            echo "Opening UDP port: $port"
+            ${pkgs.iptables}/bin/iptables -I nixos-fw -p udp --dport "$port" -j nixos-fw-accept 2>/dev/null || true
+            ${pkgs.iptables}/bin/ip6tables -I nixos-fw -p udp --dport "$port" -j nixos-fw-accept 2>/dev/null || true
+          done < /etc/firewall-ports/udp_ports
+        fi
+      '';
+    };
 
     # Enable nix garbage collection (works with writable /nix)
     nix.gc.automatic = lib.mkForce true;

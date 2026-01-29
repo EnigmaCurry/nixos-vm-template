@@ -289,6 +289,21 @@ EOF
         fi
     fi
 
+    # Copy firewall port files to /etc/firewall-ports/
+    gf_cmds="$gf_cmds : mkdir-p /etc/firewall-ports"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports"
+    gf_cmds="$gf_cmds : chmod 0755 /etc/firewall-ports"
+    if [ -s "$machine_dir/tcp_ports" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/tcp_ports /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/tcp_ports"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/tcp_ports"
+    fi
+    if [ -s "$machine_dir/udp_ports" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/udp_ports /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/udp_ports"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
+    fi
+
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
 
     # Set root password if configured
