@@ -27,19 +27,26 @@ CP="${CP:-${HOST_CMD:+$HOST_CMD }cp}"
 OUTPUT_DIR="${OUTPUT_DIR:-output}"
 MACHINES_DIR="${MACHINES_DIR:-machines}"
 
-# Build a profile's base image (supports comma-separated profile combinations)
-build_profile() {
+# Normalize profile list: sort, dedupe, ensure core is included
+# Input: comma-separated profiles (e.g., "docker,python,rust")
+# Output: canonical sorted list with core (e.g., "core,docker,python,rust")
+normalize_profiles() {
     local profiles="${1:-core}"
-
-    # Normalize: split by comma, sort, dedupe, ensure core is included
     local normalized
     normalized=$(echo "$profiles" | tr ',' '\n' | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//')
     if [[ ! ",$normalized," =~ ,core, ]]; then
         normalized="core,$normalized"
     fi
+    echo "$normalized"
+}
 
-    # Create canonical profile key (sorted, comma-separated)
-    local profile_key="$normalized"
+# Build a profile's base image (supports comma-separated profile combinations)
+build_profile() {
+    local profiles="${1:-core}"
+
+    # Normalize to canonical profile key
+    local profile_key
+    profile_key=$(normalize_profiles "$profiles")
     echo "Building profile combination: $profile_key"
     mkdir -p "$OUTPUT_DIR/profiles"
 
@@ -87,13 +94,17 @@ init_machine() {
     local machine_dir="$MACHINES_DIR/$name"
     mkdir -p "$machine_dir"
 
+    # Normalize profile to canonical form (sorted, with core)
+    local normalized_profile
+    normalized_profile=$(normalize_profiles "$profile")
+
     # Set profile (only if not present, unless explicitly overridden)
     if [ ! -f "$machine_dir/profile" ]; then
-        echo "$profile" > "$machine_dir/profile"
-        echo "Created: $machine_dir/profile ($profile)"
-    elif [ "$profile" != "base" ]; then
-        echo "$profile" > "$machine_dir/profile"
-        echo "Updated: $machine_dir/profile ($profile)"
+        echo "$normalized_profile" > "$machine_dir/profile"
+        echo "Created: $machine_dir/profile ($normalized_profile)"
+    elif [ "$profile" != "core" ]; then
+        echo "$normalized_profile" > "$machine_dir/profile"
+        echo "Updated: $machine_dir/profile ($normalized_profile)"
     else
         echo "Using existing profile: $(cat "$machine_dir/profile")"
     fi
