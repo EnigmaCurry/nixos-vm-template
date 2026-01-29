@@ -4,7 +4,7 @@
 {
   imports = [
     ./base.nix
-    ./ssh.nix
+    ../modules/ssh.nix
   ];
 
   options.core = {
