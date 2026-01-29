@@ -223,7 +223,13 @@ backend_create_disks() {
     local profile
     profile=$(cat "$machine_dir/profile")
 
-    echo "Creating VM disks: $name (profile: $profile)"
+    # Check if this is a mutable VM
+    if is_mutable "$name"; then
+        backend_create_disks_mutable "$name" "$var_size"
+        return
+    fi
+
+    echo "Creating VM disks: $name (profile: $profile, immutable)"
     mkdir -p "$OUTPUT_DIR/vms/$name"
 
     local profile_image
@@ -425,6 +431,227 @@ backend_create_disks() {
     echo "  Boot disk imported to $PVE_STORAGE"
     echo "  Var disk imported to $PVE_STORAGE ($var_size)"
     echo "  Identity: hostname=$hostname"
+}
+
+# Create VM disk for mutable mode (single read-write disk, full copy)
+backend_create_disks_mutable() {
+    local name="$1"
+    local disk_size
+    disk_size=$(normalize_size "${2:-30G}")
+    local machine_dir="$MACHINES_DIR/$name"
+
+    local profile
+    profile=$(cat "$machine_dir/profile")
+
+    echo "Creating VM disk: $name (profile: $profile, mutable)"
+    mkdir -p "$OUTPUT_DIR/vms/$name"
+
+    # Use mutable image variant
+    local profile_image
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}-mutable")/nixos.qcow2
+
+    if [ ! -f "$profile_image" ]; then
+        echo "Error: Mutable profile image not found: $profile_image"
+        echo "Run 'just build $profile' first (mutable image will be built automatically)"
+        exit 1
+    fi
+
+    # Copy the image (not backing file - this is a standalone mutable system)
+    echo "Copying base image (this may take a moment)..."
+    $CP "$profile_image" "$OUTPUT_DIR/vms/$name/disk.qcow2"
+    chmod 644 "$OUTPUT_DIR/vms/$name/disk.qcow2"
+
+    # Resize to requested size
+    echo "Resizing disk to $disk_size..."
+    $QEMU_IMG resize "$OUTPUT_DIR/vms/$name/disk.qcow2" "$disk_size"
+
+    # Set hostname, machine-id, SSH keys, firewall ports, and root password inside the image
+    local hostname machine_id
+    hostname=$(cat "$machine_dir/hostname")
+    machine_id=$(cat "$machine_dir/machine-id")
+
+    echo "Configuring mutable VM..."
+
+    # Create temp files for hostname and machine-id
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    echo "$hostname" > "$tmp_dir/hostname"
+    echo "$machine_id" > "$tmp_dir/machine-id"
+
+    # Find the nixos root partition
+    local nixos_dev
+    nixos_dev=$($GUESTFISH --ro -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<'EOF'
+run
+findfs-label nixos
+EOF
+)
+    if [ -z "$nixos_dev" ]; then
+        echo "Error: Could not find nixos partition"
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+    echo "  Found nixos partition: $nixos_dev"
+
+    # Build guestfish commands using copy-in for files with special chars
+    local gf_cmds="run : mount $nixos_dev /"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/hostname /etc/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/machine-id /etc/"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/hostname"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/hostname"
+    gf_cmds="$gf_cmds : chmod 0444 /etc/machine-id"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/machine-id"
+
+    # Add admin authorized_keys if present (filter comments/empty lines)
+    if [ -s "$machine_dir/admin_authorized_keys" ]; then
+        grep -v '^#' "$machine_dir/admin_authorized_keys" | grep -v '^$' > "$tmp_dir/admin" || true
+        if [ -s "$tmp_dir/admin" ]; then
+            gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chmod 0755 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : copy-in $tmp_dir/admin /etc/ssh/authorized_keys.d/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/admin"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d/admin"
+        fi
+    fi
+
+    # Add user authorized_keys if present
+    if [ -s "$machine_dir/user_authorized_keys" ]; then
+        grep -v '^#' "$machine_dir/user_authorized_keys" | grep -v '^$' > "$tmp_dir/user" || true
+        if [ -s "$tmp_dir/user" ]; then
+            gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chmod 0755 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : copy-in $tmp_dir/user /etc/ssh/authorized_keys.d/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/user"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d/user"
+        fi
+    fi
+
+    # Copy firewall port files to /etc/firewall-ports/
+    gf_cmds="$gf_cmds : mkdir-p /etc/firewall-ports"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports"
+    gf_cmds="$gf_cmds : chmod 0755 /etc/firewall-ports"
+    if [ -s "$machine_dir/tcp_ports" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/tcp_ports /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/tcp_ports"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/tcp_ports"
+    fi
+    if [ -s "$machine_dir/udp_ports" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/udp_ports /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/udp_ports"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
+    fi
+
+    eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+
+    # Copy root password hash to /etc/ (applied by systemd service at boot)
+    if [ -s "$machine_dir/root_password_hash" ]; then
+        gf_cmds="run : mount $nixos_dev / : copy-in $machine_dir/root_password_hash /etc/"
+        gf_cmds="$gf_cmds : chmod 0600 /etc/root_password_hash"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/root_password_hash"
+        eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+    fi
+
+    rm -rf "$tmp_dir"
+
+    # Determine VMID: user-specified > existing file > auto-allocate
+    local vmid
+    if [ -n "${PVE_VMID:-}" ]; then
+        vmid="$PVE_VMID"
+        echo "Using user-specified VMID: $vmid"
+    elif [ -f "$machine_dir/vmid" ]; then
+        vmid=$(cat "$machine_dir/vmid")
+        echo "Using existing VMID: $vmid"
+    else
+        echo "Allocating VMID from Proxmox..."
+        vmid=$(pve_next_vmid)
+        echo "Allocated VMID: $vmid"
+    fi
+
+    # Validate VMID: must be available or belong to a VM with the same name
+    local existing_name
+    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+    if [ -n "$existing_name" ]; then
+        if [ "$existing_name" != "$name" ]; then
+            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')"
+            exit 1
+        fi
+    fi
+
+    echo "$vmid" > "$machine_dir/vmid"
+
+    # Parse network configuration
+    local network_config bridge
+    network_config=$(cat "$machine_dir/network" 2>/dev/null || echo "nat")
+    if [[ "$network_config" == bridge:* ]]; then
+        bridge="${network_config#bridge:}"
+    else
+        bridge="$PVE_BRIDGE"
+    fi
+
+    # Read MAC address
+    local mac_address
+    mac_address=$(cat "$machine_dir/mac-address")
+
+    # Read memory and vcpus from config (defaults used if not set)
+    local memory vcpus
+    memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
+    vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
+
+    # Create VM shell on Proxmox
+    echo "Creating VM on Proxmox (VMID: $vmid, name: $name)..."
+    pve_ssh "qm create $vmid \
+        --name $name \
+        --bios ovmf \
+        --machine q35 \
+        --agent 1 \
+        --cores $vcpus \
+        --memory $memory \
+        --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0,format=${PVE_DISK_FORMAT} \
+        --serial0 socket \
+        --vga serial0 \
+        --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+
+    # Create staging directory on PVE node
+    pve_ssh "mkdir -p $PVE_STAGING_DIR/$name"
+
+    # rsync disk to PVE node
+    echo "Transferring disk to Proxmox..."
+    pve_rsync "$OUTPUT_DIR/vms/$name/disk.qcow2" \
+        "${PVE_HOST}:${PVE_STAGING_DIR}/$name/disk.qcow2"
+
+    # Import disk
+    echo "Importing disk..."
+    pve_ssh "qm importdisk $vmid ${PVE_STAGING_DIR}/$name/disk.qcow2 $PVE_STORAGE --format $PVE_DISK_FORMAT"
+
+    # Attach disk and set boot order
+    echo "Attaching disk and configuring boot..."
+    local disk_vol
+    disk_vol=$(pve_ssh "qm config $vmid" | grep "^unused0:" | sed 's/^unused0: //')
+
+    if [ -z "$disk_vol" ]; then
+        echo "Error: Could not find imported disk in VM config"
+        echo "Check 'qm config $vmid' on the Proxmox node"
+        exit 1
+    fi
+
+    pve_ssh "qm set $vmid \
+        --virtio0 $disk_vol \
+        --boot order=virtio0"
+
+    # Cleanup staging files on PVE node
+    echo "Cleaning up staging files..."
+    pve_ssh "rm -rf ${PVE_STAGING_DIR}/$name"
+
+    # Configure Proxmox firewall rules from tcp_ports/udp_ports
+    pve_sync_firewall "$name"
+
+    echo "Created mutable VM '$name' on Proxmox (VMID: $vmid)"
+    echo "  Disk imported to $PVE_STORAGE ($disk_size)"
+    echo "  Hostname: $hostname"
+    echo ""
+    echo "NOTE: This is a mutable VM. Upgrades must be done inside the VM with:"
+    echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
 }
 
 # Sync identity files from machine config to existing /var disk on Proxmox
@@ -818,8 +1045,15 @@ create_vm() {
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
 
-    build_profile "$profile"
+    # Initialize machine config first (so we can check mutable status)
     init_machine "$name" "$profile" "$network"
+
+    # Build appropriate image variant
+    if is_mutable "$name"; then
+        build_profile "$profile" "true"
+    else
+        build_profile "$profile" "false"
+    fi
 
     # Save memory/vcpus to machine config
     echo "$memory" > "$MACHINES_DIR/$name/memory"
@@ -828,11 +1062,22 @@ create_vm() {
     backend_create_disks "$name" "$var_size"
 
     echo ""
-    echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
-    echo "Start with: BACKEND=proxmox just start $name"
-    echo "Machine config: $MACHINES_DIR/$name/"
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    if is_mutable "$name"; then
+        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
+        echo "Start with: BACKEND=proxmox just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo ""
+        echo "NOTE: This is a mutable VM with full nix toolchain."
+        echo "Upgrades must be done inside the VM with nixos-rebuild."
+    else
+        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
+        echo "Start with: BACKEND=proxmox just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+    fi
 }
 
 # Clone a VM: copy /var disk from source, generate fresh identity
@@ -917,31 +1162,65 @@ clone_vm() {
     # Update memory/vcpus
     pve_ssh "qm set $dest_vmid --memory $memory --cores $vcpus"
 
-    # Sync fresh identity onto cloned var disk
-    backend_sync_identity "$dest"
+    # Handle identity update differently for mutable vs immutable VMs
+    if is_mutable "$source"; then
+        # Mutable VM: update identity on single disk (virtio0)
+        echo "Updating identity on cloned mutable disk..."
+        local disk_ref disk_path mount_point nbd_dev
+        disk_ref=$(pve_ssh "qm config $dest_vmid" | grep "^virtio0:" | sed 's/^virtio0: //' | cut -d',' -f1)
+        disk_path=$(pve_ssh "pvesm path '$disk_ref'")
+        mount_point="/mnt/nixos-clone-identity-$$"
+        pve_ssh "mkdir -p $mount_point"
+        nbd_dev=$(pve_ssh "for dev in /sys/block/nbd*; do
+            if [ -f \"\$dev/size\" ] && [ \"\$(cat \"\$dev/size\")\" = \"0\" ]; then
+                echo \"/dev/\$(basename \"\$dev\")\"
+                break
+            fi
+        done")
+        pve_ssh "qemu-nbd -f $PVE_DISK_FORMAT -c $nbd_dev '$disk_path'"
+        sleep 2
+        pve_ssh "partprobe $nbd_dev 2>/dev/null || true"
+        sleep 1
+        # Mount the nixos partition (usually partition 2)
+        pve_ssh "mount ${nbd_dev}p2 $mount_point"
 
-    # Delete SSH host keys so clone generates fresh keys on first boot
-    echo "Removing SSH host keys (will be regenerated on first boot)..."
-    local var_disk_ref var_disk_path mount_point nbd_dev
-    var_disk_ref=$(pve_ssh "qm config $dest_vmid" | grep "^virtio1:" | sed 's/^virtio1: //' | cut -d',' -f1)
-    var_disk_path=$(pve_ssh "pvesm path '$var_disk_ref'")
-    mount_point="/mnt/nixos-ssh-cleanup-$$"
-    pve_ssh "mkdir -p $mount_point"
-    nbd_dev=$(pve_ssh "for dev in /sys/block/nbd*; do
-        if [ -f \"\$dev/size\" ] && [ \"\$(cat \"\$dev/size\")\" = \"0\" ]; then
-            echo \"/dev/\$(basename \"\$dev\")\"
-            break
-        fi
-    done")
-    pve_ssh "qemu-nbd -f $PVE_DISK_FORMAT -c $nbd_dev '$var_disk_path'"
-    sleep 2
-    pve_ssh "partprobe $nbd_dev 2>/dev/null || true"
-    sleep 1
-    pve_ssh "mount ${nbd_dev}p1 $mount_point"
-    pve_ssh "rm -f $mount_point/identity/ssh_host_ed25519_key $mount_point/identity/ssh_host_ed25519_key.pub"
-    pve_ssh "umount $mount_point"
-    pve_ssh "qemu-nbd -d $nbd_dev"
-    pve_ssh "rmdir $mount_point 2>/dev/null || true"
+        # Update hostname and machine-id
+        local hostname machine_id
+        hostname=$(cat "$dest_machine_dir/hostname")
+        machine_id=$(cat "$dest_machine_dir/machine-id")
+        pve_ssh "echo '$hostname' > $mount_point/etc/hostname"
+        pve_ssh "echo '$machine_id' > $mount_point/etc/machine-id"
+
+        pve_ssh "umount $mount_point"
+        pve_ssh "qemu-nbd -d $nbd_dev"
+        pve_ssh "rmdir $mount_point 2>/dev/null || true"
+    else
+        # Immutable VM: sync identity onto cloned var disk
+        backend_sync_identity "$dest"
+
+        # Delete SSH host keys so clone generates fresh keys on first boot
+        echo "Removing SSH host keys (will be regenerated on first boot)..."
+        local var_disk_ref var_disk_path mount_point nbd_dev
+        var_disk_ref=$(pve_ssh "qm config $dest_vmid" | grep "^virtio1:" | sed 's/^virtio1: //' | cut -d',' -f1)
+        var_disk_path=$(pve_ssh "pvesm path '$var_disk_ref'")
+        mount_point="/mnt/nixos-ssh-cleanup-$$"
+        pve_ssh "mkdir -p $mount_point"
+        nbd_dev=$(pve_ssh "for dev in /sys/block/nbd*; do
+            if [ -f \"\$dev/size\" ] && [ \"\$(cat \"\$dev/size\")\" = \"0\" ]; then
+                echo \"/dev/\$(basename \"\$dev\")\"
+                break
+            fi
+        done")
+        pve_ssh "qemu-nbd -f $PVE_DISK_FORMAT -c $nbd_dev '$var_disk_path'"
+        sleep 2
+        pve_ssh "partprobe $nbd_dev 2>/dev/null || true"
+        sleep 1
+        pve_ssh "mount ${nbd_dev}p1 $mount_point"
+        pve_ssh "rm -f $mount_point/identity/ssh_host_ed25519_key $mount_point/identity/ssh_host_ed25519_key.pub"
+        pve_ssh "umount $mount_point"
+        pve_ssh "qemu-nbd -d $nbd_dev"
+        pve_ssh "rmdir $mount_point 2>/dev/null || true"
+    fi
 
     echo ""
     echo "VM '$dest' cloned from '$source' (VMID: $dest_vmid)."
@@ -1048,7 +1327,13 @@ recreate_vm() {
         backend_undefine "$name"
     fi
 
-    build_profile "$profile"
+    # Build appropriate image variant
+    if is_mutable "$name"; then
+        build_profile "$profile" "true"
+    else
+        build_profile "$profile" "false"
+    fi
+
     rm -rf "$OUTPUT_DIR/vms/$name"
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
@@ -1067,6 +1352,22 @@ upgrade_vm() {
     if [ ! -d "$machine_dir" ]; then
         echo "Error: Machine config not found: $machine_dir"
         echo "Use 'BACKEND=proxmox just create $name' for new VMs"
+        exit 1
+    fi
+
+    # Block upgrades for mutable VMs
+    if is_mutable "$name"; then
+        echo "Error: Cannot upgrade mutable VMs from the host."
+        echo ""
+        echo "Mutable VMs have a standard read-write NixOS filesystem and must be"
+        echo "upgraded from inside the VM using nixos-rebuild:"
+        echo ""
+        echo "  ssh admin@<vm-ip>"
+        echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
+        echo ""
+        echo "Or to upgrade packages:"
+        echo "  nix-env -u '*'"
+        echo ""
         exit 1
     fi
 
