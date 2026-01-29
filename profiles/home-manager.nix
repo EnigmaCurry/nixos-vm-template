@@ -69,6 +69,17 @@ in
         fi
       done
 
+      # Set up .nix-profile to point to home-manager-path (contains the packages)
+      if [[ -L "$generation/home-path" ]]; then
+        home_path=$(readlink "$generation/home-path")
+        if [[ -d "$home_path" ]]; then
+          mkdir -p "$HOME/.local/state/nix/profiles"
+          ln -sfn "$home_path" "$HOME/.local/state/nix/profiles/profile"
+          ln -sfn "$HOME/.local/state/nix/profiles/profile" "$HOME/.nix-profile"
+          echo "  Created: .nix-profile -> $home_path"
+        fi
+      fi
+
       echo "Home-manager symlinks created successfully"
     '';
   };
