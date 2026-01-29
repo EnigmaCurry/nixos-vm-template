@@ -83,8 +83,5 @@
     nix.gc.automatic = lib.mkForce true;
     nix.gc.dates = "weekly";
     nix.gc.options = "--delete-older-than 30d";
-
-    # TEMPORARY: Set root password for debugging
-    users.users.root.initialPassword = "root";
   };
 }
