@@ -234,49 +234,53 @@ backend_create_disks_mutable() {
 
     echo "Configuring mutable VM..."
 
-    # Build guestfish script
-    local gf_script
-    gf_script=$(mktemp)
-    cat > "$gf_script" <<EOF
-run
-mount /dev/disk/by-label/nixos /
-write /etc/hostname "$hostname"
-write /etc/machine-id "$machine_id"
-EOF
+    # Create temp files for hostname and machine-id
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    echo "$hostname" > "$tmp_dir/hostname"
+    echo "$machine_id" > "$tmp_dir/machine-id"
 
-    # Add admin authorized_keys if present
+    # Build guestfish commands using copy-in for files with special chars
+    local gf_cmds="run : mount /dev/disk/by-label/nixos /"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/hostname /etc/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/machine-id /etc/"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/hostname"
+    gf_cmds="$gf_cmds : chmod 0444 /etc/machine-id"
+
+    # Add admin authorized_keys if present (filter comments/empty lines)
     if [ -s "$machine_dir/admin_authorized_keys" ]; then
-        # Filter out comments and empty lines
-        local admin_keys
-        admin_keys=$(grep -v '^#' "$machine_dir/admin_authorized_keys" | grep -v '^$' || true)
-        if [ -n "$admin_keys" ]; then
-            echo "mkdir-p /etc/ssh/authorized_keys.d" >> "$gf_script"
-            echo "write /etc/ssh/authorized_keys.d/admin \"$admin_keys\"" >> "$gf_script"
-            echo "chmod 0644 /etc/ssh/authorized_keys.d/admin" >> "$gf_script"
+        grep -v '^#' "$machine_dir/admin_authorized_keys" | grep -v '^$' > "$tmp_dir/admin" || true
+        if [ -s "$tmp_dir/admin" ]; then
+            gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : copy-in $tmp_dir/admin /etc/ssh/authorized_keys.d/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/admin"
         fi
     fi
 
     # Add user authorized_keys if present
     if [ -s "$machine_dir/user_authorized_keys" ]; then
-        local user_keys
-        user_keys=$(grep -v '^#' "$machine_dir/user_authorized_keys" | grep -v '^$' || true)
-        if [ -n "$user_keys" ]; then
-            echo "mkdir-p /etc/ssh/authorized_keys.d" >> "$gf_script"
-            echo "write /etc/ssh/authorized_keys.d/user \"$user_keys\"" >> "$gf_script"
-            echo "chmod 0644 /etc/ssh/authorized_keys.d/user" >> "$gf_script"
+        grep -v '^#' "$machine_dir/user_authorized_keys" | grep -v '^$' > "$tmp_dir/user" || true
+        if [ -s "$tmp_dir/user" ]; then
+            gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : copy-in $tmp_dir/user /etc/ssh/authorized_keys.d/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/user"
         fi
     fi
 
-    # Set root password if configured
+    eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+
+    # Set root password if configured (requires separate guestfish call with shell command)
     if [ -s "$machine_dir/root_password_hash" ]; then
         local root_hash
         root_hash=$(cat "$machine_dir/root_password_hash")
-        # Update root's password in /etc/shadow
-        echo "!sed -i \"s|^root:[^:]*:|root:${root_hash}:|\" /etc/shadow" >> "$gf_script"
+        $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
+run
+mount /dev/disk/by-label/nixos /
+!sed -i "s|^root:[^:]*:|root:${root_hash}:|" /sysroot/etc/shadow
+EOF
     fi
 
-    $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" < "$gf_script"
-    rm -f "$gf_script"
+    rm -rf "$tmp_dir"
 
     echo "Created VM disk in $OUTPUT_DIR/vms/$name/"
     echo "  disk.qcow2 ($disk_size, standalone mutable)"
