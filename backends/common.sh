@@ -40,32 +40,51 @@ normalize_profiles() {
     echo "$normalized"
 }
 
+# Check if a machine is configured for mutable mode
+# Returns 0 (true) if machines/{name}/mutable contains "true"
+is_mutable() {
+    local name="$1"
+    local mutable_file="$MACHINES_DIR/$name/mutable"
+    if [ -f "$mutable_file" ]; then
+        local content
+        content=$(cat "$mutable_file" 2>/dev/null | tr -d '[:space:]')
+        [ "$content" = "true" ]
+    else
+        return 1
+    fi
+}
+
 # Build a profile's base image (supports comma-separated profile combinations)
+# Usage: build_profile <profiles> [mutable]
+# If mutable=true, builds a mutable (read-write) image
 build_profile() {
     local profiles="${1:-core}"
+    local mutable="${2:-false}"
 
     # Normalize to canonical profile key
     local profile_key
     profile_key=$(normalize_profiles "$profiles")
-    echo "Building profile combination: $profile_key"
+
+    # Add mutable suffix for mutable images
+    local output_key="$profile_key"
+    if [ "$mutable" = "true" ]; then
+        output_key="${profile_key}-mutable"
+        echo "Building mutable profile: $profile_key"
+    else
+        echo "Building immutable profile: $profile_key"
+    fi
     mkdir -p "$OUTPUT_DIR/profiles"
 
-    # Check if this is a single profile (can use direct flake package)
-    if [[ ! "$profile_key" =~ , ]]; then
-        # Single profile - use direct flake build
-        $NIX build ".#${profile_key}" --out-link "$OUTPUT_DIR/profiles/$profile_key"
-    else
-        # Multiple profiles - use mkCombinedImage via nix eval
-        # Convert comma-separated to nix list format: "docker,python" -> '["docker" "python"]'
-        local nix_list
-        nix_list=$(echo "$profile_key" | sed 's/,/" "/g' | sed 's/^/["/;s/$/"]/')
+    # Convert comma-separated to nix list format: "docker,python" -> '["docker" "python"]'
+    local nix_list
+    nix_list=$(echo "$profile_key" | sed 's/,/" "/g' | sed 's/^/["/;s/$/"]/')
 
-        $NIX build --impure --expr "
-          let flake = builtins.getFlake \"$SCRIPT_DIR\";
-          in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list
-        " --out-link "$OUTPUT_DIR/profiles/$profile_key"
-    fi
-    echo "Built: $OUTPUT_DIR/profiles/$profile_key"
+    $NIX build --impure --expr "
+      let flake = builtins.getFlake \"$SCRIPT_DIR\";
+      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; }
+    " --out-link "$OUTPUT_DIR/profiles/$output_key"
+
+    echo "Built: $OUTPUT_DIR/profiles/$output_key"
 }
 
 # Build all base profiles
@@ -207,8 +226,8 @@ init_machine_clone() {
     local dest_dir="$MACHINES_DIR/$dest"
     mkdir -p "$dest_dir"
 
-    # Copy config files from source
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash profile; do
+    # Copy config files from source (including mutable flag)
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash profile mutable; do
         if [ -f "$source_dir/$f" ]; then
             cp "$source_dir/$f" "$dest_dir/$f"
         fi
@@ -384,7 +403,11 @@ list_machines() {
             name=$(basename "$dir")
             local profile
             profile=$(cat "$dir/profile" 2>/dev/null || echo "unknown")
-            echo "  $name (profile: $profile)"
+            local mode="immutable"
+            if is_mutable "$name"; then
+                mode="mutable"
+            fi
+            echo "  $name (profile: $profile, $mode)"
             found=1
         fi
     done

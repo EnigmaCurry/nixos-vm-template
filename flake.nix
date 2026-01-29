@@ -34,6 +34,7 @@
         ./modules/overlay-etc.nix
         ./modules/journald.nix
         ./modules/immutable.nix
+        ./modules/mutable.nix
         ./modules/identity.nix
         ./modules/firewall-identity.nix
         ./modules/dns-identity.nix
@@ -60,7 +61,8 @@
       };
 
       # Build a combined VM image for a given system and list of profiles
-      mkCombinedImage = system: profileList:
+      # mutable: if true, builds a standard read-write NixOS system
+      mkCombinedImage = system: profileList: { mutable ? false }:
         let
           # Always include core, sort for canonical naming, dedupe
           allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
@@ -77,12 +79,13 @@
             home-manager.nixosModules.home-manager
           ] ++ profileModules ++ [
             { nixpkgs.hostPlatform = system; }
+            { vm.mutable = mutable; }
           ];
         };
 
       # Build a VM image for a given system and single profile (legacy compatibility)
       mkProfileImage = system: profile:
-        mkCombinedImage system [ profile ];
+        mkCombinedImage system [ profile ] { mutable = false; };
 
       # Build a NixOS configuration for testing/debugging
       mkNixosConfig = system: profile:
