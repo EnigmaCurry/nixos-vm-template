@@ -221,6 +221,7 @@ backend_create_disks_mutable() {
     # Copy the image (not backing file - this is a standalone mutable system)
     echo "Copying base image (this may take a moment)..."
     $CP "$profile_image" "$OUTPUT_DIR/vms/$name/disk.qcow2"
+    chmod 644 "$OUTPUT_DIR/vms/$name/disk.qcow2"
 
     # Resize to requested size
     echo "Resizing disk to $disk_size..."
