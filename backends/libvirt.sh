@@ -240,8 +240,22 @@ backend_create_disks_mutable() {
     echo "$hostname" > "$tmp_dir/hostname"
     echo "$machine_id" > "$tmp_dir/machine-id"
 
+    # Find the nixos root partition
+    local nixos_dev
+    nixos_dev=$($GUESTFISH --ro -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<'EOF'
+run
+findfs-label nixos
+EOF
+)
+    if [ -z "$nixos_dev" ]; then
+        echo "Error: Could not find nixos partition"
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+    echo "  Found nixos partition: $nixos_dev"
+
     # Build guestfish commands using copy-in for files with special chars
-    local gf_cmds="run : mount /dev/disk/by-label/nixos /"
+    local gf_cmds="run : mount $nixos_dev /"
     gf_cmds="$gf_cmds : copy-in $tmp_dir/hostname /etc/"
     gf_cmds="$gf_cmds : copy-in $tmp_dir/machine-id /etc/"
     gf_cmds="$gf_cmds : chmod 0644 /etc/hostname"
@@ -276,13 +290,13 @@ backend_create_disks_mutable() {
         # Download shadow, modify locally, upload back
         $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
 run
-mount /dev/disk/by-label/nixos /
+mount $nixos_dev /
 download /etc/shadow $tmp_dir/shadow
 EOF
         sed -i "s|^root:[^:]*:|root:${root_hash}:|" "$tmp_dir/shadow"
         $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
 run
-mount /dev/disk/by-label/nixos /
+mount $nixos_dev /
 upload $tmp_dir/shadow /etc/shadow
 chmod 0600 /etc/shadow
 EOF
