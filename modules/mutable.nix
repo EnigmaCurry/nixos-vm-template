@@ -43,6 +43,9 @@
       ".ssh/authorized_keys"
     ];
 
+    # Open SSH port in firewall (immutable mode uses firewall-identity.nix instead)
+    networking.firewall.allowedTCPPorts = [ 22 ];
+
     # Enable nix garbage collection (works with writable /nix)
     nix.gc.automatic = lib.mkForce true;
     nix.gc.dates = "weekly";
