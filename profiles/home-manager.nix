@@ -27,6 +27,9 @@
         sway-home.homeModules.rust
       ];
 
+      # Install packages from sway-home
+      home.packages = import "${sway-home}/modules/packages.nix" { inherit pkgs; };
+
       # Let home-manager manage itself
       programs.home-manager.enable = true;
     };
