@@ -51,6 +51,32 @@ in
         name=$(basename "$f")
         [[ "$name" == "." || "$name" == ".." ]] && continue
 
+        # Skip .cache entirely - it's runtime data that needs to be writable
+        if [[ "$name" == ".cache" ]]; then
+          echo "  Skipped (writable): $name"
+          mkdir -p "$HOME/$name"
+          continue
+        fi
+
+        # For .local, create the directory structure but symlink contents
+        # This preserves managed files while allowing writable state dirs
+        if [[ "$name" == ".local" && -d "$f" ]]; then
+          echo "  Merging (partial writable): $name"
+          mkdir -p "$HOME/.local"
+          # Symlink subdirectories (share, bin, etc.) but not state
+          for subdir in "$f"/*; do
+            subname=$(basename "$subdir")
+            if [[ "$subname" == "state" ]]; then
+              mkdir -p "$HOME/.local/state"
+              echo "    Skipped (writable): .local/state"
+            elif [[ ! -e "$HOME/.local/$subname" ]]; then
+              ln -sfn "$subdir" "$HOME/.local/$subname"
+              echo "    Created: .local/$subname -> $subdir"
+            fi
+          done
+          continue
+        fi
+
         # Remove existing symlink if it points to wrong location
         if [[ -L "$HOME/$name" ]]; then
           current_target=$(readlink "$HOME/$name")
