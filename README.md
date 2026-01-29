@@ -46,6 +46,7 @@ read-write NixOS system. Mutable VMs provide:
 - **Full nix toolchain** - run `nix-env`, `nixos-rebuild`, etc.
 - **Standard NixOS experience** - install packages, modify configs at runtime
 - **Same profiles** - all composable profiles work with mutable VMs
+- **Works with both backends** - libvirt and Proxmox
 
 **When to use mutable VMs:**
 - You need to run `nixos-rebuild switch` inside the VM
@@ -63,16 +64,23 @@ read-write NixOS system. Mutable VMs provide:
 Create a `mutable` file in the machine config directory before creating the VM:
 
 ```bash
+# Libvirt
 mkdir -p machines/myvm
 echo "true" > machines/myvm/mutable
 just create myvm docker,dev
+
+# Proxmox
+mkdir -p machines/myvm
+echo "true" > machines/myvm/mutable
+BACKEND=proxmox just create myvm docker,dev
 ```
 
 Or for an existing machine config, add the mutable flag before recreating:
 
 ```bash
 echo "true" > machines/myvm/mutable
-just recreate myvm
+just recreate myvm                    # Libvirt
+BACKEND=proxmox just recreate myvm    # Proxmox
 ```
 
 ### Upgrading Mutable VMs
@@ -90,6 +98,18 @@ sudo nixos-rebuild switch --upgrade
 # Or with a flake
 sudo nixos-rebuild switch --flake github:owner/repo#config
 ```
+
+### Mutable VM Internals
+
+| Feature | Immutable VM | Mutable VM |
+|---------|--------------|------------|
+| Disk layout | Boot disk + var disk | Single disk |
+| Root filesystem | Read-only | Read-write |
+| Identity files | `/var/identity/` | `/etc/` (hostname, machine-id, SSH keys) |
+| Firewall rules | `/var/identity/tcp_ports` | `/etc/firewall-ports/tcp_ports` |
+| Root password | `/var/identity/root_password_hash` | `/etc/root_password_hash` |
+| Upgrade method | `just upgrade` from host | `nixos-rebuild` inside VM |
+| Thin provisioning | Yes (QCOW2 backing files) | No (full disk copy) |
 
 ## Features
 
