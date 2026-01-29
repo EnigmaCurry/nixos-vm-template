@@ -308,15 +308,17 @@ EOF
 
     # Set root password if configured
     if [ -s "$machine_dir/root_password_hash" ]; then
-        local root_hash
-        root_hash=$(cat "$machine_dir/root_password_hash")
         # Download shadow, modify locally, upload back
         $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
 run
 mount $nixos_dev /
 download /etc/shadow $tmp_dir/shadow
 EOF
-        sed -i "s|^root:[^:]*:|root:${root_hash}:|" "$tmp_dir/shadow"
+        # Use awk to replace the root password field (handles special chars in hash)
+        local root_hash
+        root_hash=$(cat "$machine_dir/root_password_hash")
+        awk -F: -v hash="$root_hash" 'BEGIN{OFS=":"} $1=="root"{$2=hash} {print}' "$tmp_dir/shadow" > "$tmp_dir/shadow.new"
+        mv "$tmp_dir/shadow.new" "$tmp_dir/shadow"
         $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
 run
 mount $nixos_dev /
