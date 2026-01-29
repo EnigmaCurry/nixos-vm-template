@@ -61,7 +61,14 @@ read-write NixOS system. Mutable VMs provide:
 
 ### Creating a Mutable VM
 
-Create a `mutable` file in the machine config directory before creating the VM:
+Use `just mutable` to toggle mutable mode for an existing machine config:
+
+```bash
+just mutable myvm      # Interactive prompt to enable/disable
+just recreate myvm     # Apply the change
+```
+
+Or create the `mutable` file manually before creating a new VM:
 
 ```bash
 # Libvirt
@@ -73,14 +80,6 @@ just create myvm docker,dev
 mkdir -p machines/myvm
 echo "true" > machines/myvm/mutable
 BACKEND=proxmox just create myvm docker,dev
-```
-
-Or for an existing machine config, add the mutable flag before recreating:
-
-```bash
-echo "true" > machines/myvm/mutable
-just recreate myvm                    # Libvirt
-BACKEND=proxmox just recreate myvm    # Proxmox
 ```
 
 ### Upgrading Mutable VMs
@@ -516,6 +515,7 @@ just build docker,python,rust  # Build a combined image with multiple profiles
 | `just resize-var <name> <size>` | Resize just the /var disk |
 | `just recreate <name> [var_size] [network]` | Fresh start, replace all disks (data lost) |
 | `just network-config <name> [network]` | Change network mode (nat or bridge) |
+| `just mutable <name>` | Toggle mutable mode (single read-write disk) |
 | `just passwd <name>` | Set or clear root password for console access |
 | `just destroy <name>` | Remove VM and disks (preserves machine config) |
 | `just purge <name>` | Remove VM, disks, and machine config |
