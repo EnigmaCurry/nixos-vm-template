@@ -1,8 +1,13 @@
 # Home-manager profile - configures home-manager for the regular user
 # Uses sway-home modules for a complete terminal/editor environment
+# Requires writable /nix for activation, so imports the nix overlay
 { config, lib, pkgs, sway-home, swayHomeInputs, nix-flatpak, ... }:
 
 {
+  imports = [
+    ./nix.nix
+  ];
+
   home-manager = {
     useGlobalPkgs = true;
     useUserPackages = true;
