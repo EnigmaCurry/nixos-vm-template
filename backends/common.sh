@@ -392,6 +392,40 @@ set_password() {
     echo "Run 'just upgrade $name' to apply."
 }
 
+# Set or clear the mutable flag for a VM
+set_mutable() {
+    local name="$1"
+    local machine_dir="$MACHINES_DIR/$name"
+
+    if [ ! -d "$machine_dir" ]; then
+        echo "Error: Machine config not found: $machine_dir"
+        exit 1
+    fi
+
+    local current_status="disabled"
+    if is_mutable "$name"; then
+        current_status="enabled"
+    fi
+
+    echo "Configure mutable mode for VM '$name'"
+    echo ""
+    echo "Current status: $current_status"
+    echo ""
+    echo "Mutable VMs have a single read-write disk with full nix toolchain."
+    echo "They cannot be upgraded with 'just upgrade' - use nixos-rebuild inside the VM."
+    echo ""
+    read -p "Enable mutable mode? [y/N] " confirm
+    if [[ "$confirm" == [yY] || "$confirm" == [yY][eE][sS] ]]; then
+        echo "true" > "$machine_dir/mutable"
+        echo "Mutable mode enabled."
+    else
+        rm -f "$machine_dir/mutable"
+        echo "Mutable mode disabled."
+    fi
+    echo ""
+    echo "Run 'just recreate $name' to apply the change."
+}
+
 # List all machine configs
 list_machines() {
     echo "Machine configs in $MACHINES_DIR/:"
