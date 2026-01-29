@@ -259,15 +259,20 @@ EOF
     gf_cmds="$gf_cmds : copy-in $tmp_dir/hostname /etc/"
     gf_cmds="$gf_cmds : copy-in $tmp_dir/machine-id /etc/"
     gf_cmds="$gf_cmds : chmod 0644 /etc/hostname"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/hostname"
     gf_cmds="$gf_cmds : chmod 0444 /etc/machine-id"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/machine-id"
 
     # Add admin authorized_keys if present (filter comments/empty lines)
     if [ -s "$machine_dir/admin_authorized_keys" ]; then
         grep -v '^#' "$machine_dir/admin_authorized_keys" | grep -v '^$' > "$tmp_dir/admin" || true
         if [ -s "$tmp_dir/admin" ]; then
             gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chmod 0755 /etc/ssh/authorized_keys.d"
             gf_cmds="$gf_cmds : copy-in $tmp_dir/admin /etc/ssh/authorized_keys.d/"
             gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/admin"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d/admin"
         fi
     fi
 
@@ -276,8 +281,11 @@ EOF
         grep -v '^#' "$machine_dir/user_authorized_keys" | grep -v '^$' > "$tmp_dir/user" || true
         if [ -s "$tmp_dir/user" ]; then
             gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chmod 0755 /etc/ssh/authorized_keys.d"
             gf_cmds="$gf_cmds : copy-in $tmp_dir/user /etc/ssh/authorized_keys.d/"
             gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/user"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d/user"
         fi
     fi
 
