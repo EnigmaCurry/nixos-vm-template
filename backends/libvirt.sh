@@ -269,14 +269,22 @@ backend_create_disks_mutable() {
 
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
 
-    # Set root password if configured (requires separate guestfish call with shell command)
+    # Set root password if configured
     if [ -s "$machine_dir/root_password_hash" ]; then
         local root_hash
         root_hash=$(cat "$machine_dir/root_password_hash")
+        # Download shadow, modify locally, upload back
         $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
 run
 mount /dev/disk/by-label/nixos /
-!sed -i "s|^root:[^:]*:|root:${root_hash}:|" /sysroot/etc/shadow
+download /etc/shadow $tmp_dir/shadow
+EOF
+        sed -i "s|^root:[^:]*:|root:${root_hash}:|" "$tmp_dir/shadow"
+        $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
+run
+mount /dev/disk/by-label/nixos /
+upload $tmp_dir/shadow /etc/shadow
+chmod 0600 /etc/shadow
 EOF
     fi
 
