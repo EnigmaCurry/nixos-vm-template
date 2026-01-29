@@ -37,6 +37,60 @@ ideal for this because the entire system configuration is declared in
 code and built offline. The result is a VM that boots fast, runs
 predictably, and can be recreated identically at any time.
 
+## Mutable VMs
+
+While immutable VMs are the default, sometimes you need a traditional
+read-write NixOS system. Mutable VMs provide:
+
+- **Single disk** instead of boot + var disks
+- **Full nix toolchain** - run `nix-env`, `nixos-rebuild`, etc.
+- **Standard NixOS experience** - install packages, modify configs at runtime
+- **Same profiles** - all composable profiles work with mutable VMs
+
+**When to use mutable VMs:**
+- You need to run `nixos-rebuild switch` inside the VM
+- You want to experiment with NixOS configuration interactively
+- You need full `nix` command access (not just the nix profile)
+- You're doing NixOS development or testing
+
+**Tradeoffs:**
+- No thin provisioning (each VM gets a full disk copy)
+- Cannot use `just upgrade` from the host (must upgrade inside VM)
+- Loses the corruption-resistance of a read-only root
+
+### Creating a Mutable VM
+
+Create a `mutable` file in the machine config directory before creating the VM:
+
+```bash
+mkdir -p machines/myvm
+echo "true" > machines/myvm/mutable
+just create myvm docker,dev
+```
+
+Or for an existing machine config, add the mutable flag before recreating:
+
+```bash
+echo "true" > machines/myvm/mutable
+just recreate myvm
+```
+
+### Upgrading Mutable VMs
+
+Mutable VMs cannot be upgraded from the host with `just upgrade`. Instead,
+upgrade from inside the VM:
+
+```bash
+# SSH into the VM
+just ssh admin@myvm
+
+# Standard NixOS upgrade
+sudo nixos-rebuild switch --upgrade
+
+# Or with a flake
+sudo nixos-rebuild switch --flake github:owner/repo#config
+```
+
 ## Features
 
 - Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
@@ -46,6 +100,7 @@ predictably, and can be recreated identically at any time.
 - Even `/etc` is read-only, you need to rebuild the image to reconfigure it
 - Separate `/var` disk for all mutable state
 - Bind mounted `/home` to `/var/home` and `/root` to `/var/root` (persistent)
+- **Optional mutable mode**: standard read-write NixOS for full flexibility
 - Snapshots and backups
 - Composable VM profiles to customize the VM role (docker, podman, dev, claude, etc.)
 - UEFI boot with systemd-boot
@@ -636,6 +691,7 @@ safety margin.
 Each VM has a machine config directory at `machines/<name>/` containing:
 
 - `profile` - Which profile to use
+- `mutable` - If contains "true", creates a mutable VM (single read-write disk)
 - `hostname` - VM hostname
 - `machine-id` - Unique machine identifier
 - `uuid` - VM UUID (preserves DHCP lease across upgrades)
@@ -672,6 +728,17 @@ just upgrade myvm
 ```
 
 Lines starting with `#` are treated as comments.
+
+**How firewall rules are applied:**
+
+| VM Type | Rule Location | Applied By | Update Method |
+|---------|---------------|------------|---------------|
+| Immutable | `/var/identity/tcp_ports`, `/var/identity/udp_ports` | `firewall-identity.service` at boot | `just upgrade` syncs from machine config |
+| Mutable | `/etc/firewall-ports/tcp_ports`, `/etc/firewall-ports/udp_ports` | `firewall-ports.service` at boot | `just recreate` (or edit files in VM) |
+
+Both services use iptables to insert rules into the `nixos-fw` chain at boot.
+For mutable VMs, you can also edit the files directly inside the VM and reboot,
+or manually run `systemctl restart firewall-ports` to apply changes.
 
 ### Root Password
 
