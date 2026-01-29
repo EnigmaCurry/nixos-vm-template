@@ -11,7 +11,8 @@ in
   # The standard home-manager activation fails on immutable systems because
   # nix-store commands require a writable /nix with a valid database.
   # This service creates the symlinks directly before home-manager runs.
-  systemd.services."home-manager-symlinks-${regularUser}" = {
+  # On mutable VMs, the standard activation works fine so we skip this.
+  systemd.services."home-manager-symlinks-${regularUser}" = lib.mkIf (!config.vm.mutable) {
     description = "Create home-manager symlinks for ${regularUser}";
     wantedBy = [ "multi-user.target" ];
     before = [ "home-manager-${regularUser}.service" ];
@@ -103,7 +104,8 @@ in
   # The original home-manager service fails with nix-store errors on immutable systems.
   # Our symlinks service runs first and creates the symlinks, so we allow the failure.
   # We keep the service reference intact so the generation is included in the closure.
-  systemd.services."home-manager-${regularUser}" = {
+  # On mutable VMs, the standard activation works fine so we don't override this.
+  systemd.services."home-manager-${regularUser}" = lib.mkIf (!config.vm.mutable) {
     serviceConfig = {
       # Allow exit code 1 (nix-store failure) to be treated as success
       SuccessExitStatus = [ 1 ];
