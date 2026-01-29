@@ -227,18 +227,56 @@ backend_create_disks_mutable() {
     echo "Resizing disk to $disk_size..."
     $QEMU_IMG resize "$OUTPUT_DIR/vms/$name/disk.qcow2" "$disk_size"
 
-    # Set hostname and machine-id inside the image
+    # Set hostname, machine-id, SSH keys, and root password inside the image
     local hostname machine_id
     hostname=$(cat "$machine_dir/hostname")
     machine_id=$(cat "$machine_dir/machine-id")
 
-    echo "Setting hostname and machine-id..."
-    $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
+    echo "Configuring mutable VM..."
+
+    # Build guestfish script
+    local gf_script
+    gf_script=$(mktemp)
+    cat > "$gf_script" <<EOF
 run
 mount /dev/disk/by-label/nixos /
 write /etc/hostname "$hostname"
 write /etc/machine-id "$machine_id"
 EOF
+
+    # Add admin authorized_keys if present
+    if [ -s "$machine_dir/admin_authorized_keys" ]; then
+        # Filter out comments and empty lines
+        local admin_keys
+        admin_keys=$(grep -v '^#' "$machine_dir/admin_authorized_keys" | grep -v '^$' || true)
+        if [ -n "$admin_keys" ]; then
+            echo "mkdir-p /etc/ssh/authorized_keys.d" >> "$gf_script"
+            echo "write /etc/ssh/authorized_keys.d/admin \"$admin_keys\"" >> "$gf_script"
+            echo "chmod 0644 /etc/ssh/authorized_keys.d/admin" >> "$gf_script"
+        fi
+    fi
+
+    # Add user authorized_keys if present
+    if [ -s "$machine_dir/user_authorized_keys" ]; then
+        local user_keys
+        user_keys=$(grep -v '^#' "$machine_dir/user_authorized_keys" | grep -v '^$' || true)
+        if [ -n "$user_keys" ]; then
+            echo "mkdir-p /etc/ssh/authorized_keys.d" >> "$gf_script"
+            echo "write /etc/ssh/authorized_keys.d/user \"$user_keys\"" >> "$gf_script"
+            echo "chmod 0644 /etc/ssh/authorized_keys.d/user" >> "$gf_script"
+        fi
+    fi
+
+    # Set root password if configured
+    if [ -s "$machine_dir/root_password_hash" ]; then
+        local root_hash
+        root_hash=$(cat "$machine_dir/root_password_hash")
+        # Update root's password in /etc/shadow
+        echo "!sed -i \"s|^root:[^:]*:|root:${root_hash}:|\" /etc/shadow" >> "$gf_script"
+    fi
+
+    $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" < "$gf_script"
+    rm -f "$gf_script"
 
     echo "Created VM disk in $OUTPUT_DIR/vms/$name/"
     echo "  disk.qcow2 ($disk_size, standalone mutable)"
