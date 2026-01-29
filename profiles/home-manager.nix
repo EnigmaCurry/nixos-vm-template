@@ -84,10 +84,13 @@ in
     '';
   };
 
-  # Mask the original home-manager service since it will fail with nix-store errors
+  # The original home-manager service will fail with nix-store errors on immutable systems.
+  # Our symlinks service runs first and creates the symlinks, so we just make the
+  # failure non-fatal. We must keep the service as-is so the generation is included in closure.
   systemd.services."home-manager-${regularUser}" = {
     serviceConfig = {
-      ExecStart = lib.mkForce "${pkgs.coreutils}/bin/true";
+      # Allow exit code 1 (nix-store failure) to be treated as success
+      SuccessExitStatus = [ 1 ];
     };
   };
 
