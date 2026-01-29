@@ -2,7 +2,8 @@
 { config, lib, pkgs, ... }:
 
 {
-  config = {
+  # Immutable-mode firewall identity configuration
+  config = lib.mkIf (!config.vm.mutable) {
     # Service to open additional ports from /var/identity
     systemd.services.firewall-identity = {
       description = "Open firewall ports from /var/identity";
