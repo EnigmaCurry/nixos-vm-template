@@ -14,16 +14,17 @@
   };
 
   config = lib.mkIf config.vm.mutable {
-    # Standard writable root filesystem (single disk on /dev/vda)
+    # Standard writable root filesystem
     # Use mkForce to override nixos-generators qcow format defaults
+    # Keep the label-based device from nixos-generators but make it read-write
     fileSystems."/" = lib.mkForce {
-      device = "/dev/vda2";
+      device = "/dev/disk/by-label/nixos";
       fsType = "ext4";
       options = [ "rw" "noatime" ];
     };
 
     fileSystems."/boot" = lib.mkForce {
-      device = "/dev/vda1";
+      device = "/dev/disk/by-label/ESP";
       fsType = "vfat";
       options = [ "rw" ];
     };

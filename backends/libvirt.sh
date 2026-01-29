@@ -235,7 +235,7 @@ backend_create_disks_mutable() {
     echo "Setting hostname and machine-id..."
     $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
 run
-mount /dev/sda2 /
+mount /dev/disk/by-label/nixos /
 write /etc/hostname "$hostname"
 write /etc/machine-id "$machine_id"
 EOF
