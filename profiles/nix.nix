@@ -1,13 +1,9 @@
 # Nix profile - mutable /nix filesystem for running nix commands
-# Inherits from core and uses overlayfs to make /nix writable while
-# preserving the base image content as the lower layer
+# Uses overlayfs to make /nix writable while preserving the base image
+# content as the lower layer
 { config, lib, pkgs, ... }:
 
 {
-  imports = [
-    ./core.nix
-  ];
-
   # Make /nix/store writable - remove default ro,nosuid,nodev options
   # Our overlay on /nix handles the actual write layer
   boot.nixStoreMountOpts = [ ];

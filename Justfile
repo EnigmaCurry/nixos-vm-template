@@ -11,9 +11,9 @@ backend_script := if BACKEND == "common" { error("BACKEND cannot be 'common'") }
 default:
     @just --list
 
-# Build a profile's base image (default: core)
-build profile="core":
-    @source {{backend_script}} && build_profile "{{profile}}"
+# Build a profile image (supports comma-separated profiles, e.g., docker,python)
+build profiles="core":
+    @source {{backend_script}} && build_profile "{{profiles}}"
 
 # Build all profiles
 build-all:
@@ -23,9 +23,9 @@ build-all:
 list-profiles:
     @source {{backend_script}} && list_profiles
 
-# Create a new VM: build profile, create machine config, create disks, generate config, define
-create new_name profile="core" memory="2048" vcpus="2" var_size="30G" network="nat":
-    @source {{backend_script}} && create_vm "{{new_name}}" "{{profile}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
+# Create a new VM with composable profiles (e.g., just create myvm docker,python)
+create new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat":
+    @source {{backend_script}} && create_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
 # Memory/vcpus default to source VM's values if not specified

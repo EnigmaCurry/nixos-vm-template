@@ -2,8 +2,6 @@
 { config, lib, pkgs, ... }:
 
 {
-  imports = [ ./core.nix ];
-
   config = {
     # Enable Podman
     virtualisation.podman = {
@@ -25,9 +23,12 @@
       linkConfig.Unmanaged = "yes";
     };
 
-    # Useful Podman-related packages
+    # Podman-related packages including development tools
     environment.systemPackages = with pkgs; [
       podman-compose
+      distrobox
+      buildah
+      skopeo
     ];
   };
 }

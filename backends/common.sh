@@ -27,24 +27,50 @@ CP="${CP:-${HOST_CMD:+$HOST_CMD }cp}"
 OUTPUT_DIR="${OUTPUT_DIR:-output}"
 MACHINES_DIR="${MACHINES_DIR:-machines}"
 
-# Build a profile's base image
+# Build a profile's base image (supports comma-separated profile combinations)
 build_profile() {
-    local profile="${1:-core}"
-    echo "Building profile: $profile"
+    local profiles="${1:-core}"
+
+    # Normalize: split by comma, sort, dedupe, ensure core is included
+    local normalized
+    normalized=$(echo "$profiles" | tr ',' '\n' | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//')
+    if [[ ! ",$normalized," =~ ,core, ]]; then
+        normalized="core,$normalized"
+    fi
+
+    # Create canonical profile key (sorted, comma-separated)
+    local profile_key="$normalized"
+    echo "Building profile combination: $profile_key"
     mkdir -p "$OUTPUT_DIR/profiles"
-    $NIX build ".#${profile}" --out-link "$OUTPUT_DIR/profiles/$profile"
-    echo "Built: $OUTPUT_DIR/profiles/$profile"
+
+    # Check if this is a single profile (can use direct flake package)
+    if [[ ! "$profile_key" =~ , ]]; then
+        # Single profile - use direct flake build
+        $NIX build ".#${profile_key}" --out-link "$OUTPUT_DIR/profiles/$profile_key"
+    else
+        # Multiple profiles - use mkCombinedImage via nix eval
+        # Convert comma-separated to nix list format: "docker,python" -> '["docker" "python"]'
+        local nix_list
+        nix_list=$(echo "$profile_key" | sed 's/,/" "/g' | sed 's/^/["/;s/$/"]/')
+
+        $NIX build --impure --expr "
+          let flake = builtins.getFlake \"$SCRIPT_DIR\";
+          in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list
+        " --out-link "$OUTPUT_DIR/profiles/$profile_key"
+    fi
+    echo "Built: $OUTPUT_DIR/profiles/$profile_key"
 }
 
-# Build all profiles
+# Build all base profiles
 build_all() {
-    echo "Building all profiles..."
-    build_profile base
+    echo "Building all base profiles..."
     build_profile core
     build_profile docker
+    build_profile podman
     build_profile dev
     build_profile claude
-    echo "All profiles built."
+    build_profile open-code
+    echo "All base profiles built."
 }
 
 # List available profiles

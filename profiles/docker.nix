@@ -1,9 +1,7 @@
-# Docker profile - core system with Docker daemon
+# Docker profile - Docker daemon with user access
 { config, lib, pkgs, ... }:
 
 {
-  imports = [ ./core.nix ];
-
   config = {
     # Enable Docker daemon
     virtualisation.docker.enable = true;
@@ -54,8 +52,9 @@
       linkConfig.Unmanaged = "yes";
     };
 
-    # Add admin user to docker group for non-root access
+    # Add admin and regular users to docker group for non-root access
     users.users.${config.core.adminUser}.extraGroups = [ "docker" ];
+    users.users.${config.core.regularUser}.extraGroups = [ "docker" ];
 
     # Traefik UID reservation for Docker containers
     users.users.traefik = {

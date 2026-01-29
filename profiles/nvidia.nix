@@ -1,10 +1,14 @@
-# Docker with NVIDIA GPU support - for VMs with GPU passthrough
+# NVIDIA GPU profile - GPU support for VMs with GPU passthrough
+# Requires docker profile to be included for container GPU access
 { config, lib, pkgs, ... }:
 
 {
-  imports = [ ./docker.nix ];
-
   config = {
+    assertions = [{
+      assertion = config.virtualisation.docker.enable;
+      message = "nvidia profile requires docker profile to be included";
+    }];
+
     # Allow unfree NVIDIA driver packages
     nixpkgs.config.allowUnfree = true;
 

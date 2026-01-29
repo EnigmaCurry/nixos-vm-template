@@ -20,9 +20,11 @@
 
   outputs = { self, nixpkgs, nixos-generators, home-manager, sway-home, nix-flatpak, ... }@inputs:
     let
+      lib = nixpkgs.lib;
+
       # Systems we support
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
-      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      forAllSystems = lib.genAttrs supportedSystems;
 
       # Core modules (always included)
       coreModules = [
@@ -41,11 +43,29 @@
         ./modules/zram.nix
       ];
 
-      # Available profiles (each adds packages on top of core modules)
-      profiles = [ "base" "core" "nix" "docker" "docker-nvidia" "dev" "dev-nvidia" "dev-nix" "claude" "claude-nvidia" "claude-nix" "open-code" "open-code-nvidia" "open-code-nix" ];
+      # Available composable profiles (mixin-style, no inheritance)
+      # core is always implicitly included via coreModules
+      availableProfiles = [ "base" "core" "docker" "podman" "nvidia" "python" "rust" "nix" "dev" "claude" "open-code" ];
 
-      # Build a VM image for a given system and profile
-      mkProfileImage = system: profile:
+      # Common profile combinations (convenience shortcuts)
+      # These are pre-defined combinations that users commonly need
+      commonCombinations = {
+        # Single profiles (for backwards compatibility and convenience)
+        "core" = [ "core" ];
+        "docker" = [ "core" "docker" ];
+        "podman" = [ "core" "podman" ];
+        "dev" = [ "core" "docker" "podman" "rust" "python" "dev" ];
+        "claude" = [ "core" "docker" "podman" "rust" "python" "dev" "claude" ];
+        "open-code" = [ "core" "docker" "podman" "rust" "python" "dev" "open-code" ];
+      };
+
+      # Build a combined VM image for a given system and list of profiles
+      mkCombinedImage = system: profileList:
+        let
+          # Always include core, sort for canonical naming, dedupe
+          allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
+          profileModules = map (p: ./profiles/${p}.nix) allProfiles;
+        in
         nixos-generators.nixosGenerate {
           inherit system;
           format = "qcow";
@@ -55,10 +75,14 @@
           };
           modules = coreModules ++ [
             home-manager.nixosModules.home-manager
-            ./profiles/${profile}.nix
+          ] ++ profileModules ++ [
             { nixpkgs.hostPlatform = system; }
           ];
         };
+
+      # Build a VM image for a given system and single profile (legacy compatibility)
+      mkProfileImage = system: profile:
+        mkCombinedImage system [ profile ];
 
       # Build a NixOS configuration for testing/debugging
       mkNixosConfig = system: profile:
@@ -78,13 +102,13 @@
     in
     {
       # Profile images for each supported system
-      # Access as: nix build .#base or .#dev
+      # Access as: nix build .#core or .#docker
       packages = forAllSystems (system:
         builtins.listToAttrs (
           map (profile: {
             name = profile;
             value = mkProfileImage system profile;
-          }) profiles
+          }) availableProfiles
         ) // {
           default = mkProfileImage system "core";
         }
@@ -96,9 +120,14 @@
           map (profile: {
             name = "${profile}-${system}";
             value = mkNixosConfig system profile;
-          }) profiles
+          }) availableProfiles
         ) supportedSystems
       );
+
+      # Expose lib functions for backend scripts to build dynamic combinations
+      lib = {
+        inherit mkCombinedImage availableProfiles commonCombinations;
+      };
 
       # Development shell with useful tools
       devShells = forAllSystems (system:

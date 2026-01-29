@@ -1,4 +1,4 @@
-# Development profile - includes development tools
+# Development profile - includes development tools and home-manager
 { config, lib, pkgs, sway-home, swayHomeInputs, nix-flatpak, ... }:
 
 {
@@ -6,16 +6,7 @@
   vm.zram.enable = true;
   vm.zram.memoryPercent = 50;
 
-  # Import core profile (base + ssh), docker, podman, rust, and python
-  imports = [
-    ./core.nix
-    ./docker-dev.nix
-    ./podman-dev.nix
-    ./rust.nix
-    ./python.nix
-  ];
-
-  # Additional development packages
+  # Development packages
   environment.systemPackages = with pkgs; [
     # Editors
     neovim
