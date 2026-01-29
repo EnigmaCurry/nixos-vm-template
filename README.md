@@ -47,7 +47,7 @@ predictably, and can be recreated identically at any time.
 - Separate `/var` disk for all mutable state
 - Bind mounted `/home` to `/var/home` and `/root` to `/var/root` (persistent)
 - Snapshots and backups
-- Multiple VM profiles to customize the VM role (base, core, docker, dev)
+- Composable VM profiles to customize the VM role (docker, podman, dev, claude, etc.)
 - UEFI boot with systemd-boot
 - SSH key-only authentication
 - QEMU guest agent for IP detection and guest commands
@@ -417,20 +417,21 @@ BACKEND=proxmox just restore-backup myvm  # Restore from backup
 
 | Command | Description |
 |---------|-------------|
-| `just build [profile]` | Build a profile image (default: core) |
-| `just build-all` | Build main profiles (base, core, docker, dev, claude) |
+| `just build [profiles]` | Build a profile image (default: core). Supports comma-separated profiles. |
+| `just build-all` | Build common base profiles |
 | `just list-profiles` | List available profiles |
 
 ```bash
 just build              # Build the default "core" profile
-just build docker       # Build the "docker" profile
+just build docker       # Build the "docker" profile (core is always included)
+just build docker,python,rust  # Build a combined image with multiple profiles
 ```
 
 ### VM Lifecycle
 
 | Command | Description |
 |---------|-------------|
-| `just create <name> [profile] [memory] [vcpus] [var_size] [network]` | Create a new VM |
+| `just create <name> [profiles] [memory] [vcpus] [var_size] [network]` | Create a new VM (profiles are comma-separated) |
 | `just clone <source> <dest> [memory] [vcpus] [network]` | Clone a VM (copy /var, fresh identity) |
 | `just start <name>` | Start a VM |
 | `just stop <name>` | Gracefully stop a VM |
@@ -445,8 +446,9 @@ just build docker       # Build the "docker" profile
 | `just purge <name>` | Remove VM, disks, and machine config |
 
 ```bash
-just create webserver docker 4096 4 50G   # Create "webserver" with docker profile, 4GB RAM, 4 CPUs, 50GB /var
-just create devbox dev 8192 8             # Create "devbox" with dev profile, 8GB RAM, 8 CPUs
+just create webserver docker 4096 4 50G   # Docker server with 4GB RAM, 4 CPUs, 50GB /var
+just create devbox docker,podman,dev 8192 8  # Full dev environment with Docker and Podman
+just create claude-vm claude,dev,docker,podman 8192 4  # Claude Code with full dev stack
 
 just network-config webserver nat         # Switch to NAT networking
 just network-config webserver bridge      # Interactive bridge selection (local bridges)
@@ -546,22 +548,40 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 
 ## Profiles
 
-- **base** - Minimal NixOS system
-- **core** - Base + SSH server with admin/user accounts
-- **nix** - Core + mutable /nix filesystem (enables running nix commands)
-- **docker** - Core + Docker (admin user has docker access)
-- **docker-nvidia** - Docker + NVIDIA drivers and container toolkit (for GPU passthrough)
-- **podman** - Core + Podman (rootless containers for all users)
-- **podman-dev** - Podman + distrobox and host-spawn
-- **dev** - Core + development tools, Docker, and Podman (both users have container access)
-- **dev-nvidia** - Dev + NVIDIA GPU support
-- **dev-nix** - Dev + mutable /nix filesystem
-- **claude** - Dev + Claude Code CLI (Anthropic's AI coding assistant)
-- **claude-nvidia** - Claude + NVIDIA GPU support
-- **claude-nix** - Claude + mutable /nix filesystem
-- **open-code** - Dev + Open Code CLI (open-source AI coding assistant)
-- **open-code-nvidia** - Open Code + NVIDIA GPU support
-- **open-code-nix** - Open Code + mutable /nix filesystem
+Profiles are composable mixins that you combine as needed. The `core` profile
+is always included automatically. Specify multiple profiles with commas:
+
+```bash
+just create myvm docker,python           # Docker + Python
+just create devbox docker,podman,dev     # Full dev environment
+just create claude-vm claude,dev,docker  # Claude Code with dev tools
+```
+
+### Available Profiles
+
+| Profile | Description |
+|---------|-------------|
+| **core** | SSH server, admin/user accounts, firewall (always included) |
+| **docker** | Docker daemon (both users have docker access) |
+| **podman** | Podman + distrobox, buildah, skopeo (rootless containers) |
+| **nvidia** | NVIDIA drivers + container toolkit (requires docker) |
+| **python** | Python with uv package manager and build tools |
+| **rust** | Rust with rustup |
+| **nix** | Mutable /nix filesystem (enables running nix commands in VM) |
+| **dev** | Development tools + home-manager (neovim, tmux, etc.) |
+| **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
+| **open-code** | Open Code CLI (open-source AI coding assistant) |
+
+### Common Combinations
+
+| Use Case | Profiles |
+|----------|----------|
+| Docker server | `docker` |
+| Development VM | `docker,podman,dev` |
+| Python development | `docker,python` |
+| Claude Code (full) | `claude,dev,docker,podman` |
+| Claude with GPU | `claude,dev,docker,nvidia` |
+| Open Code (full) | `open-code,dev,docker,podman` |
 
 ## Zram Compressed Swap
 
@@ -570,7 +590,7 @@ memory pressure by compressing inactive pages rather than killing processes
 (OOM). This is useful for development workloads that may have unpredictable
 memory spikes.
 
-**Enabled by default in:** `dev`, `dev-nvidia`, `dev-nix`, `claude`, `claude-nvidia`, `claude-nix`, `open-code`, `open-code-nvidia`, `open-code-nix`
+**Enabled by default in:** `dev`, `claude`, `open-code`
 
 ### Configuration Options
 
