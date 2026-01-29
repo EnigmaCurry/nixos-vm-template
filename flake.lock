@@ -1,13 +1,29 @@
 {
   "nodes": {
+    "blog-rymcg-tech": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1769656519,
+        "narHash": "sha256-yVa5BIJMHWrqPkcL21TrxIi3Zd0gfQ52topghr/a4ag=",
+        "owner": "EnigmaCurry",
+        "repo": "blog.rymcg.tech",
+        "rev": "773676beea9154d248df9268a501666cc2c6fa42",
+        "type": "github"
+      },
+      "original": {
+        "owner": "EnigmaCurry",
+        "repo": "blog.rymcg.tech",
+        "type": "github"
+      }
+    },
     "emacs_enigmacurry": {
       "flake": false,
       "locked": {
-        "lastModified": 1769030448,
-        "narHash": "sha256-1jwWsjuATFE/de1BVVQ+axMfslfPBE7T43mo5oZ6/1c=",
+        "lastModified": 1769584273,
+        "narHash": "sha256-nQXzdylvqN9uTvb2S2Cg81zn9tIAUhC94fMAK5TpEfw=",
         "owner": "EnigmaCurry",
         "repo": "emacs",
-        "rev": "4b4202b9661c25e6ffae58f38028ad3e92f170d6",
+        "rev": "b7d98ee0824c3847071ef518bd8595e146af3a59",
         "type": "github"
       },
       "original": {
@@ -56,11 +72,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1768949235,
-        "narHash": "sha256-TtjKgXyg1lMfh374w5uxutd6Vx2P/hU81aEhTxrO2cg=",
+        "lastModified": 1769580047,
+        "narHash": "sha256-tNqCP/+2+peAXXQ2V8RwsBkenlfWMERb+Uy6xmevyhM=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "75ed713570ca17427119e7e204ab3590cc3bf2a5",
+        "rev": "366d78c2856de6ab3411c15c1cb4fb4c2bf5c826",
         "type": "github"
       },
       "original": {
@@ -139,11 +155,11 @@
     "nixos-vm-template": {
       "flake": false,
       "locked": {
-        "lastModified": 1769490686,
-        "narHash": "sha256-BPMtwCPGEDfZX9ARBsmO85nq2gAPEkoFRrmf81xjylU=",
+        "lastModified": 1769643590,
+        "narHash": "sha256-rXpTU6978ECw8YVuQ+oafrQBTU0V/ilP4IQg6jbk60k=",
         "owner": "EnigmaCurry",
         "repo": "nixos-vm-template",
-        "rev": "e3b7368ecc2ff955ac842a94ccdd495cb80717f0",
+        "rev": "eb2e5317d3011131b017027318a0c1a583f70893",
         "type": "github"
       },
       "original": {
@@ -170,11 +186,11 @@
     },
     "nixpkgs_unstable": {
       "locked": {
-        "lastModified": 1769170682,
-        "narHash": "sha256-oMmN1lVQU0F0W2k6OI3bgdzp2YOHWYUAw79qzDSjenU=",
+        "lastModified": 1769461804,
+        "narHash": "sha256-msG8SU5WsBUfVVa/9RPLaymvi5bI8edTavbIq3vRlhI=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "c5296fdd05cfa2c187990dd909864da9658df755",
+        "rev": "bfc1b8a4574108ceef22f02bafcf6611380c100d",
         "type": "github"
       },
       "original": {
@@ -195,6 +211,7 @@
     },
     "sway-home": {
       "inputs": {
+        "blog-rymcg-tech": "blog-rymcg-tech",
         "emacs_enigmacurry": "emacs_enigmacurry",
         "git-prompt": "git-prompt",
         "home-manager": "home-manager_2",
@@ -208,11 +225,11 @@
       },
       "locked": {
         "dir": "home-manager",
-        "lastModified": 1769642315,
-        "narHash": "sha256-ZN6IQO9q/nMsDPyKuaQt7YEEiTr0IXu1lw2uykP7zzI=",
+        "lastModified": 1769651119,
+        "narHash": "sha256-Wb41lNLkAUMHxYnTr5CY/Ri4eKuvs3CBHtSVj0r010w=",
         "owner": "EnigmaCurry",
         "repo": "sway-home",
-        "rev": "ca8ae28f542d751aadfb1ffcd89b4a4a2f337ab4",
+        "rev": "0ec79e29908c4fffefc69901cfd1aa3a23c9ddd5",
         "type": "github"
       },
       "original": {
