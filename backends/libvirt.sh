@@ -306,25 +306,12 @@ EOF
 
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
 
-    # Set root password if configured
+    # Copy root password hash to /etc/ (applied by systemd service at boot)
     if [ -s "$machine_dir/root_password_hash" ]; then
-        # Download shadow, modify locally, upload back
-        $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
-run
-mount $nixos_dev /
-download /etc/shadow $tmp_dir/shadow
-EOF
-        # Use awk to replace the root password field (handles special chars in hash)
-        local root_hash
-        root_hash=$(cat "$machine_dir/root_password_hash")
-        awk -F: -v hash="$root_hash" 'BEGIN{OFS=":"} $1=="root"{$2=hash} {print}' "$tmp_dir/shadow" > "$tmp_dir/shadow.new"
-        mv "$tmp_dir/shadow.new" "$tmp_dir/shadow"
-        $GUESTFISH -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<EOF
-run
-mount $nixos_dev /
-upload $tmp_dir/shadow /etc/shadow
-chmod 0600 /etc/shadow
-EOF
+        gf_cmds="run : mount $nixos_dev / : copy-in $machine_dir/root_password_hash /etc/"
+        gf_cmds="$gf_cmds : chmod 0600 /etc/root_password_hash"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/root_password_hash"
+        eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
     fi
 
     rm -rf "$tmp_dir"

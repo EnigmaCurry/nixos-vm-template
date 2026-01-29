@@ -79,6 +79,27 @@
       '';
     };
 
+    # Service to set root password from /etc/root_password_hash (seeded at VM creation)
+    # This mirrors root-password.nix but modifies /etc/shadow directly (writable on mutable)
+    systemd.services.root-password = {
+      description = "Set root password from /etc/root_password_hash";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "getty.target" ];
+      after = [ "local-fs.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        if [ -s /etc/root_password_hash ]; then
+          root_hash=$(cat /etc/root_password_hash)
+          # Use chpasswd to set the password hash
+          echo "root:$root_hash" | ${pkgs.shadow}/bin/chpasswd -e
+          echo "Root password set from /etc/root_password_hash"
+        fi
+      '';
+    };
+
     # Enable nix garbage collection (works with writable /nix)
     nix.gc.automatic = lib.mkForce true;
     nix.gc.dates = "weekly";
