@@ -1,18 +1,15 @@
 # Home-manager profile - configures home-manager for the regular user
 # Uses sway-home modules for a complete terminal/editor environment
-# Requires writable /nix for activation, so imports the nix overlay
+# Works with immutable /nix - uses custom symlink service instead of nix-store commands
 { config, lib, pkgs, sway-home, swayHomeInputs, nix-flatpak, ... }:
 
 let
   regularUser = config.core.regularUser;
 in
 {
-  imports = [
-    ./nix.nix
-  ];
 
-  # The standard home-manager activation fails because nix-store commands
-  # don't work with our overlay setup (store paths aren't in the nix database).
+  # The standard home-manager activation fails on immutable systems because
+  # nix-store commands require a writable /nix with a valid database.
   # This service creates the symlinks directly before home-manager runs.
   systemd.services."home-manager-symlinks-${regularUser}" = {
     description = "Create home-manager symlinks for ${regularUser}";
@@ -70,16 +67,16 @@ in
       done
 
       # Note: .nix-profile is not set up because:
-      # 1. nix-env/nix profile don't work with our overlay (database issues)
+      # 1. nix-env/nix profile require writable /nix with a valid database
       # 2. Packages from home.packages are already in PATH via home-manager's shell config
 
       echo "Home-manager symlinks created successfully"
     '';
   };
 
-  # The original home-manager service will fail with nix-store errors on immutable systems.
-  # Our symlinks service runs first and creates the symlinks, so we just make the
-  # failure non-fatal. We must keep the service as-is so the generation is included in closure.
+  # The original home-manager service fails with nix-store errors on immutable systems.
+  # Our symlinks service runs first and creates the symlinks, so we allow the failure.
+  # We keep the service reference intact so the generation is included in the closure.
   systemd.services."home-manager-${regularUser}" = {
     serviceConfig = {
       # Allow exit code 1 (nix-store failure) to be treated as success
