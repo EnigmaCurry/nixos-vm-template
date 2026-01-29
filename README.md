@@ -50,7 +50,7 @@ read-write NixOS system. Mutable VMs provide:
 **When to use mutable VMs:**
 - You need to run `nixos-rebuild switch` inside the VM
 - You want to experiment with NixOS configuration interactively
-- You need full `nix` command access (not just the nix profile)
+- You need full `nix` command access
 - You're doing NixOS development or testing
 
 **Tradeoffs:**
@@ -622,7 +622,6 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **nvidia** | NVIDIA drivers + container toolkit (requires docker) |
 | **python** | Python with uv package manager and build tools |
 | **rust** | Rust with rustup |
-| **nix** | Mutable /nix filesystem (enables running nix commands in VM) |
 | **dev** | Development tools (neovim, tmux, etc.) |
 | **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
