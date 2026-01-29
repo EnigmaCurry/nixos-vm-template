@@ -15,13 +15,14 @@
 
   config = lib.mkIf config.vm.mutable {
     # Standard writable root filesystem (single disk on /dev/vda)
-    fileSystems."/" = {
+    # Use mkForce to override nixos-generators qcow format defaults
+    fileSystems."/" = lib.mkForce {
       device = "/dev/vda2";
       fsType = "ext4";
       options = [ "rw" "noatime" ];
     };
 
-    fileSystems."/boot" = {
+    fileSystems."/boot" = lib.mkForce {
       device = "/dev/vda1";
       fsType = "vfat";
       options = [ "rw" ];
