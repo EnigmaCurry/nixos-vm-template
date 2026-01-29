@@ -45,7 +45,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "python" "rust" "nix" "dev" "claude" "open-code" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "python" "rust" "nix" "dev" "home-manager" "claude" "open-code" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
@@ -54,9 +54,9 @@
         "core" = [ "core" ];
         "docker" = [ "core" "docker" ];
         "podman" = [ "core" "podman" ];
-        "dev" = [ "core" "docker" "podman" "rust" "python" "dev" ];
-        "claude" = [ "core" "docker" "podman" "rust" "python" "dev" "claude" ];
-        "open-code" = [ "core" "docker" "podman" "rust" "python" "dev" "open-code" ];
+        "dev" = [ "core" "docker" "podman" "rust" "python" "dev" "home-manager" ];
+        "claude" = [ "core" "docker" "podman" "rust" "python" "dev" "home-manager" "claude" ];
+        "open-code" = [ "core" "docker" "podman" "rust" "python" "dev" "home-manager" "open-code" ];
       };
 
       # Build a combined VM image for a given system and list of profiles

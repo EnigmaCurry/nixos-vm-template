@@ -568,7 +568,8 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **python** | Python with uv package manager and build tools |
 | **rust** | Rust with rustup |
 | **nix** | Mutable /nix filesystem (enables running nix commands in VM) |
-| **dev** | Development tools + home-manager (neovim, tmux, etc.) |
+| **dev** | Development tools (neovim, tmux, etc.) |
+| **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
 | **open-code** | Open Code CLI (open-source AI coding assistant) |
 
@@ -578,10 +579,11 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 |----------|----------|
 | Docker server | `docker` |
 | Development VM | `docker,podman,dev` |
+| Full dev environment | `docker,podman,dev,home-manager` |
 | Python development | `docker,python` |
-| Claude Code (full) | `claude,dev,docker,podman` |
+| Claude Code (full) | `claude,dev,docker,podman,home-manager` |
 | Claude with GPU | `claude,dev,docker,nvidia` |
-| Open Code (full) | `open-code,dev,docker,podman` |
+| Open Code (full) | `open-code,dev,docker,podman,home-manager` |
 
 ## Zram Compressed Swap
 
