@@ -577,11 +577,15 @@ config_vm_interactive() {
         current_network=$(cat "$machine_dir/network" 2>/dev/null || echo "")
     fi
 
-    # Get list of available profiles
+    # Get list of available profiles (excluding core, which is always included)
     local available_profiles=()
     shopt -s nullglob
     for f in profiles/*.nix; do
-        available_profiles+=("$(basename "$f" .nix)")
+        local pname
+        pname=$(basename "$f" .nix)
+        if [ "$pname" != "core" ]; then
+            available_profiles+=("$pname")
+        fi
     done
     shopt -u nullglob
 
@@ -590,10 +594,13 @@ config_vm_interactive() {
         echo ""
         local profile_default_arg=""
         if [ -n "$current_profile" ]; then
-            # Convert comma-separated profile to JSON array: "core,docker" -> '["core","docker"]'
-            local profile_json
-            profile_json=$(echo "$current_profile" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
-            profile_default_arg="--default $profile_json"
+            # Convert comma-separated profile to JSON array, excluding core: "core,docker" -> '["docker"]'
+            local profile_without_core profile_json
+            profile_without_core=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | tr '\n' ',' | sed 's/,$//')
+            if [ -n "$profile_without_core" ]; then
+                profile_json=$(echo "$profile_without_core" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
+                profile_default_arg="--default $profile_json"
+            fi
         fi
         readarray -t selected_profiles < <($SCRIPT_WIZARD select $profile_default_arg "Select profile(s) to include:" "${available_profiles[@]}")
         if [ ${#selected_profiles[@]} -eq 0 ]; then
