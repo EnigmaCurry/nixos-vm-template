@@ -665,8 +665,18 @@ config_vm_interactive() {
             *) vcpu_default="Custom" ;;
         esac
     fi
+    echo "DEBUG: vcpu_default='$vcpu_default', SCRIPT_WIZARD='$SCRIPT_WIZARD'" >&2
     if [ -n "$vcpu_default" ]; then
+        echo "DEBUG: Running: \$SCRIPT_WIZARD choose -d \"$vcpu_default\" \"Select number of vCPUs:\" ...options..." >&2
+        set +e
         vcpu_choice=$($SCRIPT_WIZARD choose -d "$vcpu_default" "Select number of vCPUs:" "2" "1" "4" "8" "Custom")
+        local sw_exit=$?
+        set -e
+        echo "DEBUG: script-wizard exited with code $sw_exit, vcpu_choice='$vcpu_choice'" >&2
+        if [ $sw_exit -ne 0 ]; then
+            echo "ERROR: script-wizard choose failed" >&2
+            exit 1
+        fi
     else
         vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "2" "1" "4" "8" "Custom")
     fi
