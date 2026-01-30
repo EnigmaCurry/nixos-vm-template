@@ -655,8 +655,15 @@ create_vm() {
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
 
-    # Initialize machine config first (so we can check mutable status)
-    init_machine "$name" "$profile" "$network"
+    # Configure machine first (creates identity files, saves resource config)
+    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network"
+
+    # Read back the configured values (may have been normalized or pre-existing)
+    local machine_dir="$MACHINES_DIR/$name"
+    profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "$profile")
+    memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "$memory")
+    vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "$vcpus")
+    var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "$var_size")
 
     # Build appropriate image variant
     if is_mutable "$name"; then

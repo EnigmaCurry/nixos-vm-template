@@ -23,6 +23,10 @@ build-all:
 list-profiles:
     @source {{backend_script}} && list_profiles
 
+# Configure a VM (creates machine config without creating the VM)
+config new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat":
+    @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
+
 # Create a new VM with composable profiles (e.g., just create myvm docker,python)
 create new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat":
     @source {{backend_script}} && create_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"

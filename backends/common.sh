@@ -426,6 +426,61 @@ set_mutable() {
     echo "Run 'just recreate $name' to apply the change."
 }
 
+# Configure a VM (creates machine config without creating the VM)
+# This is the configuration-only step that can be called separately from create
+config_vm() {
+    local name="$1"
+    local profile="${2:-core}"
+    local memory="${3:-2048}"
+    local vcpus="${4:-2}"
+    local var_size
+    var_size=$(normalize_size "${5:-30G}")
+    local network="${6:-nat}"
+
+    # Initialize machine config (creates identity files, prompts for SSH keys)
+    init_machine "$name" "$profile" "$network"
+
+    local machine_dir="$MACHINES_DIR/$name"
+
+    # Save resource configuration (only if not present, or if explicitly set to non-default)
+    if [ ! -f "$machine_dir/memory" ]; then
+        echo "$memory" > "$machine_dir/memory"
+        echo "Created: $machine_dir/memory (${memory}M)"
+    elif [ "$memory" != "2048" ]; then
+        echo "$memory" > "$machine_dir/memory"
+        echo "Updated: $machine_dir/memory (${memory}M)"
+    else
+        memory=$(cat "$machine_dir/memory")
+        echo "Using existing memory: ${memory}M"
+    fi
+
+    if [ ! -f "$machine_dir/vcpus" ]; then
+        echo "$vcpus" > "$machine_dir/vcpus"
+        echo "Created: $machine_dir/vcpus ($vcpus)"
+    elif [ "$vcpus" != "2" ]; then
+        echo "$vcpus" > "$machine_dir/vcpus"
+        echo "Updated: $machine_dir/vcpus ($vcpus)"
+    else
+        vcpus=$(cat "$machine_dir/vcpus")
+        echo "Using existing vcpus: $vcpus"
+    fi
+
+    if [ ! -f "$machine_dir/var_size" ]; then
+        echo "$var_size" > "$machine_dir/var_size"
+        echo "Created: $machine_dir/var_size ($var_size)"
+    elif [ "$var_size" != "30G" ]; then
+        echo "$var_size" > "$machine_dir/var_size"
+        echo "Updated: $machine_dir/var_size ($var_size)"
+    else
+        var_size=$(cat "$machine_dir/var_size")
+        echo "Using existing var_size: $var_size"
+    fi
+
+    echo ""
+    echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), memory: ${memory}M, vcpus: $vcpus, var: $var_size)"
+    echo "To create the VM, run: just create $name"
+}
+
 # List all machine configs
 list_machines() {
     echo "Machine configs in $MACHINES_DIR/:"
