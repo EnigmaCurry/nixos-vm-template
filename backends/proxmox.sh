@@ -1410,8 +1410,9 @@ upgrade_vm() {
     backend_sync_identity "$name"
 
     # Flatten new boot disk
-    local profile_image
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile")/nixos.qcow2
+    local profile_key profile_image
+    profile_key=$(normalize_profiles "$profile")
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile_key")/nixos.qcow2
     mkdir -p "$OUTPUT_DIR/vms/$name"
 
     echo "Flattening new boot disk..."

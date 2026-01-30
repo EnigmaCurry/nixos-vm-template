@@ -980,8 +980,9 @@ upgrade_vm() {
     backend_sync_identity "$name"
 
     # Replace only the boot disk (keep /var disk intact)
-    local profile_image
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile")/nixos.qcow2
+    local profile_key profile_image
+    profile_key=$(normalize_profiles "$profile")
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile_key")/nixos.qcow2
     rm -f "$OUTPUT_DIR/vms/$name/boot.qcow2"
     rm -f "$OUTPUT_DIR/vms/$name/OVMF_VARS.qcow2"
     $QEMU_IMG create -f qcow2 \
