@@ -39,6 +39,7 @@
       just
       pciutils
       parted
+      unzip
     ];
 
     # Enable firewall - blocks all incoming by default
