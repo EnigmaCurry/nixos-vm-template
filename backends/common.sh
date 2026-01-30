@@ -615,13 +615,13 @@ config_vm_interactive() {
     fi
     echo "Selected profile(s): $profile"
 
-    # Memory: options are "2G" "1G" "4G" "8G" "16G" "32G" "Custom" (indices 0-6)
+    # Memory: options are "1G" "2G" "4G" "8G" "16G" "32G" "Custom" (indices 0-6)
     echo ""
     local memory_choice memory_default_idx=""
     if [ -n "$current_memory" ]; then
         case "$current_memory" in
-            "2048") memory_default_idx="0" ;;
-            "1024") memory_default_idx="1" ;;
+            "1024") memory_default_idx="0" ;;
+            "2048") memory_default_idx="1" ;;
             "4096") memory_default_idx="2" ;;
             "8192") memory_default_idx="3" ;;
             "16384") memory_default_idx="4" ;;
@@ -630,9 +630,9 @@ config_vm_interactive() {
         esac
     fi
     if [ -n "$memory_default_idx" ]; then
-        memory_choice=$($SCRIPT_WIZARD choose -d "$memory_default_idx" "Select memory size:" "2G" "1G" "4G" "8G" "16G" "32G" "Custom")
+        memory_choice=$($SCRIPT_WIZARD choose -d "$memory_default_idx" "Select memory size:" "1G" "2G" "4G" "8G" "16G" "32G" "Custom")
     else
-        memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "2G" "1G" "4G" "8G" "16G" "32G" "Custom")
+        memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "1G" "2G" "4G" "8G" "16G" "32G" "Custom")
     fi
     case "$memory_choice" in
         "1G") memory="1024" ;;
@@ -652,21 +652,21 @@ config_vm_interactive() {
 
     # vCPU selection
     echo ""
-    # vCPUs: options are "2" "1" "4" "8" "Custom" (indices 0-4)
+    # vCPUs: options are "1" "2" "4" "8" "Custom" (indices 0-4)
     local vcpu_choice vcpu_default_idx=""
     if [ -n "$current_vcpus" ]; then
         case "$current_vcpus" in
-            "2") vcpu_default_idx="0" ;;
-            "1") vcpu_default_idx="1" ;;
+            "1") vcpu_default_idx="0" ;;
+            "2") vcpu_default_idx="1" ;;
             "4") vcpu_default_idx="2" ;;
             "8") vcpu_default_idx="3" ;;
             *) vcpu_default_idx="4" ;;  # Custom
         esac
     fi
     if [ -n "$vcpu_default_idx" ]; then
-        vcpu_choice=$($SCRIPT_WIZARD choose -d "$vcpu_default_idx" "Select number of vCPUs:" "2" "1" "4" "8" "Custom")
+        vcpu_choice=$($SCRIPT_WIZARD choose -d "$vcpu_default_idx" "Select number of vCPUs:" "1" "2" "4" "8" "Custom")
     else
-        vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "2" "1" "4" "8" "Custom")
+        vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "1" "2" "4" "8" "Custom")
     fi
     case "$vcpu_choice" in
         "1") vcpus="1" ;;
@@ -682,13 +682,13 @@ config_vm_interactive() {
     esac
     echo "vCPUs: $vcpus"
 
-    # Disk: options are "30G" "20G" "50G" "100G" "200G" "500G" "Custom" (indices 0-6)
+    # Disk: options are "20G" "30G" "50G" "100G" "200G" "500G" "Custom" (indices 0-6)
     echo ""
     local disk_choice disk_default_idx=""
     if [ -n "$current_var_size" ]; then
         case "$current_var_size" in
-            "30G") disk_default_idx="0" ;;
-            "20G") disk_default_idx="1" ;;
+            "20G") disk_default_idx="0" ;;
+            "30G") disk_default_idx="1" ;;
             "50G") disk_default_idx="2" ;;
             "100G") disk_default_idx="3" ;;
             "200G") disk_default_idx="4" ;;
@@ -697,9 +697,9 @@ config_vm_interactive() {
         esac
     fi
     if [ -n "$disk_default_idx" ]; then
-        disk_choice=$($SCRIPT_WIZARD choose -d "$disk_default_idx" "Select /var disk size:" "30G" "20G" "50G" "100G" "200G" "500G" "Custom")
+        disk_choice=$($SCRIPT_WIZARD choose -d "$disk_default_idx" "Select /var disk size:" "20G" "30G" "50G" "100G" "200G" "500G" "Custom")
     else
-        disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "30G" "20G" "50G" "100G" "200G" "500G" "Custom")
+        disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "20G" "30G" "50G" "100G" "200G" "500G" "Custom")
     fi
     case "$disk_choice" in
         "20G") var_size="20G" ;;
