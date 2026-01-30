@@ -40,6 +40,7 @@
       pciutils
       parted
       unzip
+      wireguard
     ];
 
     # Enable firewall - blocks all incoming by default
