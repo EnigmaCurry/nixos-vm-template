@@ -557,14 +557,24 @@ config_vm_interactive() {
         fi
     fi
 
-    # Check if machine config already exists
+    # Check if machine config already exists and load current values
     local machine_dir="$MACHINES_DIR/$name"
+    local current_profile="" current_memory="" current_vcpus="" current_var_size="" current_network=""
+    local is_reconfigure=false
+
     if [ -d "$machine_dir" ]; then
         echo "Machine config already exists: $machine_dir"
         if ! $SCRIPT_WIZARD confirm "Reconfigure this VM?" no; then
             echo "Aborted."
             exit 0
         fi
+        is_reconfigure=true
+        # Load current values
+        current_profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "")
+        current_memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "")
+        current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "")
+        current_var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "")
+        current_network=$(cat "$machine_dir/network" 2>/dev/null || echo "")
     fi
 
     # Get list of available profiles
@@ -578,7 +588,14 @@ config_vm_interactive() {
     # Prompt for profile(s) if not provided
     if [ -z "$profile" ]; then
         echo ""
-        readarray -t selected_profiles < <($SCRIPT_WIZARD select "Select profile(s) to include:" "${available_profiles[@]}")
+        local profile_default_arg=""
+        if [ -n "$current_profile" ]; then
+            # Convert comma-separated profile to JSON array: "core,docker" -> '["core","docker"]'
+            local profile_json
+            profile_json=$(echo "$current_profile" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
+            profile_default_arg="--default $profile_json"
+        fi
+        readarray -t selected_profiles < <($SCRIPT_WIZARD select $profile_default_arg "Select profile(s) to include:" "${available_profiles[@]}")
         if [ ${#selected_profiles[@]} -eq 0 ]; then
             profile="core"
         else
@@ -589,8 +606,20 @@ config_vm_interactive() {
 
     # Memory selection
     echo ""
-    local memory_choice
-    memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "2G (Recommended)" "1G" "4G" "8G" "16G" "32G" "Custom")
+    local memory_choice memory_default_arg=""
+    # Map current memory MB to choice label
+    if [ -n "$current_memory" ]; then
+        case "$current_memory" in
+            1024) memory_default_arg="--default 1G" ;;
+            2048) memory_default_arg="--default '2G (Recommended)'" ;;
+            4096) memory_default_arg="--default 4G" ;;
+            8192) memory_default_arg="--default 8G" ;;
+            16384) memory_default_arg="--default 16G" ;;
+            32768) memory_default_arg="--default 32G" ;;
+            *) memory_default_arg="--default Custom" ;;
+        esac
+    fi
+    memory_choice=$(eval "$SCRIPT_WIZARD choose $memory_default_arg \"Select memory size:\" \"2G (Recommended)\" \"1G\" \"4G\" \"8G\" \"16G\" \"32G\" \"Custom\"")
     case "$memory_choice" in
         "1G") memory="1024" ;;
         "2G (Recommended)") memory="2048" ;;
@@ -600,7 +629,7 @@ config_vm_interactive() {
         "32G") memory="32768" ;;
         "Custom")
             local custom_mem
-            custom_mem=$($SCRIPT_WIZARD ask "Enter memory in MB (e.g., 3072):")
+            custom_mem=$($SCRIPT_WIZARD ask "Enter memory in MB (e.g., 3072):" "$current_memory")
             memory="${custom_mem:-2048}"
             ;;
         *) memory="2048" ;;
@@ -609,8 +638,18 @@ config_vm_interactive() {
 
     # vCPU selection
     echo ""
-    local vcpu_choice
-    vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "2 (Recommended)" "1" "4" "8" "Custom")
+    local vcpu_choice vcpu_default_arg=""
+    # Map current vcpus to choice label
+    if [ -n "$current_vcpus" ]; then
+        case "$current_vcpus" in
+            1) vcpu_default_arg="--default 1" ;;
+            2) vcpu_default_arg="--default '2 (Recommended)'" ;;
+            4) vcpu_default_arg="--default 4" ;;
+            8) vcpu_default_arg="--default 8" ;;
+            *) vcpu_default_arg="--default Custom" ;;
+        esac
+    fi
+    vcpu_choice=$(eval "$SCRIPT_WIZARD choose $vcpu_default_arg \"Select number of vCPUs:\" \"2 (Recommended)\" \"1\" \"4\" \"8\" \"Custom\"")
     case "$vcpu_choice" in
         "1") vcpus="1" ;;
         "2 (Recommended)") vcpus="2" ;;
@@ -618,7 +657,7 @@ config_vm_interactive() {
         "8") vcpus="8" ;;
         "Custom")
             local custom_vcpus
-            custom_vcpus=$($SCRIPT_WIZARD ask "Enter number of vCPUs:")
+            custom_vcpus=$($SCRIPT_WIZARD ask "Enter number of vCPUs:" "$current_vcpus")
             vcpus="${custom_vcpus:-2}"
             ;;
         *) vcpus="2" ;;
@@ -627,8 +666,20 @@ config_vm_interactive() {
 
     # Disk size selection
     echo ""
-    local disk_choice
-    disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "30G (Recommended)" "20G" "50G" "100G" "200G" "500G" "Custom")
+    local disk_choice disk_default_arg=""
+    # Map current var_size to choice label
+    if [ -n "$current_var_size" ]; then
+        case "$current_var_size" in
+            20G) disk_default_arg="--default 20G" ;;
+            30G) disk_default_arg="--default '30G (Recommended)'" ;;
+            50G) disk_default_arg="--default 50G" ;;
+            100G) disk_default_arg="--default 100G" ;;
+            200G) disk_default_arg="--default 200G" ;;
+            500G) disk_default_arg="--default 500G" ;;
+            *) disk_default_arg="--default Custom" ;;
+        esac
+    fi
+    disk_choice=$(eval "$SCRIPT_WIZARD choose $disk_default_arg \"Select /var disk size:\" \"30G (Recommended)\" \"20G\" \"50G\" \"100G\" \"200G\" \"500G\" \"Custom\"")
     case "$disk_choice" in
         "20G") var_size="20G" ;;
         "30G (Recommended)") var_size="30G" ;;
@@ -638,7 +689,7 @@ config_vm_interactive() {
         "500G") var_size="500G" ;;
         "Custom")
             local custom_size
-            custom_size=$($SCRIPT_WIZARD ask "Enter disk size (e.g., 40G):")
+            custom_size=$($SCRIPT_WIZARD ask "Enter disk size (e.g., 40G):" "$current_var_size")
             var_size="${custom_size:-30G}"
             ;;
         *) var_size="30G" ;;
@@ -647,8 +698,15 @@ config_vm_interactive() {
 
     # Network selection
     echo ""
-    local network_choice
-    network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT (Recommended)" "Bridge")
+    local network_choice network_default_arg=""
+    # Map current network to choice label
+    if [ -n "$current_network" ]; then
+        case "$current_network" in
+            nat) network_default_arg="--default 'NAT (Recommended)'" ;;
+            bridge*) network_default_arg="--default Bridge" ;;
+        esac
+    fi
+    network_choice=$(eval "$SCRIPT_WIZARD choose $network_default_arg \"Select network mode:\" \"NAT (Recommended)\" \"Bridge\"")
     case "$network_choice" in
         "NAT (Recommended)") network="nat" ;;
         "Bridge") network="bridge" ;;
@@ -668,7 +726,31 @@ config_vm_interactive() {
         agent_key_count=$(ssh-add -L 2>/dev/null | wc -l)
     fi
 
-    if [ "$agent_key_count" -gt 0 ]; then
+    # Check if existing keys are configured
+    local has_existing_keys=false
+    if [ "$is_reconfigure" = true ] && [ -f "$machine_dir/admin_authorized_keys" ]; then
+        local existing_key_count
+        existing_key_count=$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys" 2>/dev/null || echo "0")
+        if [ "$existing_key_count" -gt 0 ]; then
+            has_existing_keys=true
+        fi
+    fi
+
+    if [ "$has_existing_keys" = true ]; then
+        local ssh_choice
+        if [ "$agent_key_count" -gt 0 ]; then
+            ssh_choice=$($SCRIPT_WIZARD choose --default "Keep existing keys" "SSH authorized keys:" "Keep existing keys" "Use current SSH agent keys ($agent_key_count key(s))" "Enter keys manually" "Skip (no SSH access)")
+        else
+            ssh_choice=$($SCRIPT_WIZARD choose --default "Keep existing keys" "SSH authorized keys:" "Keep existing keys" "Enter keys manually" "Skip (no SSH access)")
+        fi
+        case "$ssh_choice" in
+            "Keep existing keys"*) ssh_key_mode="keep" ;;
+            "Use current SSH agent keys"*) ssh_key_mode="agent" ;;
+            "Enter keys manually") ssh_key_mode="manual" ;;
+            "Skip"*) ssh_key_mode="skip" ;;
+            *) ssh_key_mode="keep" ;;
+        esac
+    elif [ "$agent_key_count" -gt 0 ]; then
         local ssh_choice
         ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s)) (Recommended)" "Enter keys manually" "Skip (no SSH access)")
         case "$ssh_choice" in
@@ -726,7 +808,10 @@ config_vm_interactive() {
     fi
 
     # Initialize machine with collected values
-    if [ "$ssh_key_mode" = "manual" ]; then
+    if [ "$ssh_key_mode" = "keep" ]; then
+        # Keep existing keys - just update other settings
+        init_machine "$name" "$profile" "$network" "skip"
+    elif [ "$ssh_key_mode" = "manual" ]; then
         init_machine "$name" "$profile" "$network" "" "$admin_keys" "$user_keys"
     else
         init_machine "$name" "$profile" "$network" "$ssh_key_mode"
