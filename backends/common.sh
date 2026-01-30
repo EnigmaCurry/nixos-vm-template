@@ -527,19 +527,30 @@ config_vm_interactive() {
     local name="${1:-}"
     local profile="${2:-}"
 
-    # Check for script-wizard
-    if ! command -v script-wizard &>/dev/null; then
+    # Determine how to run script-wizard
+    local SCRIPT_WIZARD=""
+    if command -v script-wizard &>/dev/null; then
+        SCRIPT_WIZARD="script-wizard"
+    elif command -v nix &>/dev/null && nix --version 2>&1 | grep -q "nix"; then
+        # Check if flakes are supported
+        if nix flake --help &>/dev/null; then
+            SCRIPT_WIZARD="nix run github:enigmacurry/script-wizard --"
+            echo "Using script-wizard via nix flakes..."
+        fi
+    fi
+
+    if [ -z "$SCRIPT_WIZARD" ]; then
         echo "Error: script-wizard is not installed."
-        echo "Install it with: cargo install script-wizard"
         echo ""
-        echo "Falling back to non-interactive mode..."
-        config_vm "$name" "$profile"
-        return
+        echo "Install it from: https://github.com/enigmacurry/script-wizard"
+        echo ""
+        echo "Or if you have Nix with flakes enabled, it will be used automatically."
+        exit 1
     fi
 
     # Prompt for VM name if not provided
     if [ -z "$name" ]; then
-        name=$(script-wizard ask "Enter VM name:")
+        name=$($SCRIPT_WIZARD ask "Enter VM name:")
         if [ -z "$name" ]; then
             echo "Error: VM name is required."
             exit 1
@@ -550,7 +561,7 @@ config_vm_interactive() {
     local machine_dir="$MACHINES_DIR/$name"
     if [ -d "$machine_dir" ]; then
         echo "Machine config already exists: $machine_dir"
-        if ! script-wizard confirm "Reconfigure this VM?" no; then
+        if ! $SCRIPT_WIZARD confirm "Reconfigure this VM?" no; then
             echo "Aborted."
             exit 0
         fi
@@ -567,7 +578,7 @@ config_vm_interactive() {
     # Prompt for profile(s) if not provided
     if [ -z "$profile" ]; then
         echo ""
-        readarray -t selected_profiles < <(script-wizard select "Select profile(s) to include:" "${available_profiles[@]}")
+        readarray -t selected_profiles < <($SCRIPT_WIZARD select "Select profile(s) to include:" "${available_profiles[@]}")
         if [ ${#selected_profiles[@]} -eq 0 ]; then
             profile="core"
         else
@@ -579,7 +590,7 @@ config_vm_interactive() {
     # Memory selection
     echo ""
     local memory_choice
-    memory_choice=$(script-wizard choose "Select memory size:" "2G (Recommended)" "1G" "4G" "8G" "16G" "32G" "Custom")
+    memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "2G (Recommended)" "1G" "4G" "8G" "16G" "32G" "Custom")
     case "$memory_choice" in
         "1G") memory="1024" ;;
         "2G (Recommended)") memory="2048" ;;
@@ -589,7 +600,7 @@ config_vm_interactive() {
         "32G") memory="32768" ;;
         "Custom")
             local custom_mem
-            custom_mem=$(script-wizard ask "Enter memory in MB (e.g., 3072):")
+            custom_mem=$($SCRIPT_WIZARD ask "Enter memory in MB (e.g., 3072):")
             memory="${custom_mem:-2048}"
             ;;
         *) memory="2048" ;;
@@ -599,7 +610,7 @@ config_vm_interactive() {
     # vCPU selection
     echo ""
     local vcpu_choice
-    vcpu_choice=$(script-wizard choose "Select number of vCPUs:" "2 (Recommended)" "1" "4" "8" "Custom")
+    vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "2 (Recommended)" "1" "4" "8" "Custom")
     case "$vcpu_choice" in
         "1") vcpus="1" ;;
         "2 (Recommended)") vcpus="2" ;;
@@ -607,7 +618,7 @@ config_vm_interactive() {
         "8") vcpus="8" ;;
         "Custom")
             local custom_vcpus
-            custom_vcpus=$(script-wizard ask "Enter number of vCPUs:")
+            custom_vcpus=$($SCRIPT_WIZARD ask "Enter number of vCPUs:")
             vcpus="${custom_vcpus:-2}"
             ;;
         *) vcpus="2" ;;
@@ -617,7 +628,7 @@ config_vm_interactive() {
     # Disk size selection
     echo ""
     local disk_choice
-    disk_choice=$(script-wizard choose "Select /var disk size:" "30G (Recommended)" "20G" "50G" "100G" "200G" "500G" "Custom")
+    disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "30G (Recommended)" "20G" "50G" "100G" "200G" "500G" "Custom")
     case "$disk_choice" in
         "20G") var_size="20G" ;;
         "30G (Recommended)") var_size="30G" ;;
@@ -627,7 +638,7 @@ config_vm_interactive() {
         "500G") var_size="500G" ;;
         "Custom")
             local custom_size
-            custom_size=$(script-wizard ask "Enter disk size (e.g., 40G):")
+            custom_size=$($SCRIPT_WIZARD ask "Enter disk size (e.g., 40G):")
             var_size="${custom_size:-30G}"
             ;;
         *) var_size="30G" ;;
@@ -637,7 +648,7 @@ config_vm_interactive() {
     # Network selection
     echo ""
     local network_choice
-    network_choice=$(script-wizard choose "Select network mode:" "NAT (Recommended)" "Bridge")
+    network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT (Recommended)" "Bridge")
     case "$network_choice" in
         "NAT (Recommended)") network="nat" ;;
         "Bridge") network="bridge" ;;
@@ -659,7 +670,7 @@ config_vm_interactive() {
 
     if [ "$agent_key_count" -gt 0 ]; then
         local ssh_choice
-        ssh_choice=$(script-wizard choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s)) (Recommended)" "Enter keys manually" "Skip (no SSH access)")
+        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s)) (Recommended)" "Enter keys manually" "Skip (no SSH access)")
         case "$ssh_choice" in
             "Use current SSH agent keys"*) ssh_key_mode="agent" ;;
             "Enter keys manually") ssh_key_mode="manual" ;;
@@ -668,7 +679,7 @@ config_vm_interactive() {
         esac
     else
         local ssh_choice
-        ssh_choice=$(script-wizard choose "SSH authorized keys:" "Enter keys manually (Recommended)" "Skip (no SSH access)")
+        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Enter keys manually (Recommended)" "Skip (no SSH access)")
         case "$ssh_choice" in
             "Enter keys manually"*) ssh_key_mode="manual" ;;
             "Skip"*) ssh_key_mode="skip" ;;
@@ -679,19 +690,19 @@ config_vm_interactive() {
     if [ "$ssh_key_mode" = "manual" ]; then
         echo ""
         echo "Enter SSH public key(s) for 'admin' (has sudo access):"
-        admin_keys=$(script-wizard editor "Enter admin SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+        admin_keys=$($SCRIPT_WIZARD editor "Enter admin SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
         # Remove comment lines
         admin_keys=$(echo "$admin_keys" | grep -v '^#' | grep -v '^$' || true)
 
         echo ""
         local same_keys
-        same_keys=$(script-wizard choose "User account SSH keys:" "Same as admin (Recommended)" "Enter different keys" "No user SSH access")
+        same_keys=$($SCRIPT_WIZARD choose "User account SSH keys:" "Same as admin (Recommended)" "Enter different keys" "No user SSH access")
         case "$same_keys" in
             "Same as admin"*) user_keys="$admin_keys" ;;
             "Enter different keys")
                 echo ""
                 echo "Enter SSH public key(s) for 'user' (no sudo access):"
-                user_keys=$(script-wizard editor "Enter user SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+                user_keys=$($SCRIPT_WIZARD editor "Enter user SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
                 user_keys=$(echo "$user_keys" | grep -v '^#' | grep -v '^$' || true)
                 ;;
             *) user_keys="" ;;
@@ -709,7 +720,7 @@ config_vm_interactive() {
     echo "  SSH:     $ssh_key_mode"
     echo ""
 
-    if ! script-wizard confirm "Create this configuration?" yes; then
+    if ! $SCRIPT_WIZARD confirm "Create this configuration?" yes; then
         echo "Aborted."
         exit 0
     fi
