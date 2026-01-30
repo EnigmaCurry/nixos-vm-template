@@ -569,12 +569,16 @@ config_vm_interactive() {
             exit 0
         fi
         is_reconfigure=true
-        # Load current values
-        current_profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "")
-        current_memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "")
-        current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "")
-        current_var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "")
-        current_network=$(cat "$machine_dir/network" 2>/dev/null || echo "")
+        # Load current values (trim whitespace for simple values)
+        current_profile=$(cat "$machine_dir/profile" 2>/dev/null || true)
+        current_profile="${current_profile%"${current_profile##*[![:space:]]}"}"  # trim trailing
+        current_profile="${current_profile#"${current_profile%%[![:space:]]*}"}"  # trim leading
+        current_memory=$(cat "$machine_dir/memory" 2>/dev/null | tr -d '[:space:]' || true)
+        current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null | tr -d '[:space:]' || true)
+        current_var_size=$(cat "$machine_dir/var_size" 2>/dev/null | tr -d '[:space:]' || true)
+        current_network=$(cat "$machine_dir/network" 2>/dev/null || true)
+        current_network="${current_network%"${current_network##*[![:space:]]}"}"  # trim trailing
+        current_network="${current_network#"${current_network%%[![:space:]]*}"}"  # trim leading
     fi
 
     # Get list of available profiles (excluding core, which is always included)
@@ -649,6 +653,7 @@ config_vm_interactive() {
 
     # vCPU selection
     echo ""
+    echo "DEBUG: About to select vCPUs, current_vcpus='$current_vcpus'" >&2
     local vcpu_choice vcpu_default=""
     # Map current vcpus to choice label
     if [ -n "$current_vcpus" ]; then
