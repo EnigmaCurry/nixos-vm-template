@@ -84,6 +84,19 @@ passwd name:
 mutable name:
     @source {{backend_script}} && set_mutable "{{name}}"
 
+# Set the profile(s) for a VM (e.g., just profile myvm docker python)
+profile name +profiles:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ ! -d "machines/{{name}}" ]; then
+        echo "Error: Machine '{{name}}' does not exist" >&2
+        exit 1
+    fi
+    profiles_csv=$(echo "{{profiles}}" | tr ' ' ',')
+    echo "$profiles_csv" > "machines/{{name}}/profile"
+    echo "Set profile for {{name}}: $profiles_csv"
+    echo "Run 'just upgrade {{name}}' to apply the new profile."
+
 # List all machine configs
 list-machines:
     @source {{backend_script}} && list_machines
