@@ -222,6 +222,7 @@ backend_create_disks() {
 
     local profile
     profile=$(cat "$machine_dir/profile")
+    profile=$(normalize_profiles "$profile")
 
     # Check if this is a mutable VM
     if is_mutable "$name"; then
@@ -442,6 +443,7 @@ backend_create_disks_mutable() {
 
     local profile
     profile=$(cat "$machine_dir/profile")
+    profile=$(normalize_profiles "$profile")
 
     echo "Creating VM disk: $name (profile: $profile, mutable)"
     mkdir -p "$OUTPUT_DIR/vms/$name"
