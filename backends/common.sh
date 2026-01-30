@@ -106,10 +106,16 @@ list_profiles() {
 }
 
 # Initialize machine config directory (creates identity files if not present)
+# Optional 4th arg: ssh_key_mode - "agent" to use ssh-add keys, "skip" to skip SSH prompts
+# Optional 5th arg: admin_keys - pre-set admin SSH keys (newline-separated)
+# Optional 6th arg: user_keys - pre-set user SSH keys (newline-separated)
 init_machine() {
     local name="$1"
     local profile="${2:-core}"
     local network="${3:-nat}"
+    local ssh_key_mode="${4:-}"
+    local admin_keys="${5:-}"
+    local user_keys="${6:-}"
     local machine_dir="$MACHINES_DIR/$name"
     mkdir -p "$machine_dir"
 
@@ -168,31 +174,65 @@ init_machine() {
         echo "Created: $machine_dir/hostname"
     fi
 
-    # Prompt for admin authorized_keys if not present
+    # Handle admin authorized_keys
     if [ ! -f "$machine_dir/admin_authorized_keys" ]; then
-        echo ""
-        echo "Enter SSH public key(s) for 'admin' (has sudo access):"
-        echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
         printf '%s\n' "# SSH authorized_keys for 'admin' user (has sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/admin_authorized_keys"
-        cat >> "$machine_dir/admin_authorized_keys" || true
-        if [ "$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys")" -gt 0 ]; then
+
+        if [ -n "$admin_keys" ]; then
+            # Pre-set keys provided
+            echo "$admin_keys" >> "$machine_dir/admin_authorized_keys"
             echo "Saved: $machine_dir/admin_authorized_keys"
-        else
+        elif [ "$ssh_key_mode" = "agent" ]; then
+            # Use keys from SSH agent
+            if ssh-add -L 2>/dev/null >> "$machine_dir/admin_authorized_keys"; then
+                echo "Saved: $machine_dir/admin_authorized_keys (from SSH agent)"
+            else
+                echo "Warning: No keys in SSH agent, admin SSH login will be disabled"
+            fi
+        elif [ "$ssh_key_mode" = "skip" ]; then
             echo "No admin authorized_keys configured (admin SSH login will be disabled)"
+        else
+            # Interactive prompt (original behavior)
+            echo ""
+            echo "Enter SSH public key(s) for 'admin' (has sudo access):"
+            echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
+            cat >> "$machine_dir/admin_authorized_keys" || true
+            if [ "$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys")" -gt 0 ]; then
+                echo "Saved: $machine_dir/admin_authorized_keys"
+            else
+                echo "No admin authorized_keys configured (admin SSH login will be disabled)"
+            fi
         fi
     fi
 
-    # Prompt for user authorized_keys if not present
+    # Handle user authorized_keys
     if [ ! -f "$machine_dir/user_authorized_keys" ]; then
-        echo ""
-        echo "Enter SSH public key(s) for 'user' (no sudo access):"
-        echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
         printf '%s\n' "# SSH authorized_keys for 'user' account (no sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/user_authorized_keys"
-        cat >> "$machine_dir/user_authorized_keys" || true
-        if [ "$(grep -cv '^#\|^$' "$machine_dir/user_authorized_keys")" -gt 0 ]; then
+
+        if [ -n "$user_keys" ]; then
+            # Pre-set keys provided
+            echo "$user_keys" >> "$machine_dir/user_authorized_keys"
             echo "Saved: $machine_dir/user_authorized_keys"
-        else
+        elif [ "$ssh_key_mode" = "agent" ]; then
+            # Use keys from SSH agent
+            if ssh-add -L 2>/dev/null >> "$machine_dir/user_authorized_keys"; then
+                echo "Saved: $machine_dir/user_authorized_keys (from SSH agent)"
+            else
+                echo "Warning: No keys in SSH agent, user SSH login will be disabled"
+            fi
+        elif [ "$ssh_key_mode" = "skip" ]; then
             echo "No user authorized_keys configured (user SSH login will be disabled)"
+        else
+            # Interactive prompt (original behavior)
+            echo ""
+            echo "Enter SSH public key(s) for 'user' (no sudo access):"
+            echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
+            cat >> "$machine_dir/user_authorized_keys" || true
+            if [ "$(grep -cv '^#\|^$' "$machine_dir/user_authorized_keys")" -gt 0 ]; then
+                echo "Saved: $machine_dir/user_authorized_keys"
+            else
+                echo "No user authorized_keys configured (user SSH login will be disabled)"
+            fi
         fi
     fi
 
@@ -478,6 +518,223 @@ config_vm() {
 
     echo ""
     echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), memory: ${memory}M, vcpus: $vcpus, var: $var_size)"
+    echo "To create the VM, run: just create $name"
+}
+
+# Interactive VM configuration using script-wizard
+# All arguments are optional - will prompt for everything interactively
+config_vm_interactive() {
+    local name="${1:-}"
+    local profile="${2:-}"
+
+    # Check for script-wizard
+    if ! command -v script-wizard &>/dev/null; then
+        echo "Error: script-wizard is not installed."
+        echo "Install it with: cargo install script-wizard"
+        echo ""
+        echo "Falling back to non-interactive mode..."
+        config_vm "$name" "$profile"
+        return
+    fi
+
+    # Prompt for VM name if not provided
+    if [ -z "$name" ]; then
+        name=$(script-wizard ask "Enter VM name:")
+        if [ -z "$name" ]; then
+            echo "Error: VM name is required."
+            exit 1
+        fi
+    fi
+
+    # Check if machine config already exists
+    local machine_dir="$MACHINES_DIR/$name"
+    if [ -d "$machine_dir" ]; then
+        echo "Machine config already exists: $machine_dir"
+        if ! script-wizard confirm "Reconfigure this VM?" no; then
+            echo "Aborted."
+            exit 0
+        fi
+    fi
+
+    # Get list of available profiles
+    local available_profiles=()
+    shopt -s nullglob
+    for f in profiles/*.nix; do
+        available_profiles+=("$(basename "$f" .nix)")
+    done
+    shopt -u nullglob
+
+    # Prompt for profile(s) if not provided
+    if [ -z "$profile" ]; then
+        echo ""
+        readarray -t selected_profiles < <(script-wizard select "Select profile(s) to include:" "${available_profiles[@]}")
+        if [ ${#selected_profiles[@]} -eq 0 ]; then
+            profile="core"
+        else
+            profile=$(IFS=,; echo "${selected_profiles[*]}")
+        fi
+    fi
+    echo "Selected profile(s): $profile"
+
+    # Memory selection
+    echo ""
+    local memory_choice
+    memory_choice=$(script-wizard choose "Select memory size:" "2G (Recommended)" "1G" "4G" "8G" "16G" "32G" "Custom")
+    case "$memory_choice" in
+        "1G") memory="1024" ;;
+        "2G (Recommended)") memory="2048" ;;
+        "4G") memory="4096" ;;
+        "8G") memory="8192" ;;
+        "16G") memory="16384" ;;
+        "32G") memory="32768" ;;
+        "Custom")
+            local custom_mem
+            custom_mem=$(script-wizard ask "Enter memory in MB (e.g., 3072):")
+            memory="${custom_mem:-2048}"
+            ;;
+        *) memory="2048" ;;
+    esac
+    echo "Memory: ${memory}M"
+
+    # vCPU selection
+    echo ""
+    local vcpu_choice
+    vcpu_choice=$(script-wizard choose "Select number of vCPUs:" "2 (Recommended)" "1" "4" "8" "Custom")
+    case "$vcpu_choice" in
+        "1") vcpus="1" ;;
+        "2 (Recommended)") vcpus="2" ;;
+        "4") vcpus="4" ;;
+        "8") vcpus="8" ;;
+        "Custom")
+            local custom_vcpus
+            custom_vcpus=$(script-wizard ask "Enter number of vCPUs:")
+            vcpus="${custom_vcpus:-2}"
+            ;;
+        *) vcpus="2" ;;
+    esac
+    echo "vCPUs: $vcpus"
+
+    # Disk size selection
+    echo ""
+    local disk_choice
+    disk_choice=$(script-wizard choose "Select /var disk size:" "30G (Recommended)" "20G" "50G" "100G" "200G" "500G" "Custom")
+    case "$disk_choice" in
+        "20G") var_size="20G" ;;
+        "30G (Recommended)") var_size="30G" ;;
+        "50G") var_size="50G" ;;
+        "100G") var_size="100G" ;;
+        "200G") var_size="200G" ;;
+        "500G") var_size="500G" ;;
+        "Custom")
+            local custom_size
+            custom_size=$(script-wizard ask "Enter disk size (e.g., 40G):")
+            var_size="${custom_size:-30G}"
+            ;;
+        *) var_size="30G" ;;
+    esac
+    echo "Disk size: $var_size"
+
+    # Network selection
+    echo ""
+    local network_choice
+    network_choice=$(script-wizard choose "Select network mode:" "NAT (Recommended)" "Bridge")
+    case "$network_choice" in
+        "NAT (Recommended)") network="nat" ;;
+        "Bridge") network="bridge" ;;
+        *) network="nat" ;;
+    esac
+    echo "Network: $network"
+
+    # SSH keys selection
+    echo ""
+    local ssh_key_mode=""
+    local admin_keys=""
+    local user_keys=""
+
+    # Check if SSH agent has keys
+    local agent_key_count=0
+    if ssh-add -L &>/dev/null; then
+        agent_key_count=$(ssh-add -L 2>/dev/null | wc -l)
+    fi
+
+    if [ "$agent_key_count" -gt 0 ]; then
+        local ssh_choice
+        ssh_choice=$(script-wizard choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s)) (Recommended)" "Enter keys manually" "Skip (no SSH access)")
+        case "$ssh_choice" in
+            "Use current SSH agent keys"*) ssh_key_mode="agent" ;;
+            "Enter keys manually") ssh_key_mode="manual" ;;
+            "Skip"*) ssh_key_mode="skip" ;;
+            *) ssh_key_mode="agent" ;;
+        esac
+    else
+        local ssh_choice
+        ssh_choice=$(script-wizard choose "SSH authorized keys:" "Enter keys manually (Recommended)" "Skip (no SSH access)")
+        case "$ssh_choice" in
+            "Enter keys manually"*) ssh_key_mode="manual" ;;
+            "Skip"*) ssh_key_mode="skip" ;;
+            *) ssh_key_mode="manual" ;;
+        esac
+    fi
+
+    if [ "$ssh_key_mode" = "manual" ]; then
+        echo ""
+        echo "Enter SSH public key(s) for 'admin' (has sudo access):"
+        admin_keys=$(script-wizard editor "Enter admin SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+        # Remove comment lines
+        admin_keys=$(echo "$admin_keys" | grep -v '^#' | grep -v '^$' || true)
+
+        echo ""
+        local same_keys
+        same_keys=$(script-wizard choose "User account SSH keys:" "Same as admin (Recommended)" "Enter different keys" "No user SSH access")
+        case "$same_keys" in
+            "Same as admin"*) user_keys="$admin_keys" ;;
+            "Enter different keys")
+                echo ""
+                echo "Enter SSH public key(s) for 'user' (no sudo access):"
+                user_keys=$(script-wizard editor "Enter user SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+                user_keys=$(echo "$user_keys" | grep -v '^#' | grep -v '^$' || true)
+                ;;
+            *) user_keys="" ;;
+        esac
+    fi
+
+    echo ""
+    echo "Configuration summary:"
+    echo "  Name:    $name"
+    echo "  Profile: $profile"
+    echo "  Memory:  ${memory}M"
+    echo "  vCPUs:   $vcpus"
+    echo "  Disk:    $var_size"
+    echo "  Network: $network"
+    echo "  SSH:     $ssh_key_mode"
+    echo ""
+
+    if ! script-wizard confirm "Create this configuration?" yes; then
+        echo "Aborted."
+        exit 0
+    fi
+
+    # Initialize machine with collected values
+    if [ "$ssh_key_mode" = "manual" ]; then
+        init_machine "$name" "$profile" "$network" "" "$admin_keys" "$user_keys"
+    else
+        init_machine "$name" "$profile" "$network" "$ssh_key_mode"
+    fi
+
+    # Save resource configuration
+    echo "$memory" > "$machine_dir/memory"
+    echo "Created: $machine_dir/memory (${memory}M)"
+
+    echo "$vcpus" > "$machine_dir/vcpus"
+    echo "Created: $machine_dir/vcpus ($vcpus)"
+
+    local normalized_var_size
+    normalized_var_size=$(normalize_size "$var_size")
+    echo "$normalized_var_size" > "$machine_dir/var_size"
+    echo "Created: $machine_dir/var_size ($normalized_var_size)"
+
+    echo ""
+    echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
     echo "To create the VM, run: just create $name"
 }
 
