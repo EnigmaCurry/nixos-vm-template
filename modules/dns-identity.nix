@@ -11,7 +11,8 @@
 { config, lib, pkgs, ... }:
 
 {
-  config = {
+  # Immutable-mode DNS identity configuration
+  config = lib.mkIf (!config.vm.mutable) {
     # Enable systemd-resolved with listeners on 127.0.0.1 and ::1
     # (in addition to the default 127.0.0.53)
     services.resolved.enable = true;

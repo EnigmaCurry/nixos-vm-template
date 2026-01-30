@@ -1,20 +1,18 @@
 # Home-manager profile - configures home-manager for the regular user
 # Uses sway-home modules for a complete terminal/editor environment
-# Requires writable /nix for activation, so imports the nix overlay
+# Works with immutable /nix - uses custom symlink service instead of nix-store commands
 { config, lib, pkgs, sway-home, swayHomeInputs, nix-flatpak, ... }:
 
 let
   regularUser = config.core.regularUser;
 in
 {
-  imports = [
-    ./nix.nix
-  ];
 
-  # The standard home-manager activation fails because nix-store commands
-  # don't work with our overlay setup (store paths aren't in the nix database).
+  # The standard home-manager activation fails on immutable systems because
+  # nix-store commands require a writable /nix with a valid database.
   # This service creates the symlinks directly before home-manager runs.
-  systemd.services."home-manager-symlinks-${regularUser}" = {
+  # On mutable VMs, the standard activation works fine so we skip this.
+  systemd.services."home-manager-symlinks-${regularUser}" = lib.mkIf (!config.vm.mutable) {
     description = "Create home-manager symlinks for ${regularUser}";
     wantedBy = [ "multi-user.target" ];
     before = [ "home-manager-${regularUser}.service" ];
@@ -54,6 +52,32 @@ in
         name=$(basename "$f")
         [[ "$name" == "." || "$name" == ".." ]] && continue
 
+        # Skip .cache entirely - it's runtime data that needs to be writable
+        if [[ "$name" == ".cache" ]]; then
+          echo "  Skipped (writable): $name"
+          mkdir -p "$HOME/$name"
+          continue
+        fi
+
+        # For .local, create the directory structure but symlink contents
+        # This preserves managed files while allowing writable state dirs
+        if [[ "$name" == ".local" && -d "$f" ]]; then
+          echo "  Merging (partial writable): $name"
+          mkdir -p "$HOME/.local"
+          # Symlink subdirectories (share, bin, etc.) but not state
+          for subdir in "$f"/*; do
+            subname=$(basename "$subdir")
+            if [[ "$subname" == "state" ]]; then
+              mkdir -p "$HOME/.local/state"
+              echo "    Skipped (writable): .local/state"
+            elif [[ ! -e "$HOME/.local/$subname" ]]; then
+              ln -sfn "$subdir" "$HOME/.local/$subname"
+              echo "    Created: .local/$subname -> $subdir"
+            fi
+          done
+          continue
+        fi
+
         # Remove existing symlink if it points to wrong location
         if [[ -L "$HOME/$name" ]]; then
           current_target=$(readlink "$HOME/$name")
@@ -69,25 +93,19 @@ in
         fi
       done
 
-      # Set up .nix-profile to point to home-manager-path (contains the packages)
-      if [[ -L "$generation/home-path" ]]; then
-        home_path=$(readlink "$generation/home-path")
-        if [[ -d "$home_path" ]]; then
-          mkdir -p "$HOME/.local/state/nix/profiles"
-          ln -sfn "$home_path" "$HOME/.local/state/nix/profiles/profile"
-          ln -sfn "$HOME/.local/state/nix/profiles/profile" "$HOME/.nix-profile"
-          echo "  Created: .nix-profile -> $home_path"
-        fi
-      fi
+      # Note: .nix-profile is not set up because:
+      # 1. nix-env/nix profile require writable /nix with a valid database
+      # 2. Packages from home.packages are already in PATH via home-manager's shell config
 
       echo "Home-manager symlinks created successfully"
     '';
   };
 
-  # The original home-manager service will fail with nix-store errors on immutable systems.
-  # Our symlinks service runs first and creates the symlinks, so we just make the
-  # failure non-fatal. We must keep the service as-is so the generation is included in closure.
-  systemd.services."home-manager-${regularUser}" = {
+  # The original home-manager service fails with nix-store errors on immutable systems.
+  # Our symlinks service runs first and creates the symlinks, so we allow the failure.
+  # We keep the service reference intact so the generation is included in the closure.
+  # On mutable VMs, the standard activation works fine so we don't override this.
+  systemd.services."home-manager-${regularUser}" = lib.mkIf (!config.vm.mutable) {
     serviceConfig = {
       # Allow exit code 1 (nix-store failure) to be treated as success
       SuccessExitStatus = [ 1 ];

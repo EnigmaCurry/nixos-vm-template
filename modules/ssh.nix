@@ -7,77 +7,84 @@ let
   regularUser = config.core.regularUser;
 in
 {
-  config = {
-    # Enable SSH daemon
-    services.openssh = {
-      enable = true;
-      openFirewall = false;  # Firewall managed by /var/identity/tcp_ports
-      authorizedKeysFiles = lib.mkForce [ "/etc/ssh/authorized_keys.d/%u" ];
-      settings = {
-        PermitRootLogin = "no";
-        PasswordAuthentication = false;
-        KbdInteractiveAuthentication = false;
+  config = lib.mkMerge [
+    # Common SSH configuration (both mutable and immutable)
+    {
+      # Enable SSH daemon
+      services.openssh = {
+        enable = true;
+        openFirewall = false;  # Firewall managed by /var/identity/tcp_ports (immutable) or nixos config (mutable)
+        settings = {
+          PermitRootLogin = "no";
+          PasswordAuthentication = false;
+          KbdInteractiveAuthentication = false;
+        };
       };
-    };
 
-    # SSH host key stored on /var/identity (persistent across reboots)
-    services.openssh.hostKeys = [
-      {
-        path = "/var/identity/ssh_host_ed25519_key";
-        type = "ed25519";
-      }
-    ];
+      # Admin user with sudo access
+      users.users.${adminUser} = {
+        isNormalUser = true;
+        description = "Admin User";
+        extraGroups = [ "wheel" ];
+      };
 
-    # Admin user with sudo access
-    users.users.${adminUser} = {
-      isNormalUser = true;
-      description = "Admin User";
-      extraGroups = [ "wheel" ];
-    };
+      # Regular user without sudo
+      users.users.${regularUser} = {
+        isNormalUser = true;
+        description = "Regular User";
+        extraGroups = [ ];
+      };
 
-    # Regular user without sudo
-    users.users.${regularUser} = {
-      isNormalUser = true;
-      description = "Regular User";
-      extraGroups = [ ];
-    };
+      # Enable passwordless sudo for wheel group
+      security.sudo = {
+        enable = true;
+        wheelNeedsPassword = false;
+      };
+    }
 
-    # Create home directories on /var/home (since /home is a bind mount)
-    # Uses 'users' group since isNormalUser doesn't create per-user groups
-    systemd.tmpfiles.rules = [
-      "d /var/home/${adminUser} 0700 ${adminUser} users -"
-      "d /var/home/${regularUser} 0700 ${regularUser} users -"
-    ];
+    # Immutable-mode SSH configuration (bind mounts for authorized_keys and host keys)
+    (lib.mkIf (!config.vm.mutable) {
+      services.openssh.authorizedKeysFiles = lib.mkForce [ "/etc/ssh/authorized_keys.d/%u" ];
 
-    # Enable passwordless sudo for wheel group
-    security.sudo = {
-      enable = true;
-      wheelNeedsPassword = false;
-    };
+      # SSH host key stored on /var/identity (persistent across reboots)
+      services.openssh.hostKeys = [
+        {
+          path = "/var/identity/ssh_host_ed25519_key";
+          type = "ed25519";
+        }
+      ];
 
-    # Create placeholders for authorized_keys bind mounts
-    environment.etc."ssh/authorized_keys.d/${adminUser}" = {
-      text = "";
-      mode = "0600";
-    };
+      # Create home directories on /var/home (since /home is a bind mount)
+      # Uses 'users' group since isNormalUser doesn't create per-user groups
+      systemd.tmpfiles.rules = [
+        "d /var/home/${adminUser} 0700 ${adminUser} users -"
+        "d /var/home/${regularUser} 0700 ${regularUser} users -"
+      ];
 
-    environment.etc."ssh/authorized_keys.d/${regularUser}" = {
-      text = "";
-      mode = "0600";
-    };
+      # Create placeholders for authorized_keys bind mounts
+      environment.etc."ssh/authorized_keys.d/${adminUser}" = {
+        text = "";
+        mode = "0600";
+      };
 
-    # Bind mount authorized_keys from /var/identity for admin
-    fileSystems."/etc/ssh/authorized_keys.d/${adminUser}" = {
-      device = "/var/identity/${adminUser}_authorized_keys";
-      options = [ "bind" ];
-      depends = [ "/var" ];
-    };
+      environment.etc."ssh/authorized_keys.d/${regularUser}" = {
+        text = "";
+        mode = "0600";
+      };
 
-    # Bind mount authorized_keys from /var/identity for regular user
-    fileSystems."/etc/ssh/authorized_keys.d/${regularUser}" = {
-      device = "/var/identity/${regularUser}_authorized_keys";
-      options = [ "bind" ];
-      depends = [ "/var" ];
-    };
-  };
+      # Bind mount authorized_keys from /var/identity for admin
+      fileSystems."/etc/ssh/authorized_keys.d/${adminUser}" = {
+        device = "/var/identity/${adminUser}_authorized_keys";
+        options = [ "bind" ];
+        depends = [ "/var" ];
+      };
+
+      # Bind mount authorized_keys from /var/identity for regular user
+      fileSystems."/etc/ssh/authorized_keys.d/${regularUser}" = {
+        device = "/var/identity/${regularUser}_authorized_keys";
+        options = [ "bind" ];
+        depends = [ "/var" ];
+      };
+    })
+  ];
 }

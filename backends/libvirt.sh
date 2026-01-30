@@ -96,7 +96,13 @@ backend_create_disks() {
     local profile
     profile=$(cat "$machine_dir/profile")
 
-    echo "Creating VM disks: $name (profile: $profile)"
+    # Check if this is a mutable VM
+    if is_mutable "$name"; then
+        backend_create_disks_mutable "$name" "$var_size"
+        return
+    fi
+
+    echo "Creating VM disks: $name (profile: $profile, immutable)"
     mkdir -p "$OUTPUT_DIR/vms/$name"
 
     local profile_image
@@ -187,6 +193,135 @@ backend_create_disks() {
     echo "  boot.qcow2 (backing: $profile_image)"
     echo "  var.qcow2 ($var_size, ext4)"
     echo "  Identity: hostname=$hostname"
+}
+
+# Create VM disk for mutable mode (single read-write disk, full copy)
+backend_create_disks_mutable() {
+    local name="$1"
+    local disk_size
+    disk_size=$(normalize_size "${2:-30G}")
+    local machine_dir="$MACHINES_DIR/$name"
+
+    local profile
+    profile=$(cat "$machine_dir/profile")
+
+    echo "Creating VM disk: $name (profile: $profile, mutable)"
+    mkdir -p "$OUTPUT_DIR/vms/$name"
+
+    # Use mutable image variant
+    local profile_image
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}-mutable")/nixos.qcow2
+
+    if [ ! -f "$profile_image" ]; then
+        echo "Error: Mutable profile image not found: $profile_image"
+        echo "Run 'just build $profile' first (mutable image will be built automatically)"
+        exit 1
+    fi
+
+    # Copy the image (not backing file - this is a standalone mutable system)
+    echo "Copying base image (this may take a moment)..."
+    $CP "$profile_image" "$OUTPUT_DIR/vms/$name/disk.qcow2"
+    chmod 644 "$OUTPUT_DIR/vms/$name/disk.qcow2"
+
+    # Resize to requested size
+    echo "Resizing disk to $disk_size..."
+    $QEMU_IMG resize "$OUTPUT_DIR/vms/$name/disk.qcow2" "$disk_size"
+
+    # Set hostname, machine-id, SSH keys, and root password inside the image
+    local hostname machine_id
+    hostname=$(cat "$machine_dir/hostname")
+    machine_id=$(cat "$machine_dir/machine-id")
+
+    echo "Configuring mutable VM..."
+
+    # Create temp files for hostname and machine-id
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    echo "$hostname" > "$tmp_dir/hostname"
+    echo "$machine_id" > "$tmp_dir/machine-id"
+
+    # Find the nixos root partition
+    local nixos_dev
+    nixos_dev=$($GUESTFISH --ro -a "$OUTPUT_DIR/vms/$name/disk.qcow2" <<'EOF'
+run
+findfs-label nixos
+EOF
+)
+    if [ -z "$nixos_dev" ]; then
+        echo "Error: Could not find nixos partition"
+        rm -rf "$tmp_dir"
+        exit 1
+    fi
+    echo "  Found nixos partition: $nixos_dev"
+
+    # Build guestfish commands using copy-in for files with special chars
+    local gf_cmds="run : mount $nixos_dev /"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/hostname /etc/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/machine-id /etc/"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/hostname"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/hostname"
+    gf_cmds="$gf_cmds : chmod 0444 /etc/machine-id"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/machine-id"
+
+    # Add admin authorized_keys if present (filter comments/empty lines)
+    if [ -s "$machine_dir/admin_authorized_keys" ]; then
+        grep -v '^#' "$machine_dir/admin_authorized_keys" | grep -v '^$' > "$tmp_dir/admin" || true
+        if [ -s "$tmp_dir/admin" ]; then
+            gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chmod 0755 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : copy-in $tmp_dir/admin /etc/ssh/authorized_keys.d/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/admin"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d/admin"
+        fi
+    fi
+
+    # Add user authorized_keys if present
+    if [ -s "$machine_dir/user_authorized_keys" ]; then
+        grep -v '^#' "$machine_dir/user_authorized_keys" | grep -v '^$' > "$tmp_dir/user" || true
+        if [ -s "$tmp_dir/user" ]; then
+            gf_cmds="$gf_cmds : mkdir-p /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : chmod 0755 /etc/ssh/authorized_keys.d"
+            gf_cmds="$gf_cmds : copy-in $tmp_dir/user /etc/ssh/authorized_keys.d/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/ssh/authorized_keys.d/user"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/ssh/authorized_keys.d/user"
+        fi
+    fi
+
+    # Copy firewall port files to /etc/firewall-ports/
+    gf_cmds="$gf_cmds : mkdir-p /etc/firewall-ports"
+    gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports"
+    gf_cmds="$gf_cmds : chmod 0755 /etc/firewall-ports"
+    if [ -s "$machine_dir/tcp_ports" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/tcp_ports /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/tcp_ports"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/tcp_ports"
+    fi
+    if [ -s "$machine_dir/udp_ports" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/udp_ports /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/udp_ports"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
+    fi
+
+    eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+
+    # Copy root password hash to /etc/ (applied by systemd service at boot)
+    if [ -s "$machine_dir/root_password_hash" ]; then
+        gf_cmds="run : mount $nixos_dev / : copy-in $machine_dir/root_password_hash /etc/"
+        gf_cmds="$gf_cmds : chmod 0600 /etc/root_password_hash"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/root_password_hash"
+        eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+    fi
+
+    rm -rf "$tmp_dir"
+
+    echo "Created VM disk in $OUTPUT_DIR/vms/$name/"
+    echo "  disk.qcow2 ($disk_size, standalone mutable)"
+    echo "  Hostname: $hostname"
+    echo ""
+    echo "NOTE: This is a mutable VM. Upgrades must be done inside the VM with:"
+    echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
 }
 
 # Sync identity files from machine config to existing /var disk
@@ -284,9 +419,7 @@ backend_generate_config() {
     echo "Generating libvirt XML for: $name"
     mkdir -p "$LIBVIRT_DIR"
 
-    local boot_disk var_disk ovmf_vars_dest mac_address vm_uuid
-    boot_disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/boot.qcow2")
-    var_disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/var.qcow2")
+    local ovmf_vars_dest mac_address vm_uuid
     ovmf_vars_dest=$($READLINK -f "$OUTPUT_DIR/vms/$name")/OVMF_VARS.qcow2
     mac_address=$(cat "$MACHINES_DIR/$name/mac-address")
 
@@ -320,20 +453,44 @@ backend_generate_config() {
     owner_uid=$(id -u)
     owner_gid=$(id -g)
 
-    sed -e "s|@@VM_NAME@@|$name|g" \
-        -e "s|@@UUID@@|$vm_uuid|g" \
-        -e "s|@@MEMORY@@|$memory|g" \
-        -e "s|@@VCPUS@@|$vcpus|g" \
-        -e "s|@@BOOT_DISK@@|$boot_disk|g" \
-        -e "s|@@VAR_DISK@@|$var_disk|g" \
-        -e "s|@@OVMF_CODE@@|$OVMF_CODE|g" \
-        -e "s|@@OVMF_VARS@@|$ovmf_vars_dest|g" \
-        -e "s|@@MAC_ADDRESS@@|$mac_address|g" \
-        -e "s|@@NETWORK_TYPE@@|$network_type|g" \
-        -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
-        -e "s|@@OWNER_UID@@|$owner_uid|g" \
-        -e "s|@@OWNER_GID@@|$owner_gid|g" \
-        "$LIBVIRT_DIR/template.xml" > "$LIBVIRT_DIR/$name.xml"
+    # Choose template based on mutable mode
+    if is_mutable "$name"; then
+        local disk
+        disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/disk.qcow2")
+
+        sed -e "s|@@VM_NAME@@|$name|g" \
+            -e "s|@@UUID@@|$vm_uuid|g" \
+            -e "s|@@MEMORY@@|$memory|g" \
+            -e "s|@@VCPUS@@|$vcpus|g" \
+            -e "s|@@DISK@@|$disk|g" \
+            -e "s|@@OVMF_CODE@@|$OVMF_CODE|g" \
+            -e "s|@@OVMF_VARS@@|$ovmf_vars_dest|g" \
+            -e "s|@@MAC_ADDRESS@@|$mac_address|g" \
+            -e "s|@@NETWORK_TYPE@@|$network_type|g" \
+            -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
+            -e "s|@@OWNER_UID@@|$owner_uid|g" \
+            -e "s|@@OWNER_GID@@|$owner_gid|g" \
+            "$LIBVIRT_DIR/template-mutable.xml" > "$LIBVIRT_DIR/$name.xml"
+    else
+        local boot_disk var_disk
+        boot_disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/boot.qcow2")
+        var_disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/var.qcow2")
+
+        sed -e "s|@@VM_NAME@@|$name|g" \
+            -e "s|@@UUID@@|$vm_uuid|g" \
+            -e "s|@@MEMORY@@|$memory|g" \
+            -e "s|@@VCPUS@@|$vcpus|g" \
+            -e "s|@@BOOT_DISK@@|$boot_disk|g" \
+            -e "s|@@VAR_DISK@@|$var_disk|g" \
+            -e "s|@@OVMF_CODE@@|$OVMF_CODE|g" \
+            -e "s|@@OVMF_VARS@@|$ovmf_vars_dest|g" \
+            -e "s|@@MAC_ADDRESS@@|$mac_address|g" \
+            -e "s|@@NETWORK_TYPE@@|$network_type|g" \
+            -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
+            -e "s|@@OWNER_UID@@|$owner_uid|g" \
+            -e "s|@@OWNER_GID@@|$owner_gid|g" \
+            "$LIBVIRT_DIR/template.xml" > "$LIBVIRT_DIR/$name.xml"
+    fi
 
     echo "Generated: $LIBVIRT_DIR/$name.xml"
 }
@@ -496,20 +653,38 @@ create_vm() {
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
 
-    build_profile "$profile"
+    # Initialize machine config first (so we can check mutable status)
     init_machine "$name" "$profile" "$network"
+
+    # Build appropriate image variant
+    if is_mutable "$name"; then
+        build_profile "$profile" "true"
+    else
+        build_profile "$profile" "false"
+    fi
+
     backend_create_disks "$name" "$var_size"
     backend_generate_config "$name" "$memory" "$vcpus"
     backend_define "$name"
 
     echo ""
-    echo "VM '$name' is ready (profile: $profile). Start with: just start $name"
-    echo "Machine config: $MACHINES_DIR/$name/"
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    if is_mutable "$name"; then
+        echo "VM '$name' is ready (profile: $profile, mutable). Start with: just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo ""
+        echo "NOTE: This is a mutable VM with full nix toolchain."
+        echo "Upgrades must be done inside the VM with nixos-rebuild."
+    else
+        echo "VM '$name' is ready (profile: $profile). Start with: just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+    fi
 }
 
-# Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
+# Clone a VM: copy disk(s) from source, generate fresh identity
 clone_vm() {
     local source="$1"
     local dest="$2"
@@ -536,10 +711,23 @@ clone_vm() {
         vcpus=$(cat "$source_machine_dir/vcpus" 2>/dev/null || echo "2")
     fi
 
-    # Validate source var disk exists
-    if [ ! -f "$source_vm_dir/var.qcow2" ]; then
-        echo "Error: Source /var disk not found: $source_vm_dir/var.qcow2"
-        exit 1
+    # Check if source is mutable
+    local source_mutable=false
+    if is_mutable "$source"; then
+        source_mutable=true
+    fi
+
+    # Validate source disk exists
+    if [ "$source_mutable" = true ]; then
+        if [ ! -f "$source_vm_dir/disk.qcow2" ]; then
+            echo "Error: Source disk not found: $source_vm_dir/disk.qcow2"
+            exit 1
+        fi
+    else
+        if [ ! -f "$source_vm_dir/var.qcow2" ]; then
+            echo "Error: Source /var disk not found: $source_vm_dir/var.qcow2"
+            exit 1
+        fi
     fi
 
     # Validate source VM is shut off
@@ -563,34 +751,53 @@ clone_vm() {
 
     echo "Cloning VM '$source' -> '$dest'"
 
-    # Initialize machine config (non-interactive)
+    # Initialize machine config (non-interactive, copies mutable flag too)
     init_machine_clone "$source" "$dest" "$network"
-
-    # Copy var disk
-    echo "Copying /var disk..."
     mkdir -p "$dest_vm_dir"
-    $CP "$source_vm_dir/var.qcow2" "$dest_vm_dir/var.qcow2"
 
-    # Sync new identity onto copied var disk
-    backend_sync_identity "$dest"
+    if [ "$source_mutable" = true ]; then
+        # Mutable: copy the single disk
+        echo "Copying disk..."
+        $CP "$source_vm_dir/disk.qcow2" "$dest_vm_dir/disk.qcow2"
 
-    # Delete SSH host keys so clone generates fresh keys on first boot
-    echo "Removing SSH host keys (will be regenerated on first boot)..."
-    eval "$GUESTFISH -a $dest_vm_dir/var.qcow2 run : mount /dev/sda1 / : rm-f /identity/ssh_host_ed25519_key : rm-f /identity/ssh_host_ed25519_key.pub"
+        # Update hostname and machine-id in the cloned disk
+        local hostname machine_id
+        hostname=$(cat "$dest_machine_dir/hostname")
+        machine_id=$(cat "$dest_machine_dir/machine-id")
 
-    # Create boot disk with same profile's base image
-    local profile profile_image
-    profile=$(cat "$dest_machine_dir/profile")
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile")/nixos.qcow2
-    if [ ! -f "$profile_image" ]; then
-        echo "Error: Profile image not found: $profile_image"
-        echo "Run 'just build $profile' first"
-        exit 1
+        echo "Updating identity in cloned disk..."
+        $GUESTFISH -a "$dest_vm_dir/disk.qcow2" <<EOF
+run
+mount /dev/sda2 /
+write /etc/hostname "$hostname"
+write /etc/machine-id "$machine_id"
+EOF
+    else
+        # Immutable: copy var disk, create new boot disk
+        echo "Copying /var disk..."
+        $CP "$source_vm_dir/var.qcow2" "$dest_vm_dir/var.qcow2"
+
+        # Sync new identity onto copied var disk
+        backend_sync_identity "$dest"
+
+        # Delete SSH host keys so clone generates fresh keys on first boot
+        echo "Removing SSH host keys (will be regenerated on first boot)..."
+        eval "$GUESTFISH -a $dest_vm_dir/var.qcow2 run : mount /dev/sda1 / : rm-f /identity/ssh_host_ed25519_key : rm-f /identity/ssh_host_ed25519_key.pub"
+
+        # Create boot disk with same profile's base image
+        local profile profile_image
+        profile=$(cat "$dest_machine_dir/profile")
+        profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile")/nixos.qcow2
+        if [ ! -f "$profile_image" ]; then
+            echo "Error: Profile image not found: $profile_image"
+            echo "Run 'just build $profile' first"
+            exit 1
+        fi
+        $QEMU_IMG create -f qcow2 \
+            -b "$profile_image" \
+            -F qcow2 \
+            "$dest_vm_dir/boot.qcow2"
     fi
-    $QEMU_IMG create -f qcow2 \
-        -b "$profile_image" \
-        -F qcow2 \
-        "$dest_vm_dir/boot.qcow2"
 
     # Generate XML and define in libvirt
     backend_generate_config "$dest" "$memory" "$vcpus"
@@ -699,7 +906,13 @@ recreate_vm() {
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" 2>/dev/null || true
 
-    build_profile "$profile"
+    # Build appropriate image variant
+    if is_mutable "$name"; then
+        build_profile "$profile" "true"
+    else
+        build_profile "$profile" "false"
+    fi
+
     rm -rf "$OUTPUT_DIR/vms/$name"
     backend_create_disks "$name" "$var_size"
     backend_generate_config "$name"
@@ -722,6 +935,23 @@ upgrade_vm() {
         echo "Use 'just create $name' for new VMs"
         exit 1
     fi
+
+    # Block upgrades for mutable VMs
+    if is_mutable "$name"; then
+        echo "Error: Cannot upgrade mutable VMs from the host."
+        echo ""
+        echo "Mutable VMs have a standard read-write NixOS filesystem and must be"
+        echo "upgraded from inside the VM using nixos-rebuild:"
+        echo ""
+        echo "  ssh admin@<vm-ip>"
+        echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
+        echo ""
+        echo "Or to upgrade packages:"
+        echo "  nix-env -u '*'"
+        echo ""
+        exit 1
+    fi
+
     local profile
     profile=$(cat "$machine_dir/profile")
 
@@ -769,17 +999,27 @@ upgrade_vm() {
     echo "SSH as user (no sudo): ssh user@<ip>"
 }
 
-# Resize the /var disk for a VM
+# Resize the /var disk for a VM (or main disk for mutable VMs)
 resize_var() {
     local name="$1"
     local new_size
     new_size=$(normalize_size "$2")
-    local var_disk="$OUTPUT_DIR/vms/$name/var.qcow2"
 
-    if [ ! -f "$var_disk" ]; then
-        echo "Error: /var disk not found: $var_disk"
+    # Determine disk path based on mutable mode
+    local disk_path disk_label
+    if is_mutable "$name"; then
+        disk_path="$OUTPUT_DIR/vms/$name/disk.qcow2"
+        disk_label="disk"
+    else
+        disk_path="$OUTPUT_DIR/vms/$name/var.qcow2"
+        disk_label="/var disk"
+    fi
+
+    if [ ! -f "$disk_path" ]; then
+        echo "Error: $disk_label not found: $disk_path"
         exit 1
     fi
+    local var_disk="$disk_path"
 
     # Check if VM is running
     if backend_is_running "$name"; then
@@ -803,7 +1043,7 @@ resize_var() {
         exit 1
     fi
 
-    echo "Current /var disk size: $current_size_human"
+    echo "Current $disk_label size: $current_size_human"
     echo "New size: $new_size"
     echo ""
     echo "NOTE: This will resize the QCOW2 disk image."
@@ -814,17 +1054,28 @@ resize_var() {
         exit 1
     fi
 
-    echo "Resizing /var disk..."
+    echo "Resizing $disk_label..."
     $QEMU_IMG resize "$var_disk" "$new_size"
 
     # Use guestfish to grow the partition and filesystem
     echo "Growing partition and filesystem..."
-    $GUESTFISH -a "$var_disk" <<EOF
+    if is_mutable "$name"; then
+        # Mutable: root is on partition 2
+        $GUESTFISH -a "$var_disk" <<EOF
+run
+part-resize /dev/sda 2 -1
+e2fsck-f /dev/sda2
+resize2fs /dev/sda2
+EOF
+    else
+        # Immutable: /var is on partition 1
+        $GUESTFISH -a "$var_disk" <<EOF
 run
 part-resize /dev/sda 1 -1
 e2fsck-f /dev/sda1
 resize2fs /dev/sda1
 EOF
+    fi
 
     echo ""
     echo "Resize complete. Start VM with: just start $name"
@@ -851,7 +1102,18 @@ resize_vm() {
     local current_memory current_vcpus current_disk_bytes current_disk_human
     current_memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
     current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
-    local var_disk="$OUTPUT_DIR/vms/$name/var.qcow2"
+
+    # Determine disk path based on mutable mode
+    local disk_path disk_label
+    if is_mutable "$name"; then
+        disk_path="$OUTPUT_DIR/vms/$name/disk.qcow2"
+        disk_label="Disk"
+    else
+        disk_path="$OUTPUT_DIR/vms/$name/var.qcow2"
+        disk_label="/var"
+    fi
+    local var_disk="$disk_path"
+
     if [ -f "$var_disk" ]; then
         current_disk_bytes=$($QEMU_IMG info --output=json "$var_disk" | jq -r '.["virtual-size"]')
         current_disk_human=$(numfmt --to=iec "$current_disk_bytes" 2>/dev/null || echo "unknown")
@@ -863,7 +1125,7 @@ resize_vm() {
     echo "Current VM configuration for '$name':"
     echo "  Memory: ${current_memory} MB"
     echo "  vCPUs:  ${current_vcpus}"
-    echo "  /var:   ${current_disk_human}"
+    echo "  $disk_label:   ${current_disk_human}"
     echo ""
 
     # Prompt for new values
@@ -873,7 +1135,7 @@ resize_vm() {
     read -p "New vCPUs [$current_vcpus]: " new_vcpus
     new_vcpus="${new_vcpus:-$current_vcpus}"
 
-    read -p "New /var disk size [$current_disk_human]: " new_disk
+    read -p "New $disk_label disk size [$current_disk_human]: " new_disk
     new_disk="${new_disk:-$current_disk_human}"
     new_disk=$(normalize_size "$new_disk")
 
@@ -903,15 +1165,26 @@ resize_vm() {
 
     # Resize disk if needed
     if [ "$new_disk_bytes" -gt "$current_disk_bytes" ] && [ -f "$var_disk" ]; then
-        echo "Resizing /var disk..."
+        echo "Resizing $disk_label disk..."
         $QEMU_IMG resize "$var_disk" "$new_disk"
         echo "Growing partition and filesystem..."
-        $GUESTFISH -a "$var_disk" <<EOF
+        if is_mutable "$name"; then
+            # Mutable: root is on partition 2
+            $GUESTFISH -a "$var_disk" <<EOF
+run
+part-resize /dev/sda 2 -1
+e2fsck-f /dev/sda2
+resize2fs /dev/sda2
+EOF
+        else
+            # Immutable: /var is on partition 1
+            $GUESTFISH -a "$var_disk" <<EOF
 run
 part-resize /dev/sda 1 -1
 e2fsck-f /dev/sda1
 resize2fs /dev/sda1
 EOF
+        fi
     fi
 
     # Regenerate libvirt XML and redefine

@@ -1,0 +1,90 @@
+<domain type='kvm'>
+  <name>@@VM_NAME@@</name>
+  <uuid>@@UUID@@</uuid>
+  <memory unit='MiB'>@@MEMORY@@</memory>
+  <vcpu placement='static'>@@VCPUS@@</vcpu>
+
+  <os>
+    <type arch='x86_64' machine='q35'>hvm</type>
+    <loader readonly='yes' type='pflash'>@@OVMF_CODE@@</loader>
+    <nvram type='file' format='qcow2'>
+      <source file='@@OVMF_VARS@@'/>
+    </nvram>
+    <boot dev='hd'/>
+  </os>
+
+  <features>
+    <acpi/>
+    <apic/>
+  </features>
+
+  <cpu mode='host-passthrough' check='none' migratable='on'/>
+
+  <clock offset='utc'>
+    <timer name='rtc' tickpolicy='catchup'/>
+    <timer name='pit' tickpolicy='delay'/>
+    <timer name='hpet' present='no'/>
+  </clock>
+
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+
+  <devices>
+    <!-- Single disk (read-write, mutable system) -->
+    <disk type='file' device='disk'>
+      <driver name='qemu' type='qcow2' cache='writeback' discard='unmap'/>
+      <source file='@@DISK@@'/>
+      <target dev='vda' bus='virtio'/>
+    </disk>
+
+    <!-- Network interface -->
+    <interface type='@@NETWORK_TYPE@@'>
+      <mac address='@@MAC_ADDRESS@@'/>
+      <source @@NETWORK_SOURCE@@/>
+      <model type='virtio'/>
+    </interface>
+
+    <!-- Serial console -->
+    <serial type='pty'>
+      <target type='isa-serial' port='0'>
+        <model name='isa-serial'/>
+      </target>
+    </serial>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+
+    <!-- VGA display -->
+    <video>
+      <model type='virtio' heads='1' primary='yes'/>
+    </video>
+
+    <!-- Input devices -->
+    <input type='tablet' bus='usb'>
+      <address type='usb' bus='0' port='1'/>
+    </input>
+    <input type='mouse' bus='ps2'/>
+    <input type='keyboard' bus='ps2'/>
+
+    <!-- USB controller -->
+    <controller type='usb' index='0' model='qemu-xhci'>
+      <address type='pci' domain='0x0000' bus='0x02' slot='0x00' function='0x0'/>
+    </controller>
+
+    <!-- RNG for entropy -->
+    <rng model='virtio'>
+      <backend model='random'>/dev/urandom</backend>
+    </rng>
+
+    <!-- Guest agent channel -->
+    <channel type='unix'>
+      <target type='virtio' name='org.qemu.guest_agent.0'/>
+    </channel>
+  </devices>
+
+  <!-- Run qemu as the VM owner (avoids permission issues with disk files) -->
+  <seclabel type='static' model='dac' relabel='yes'>
+    <label>+@@OWNER_UID@@:+@@OWNER_GID@@</label>
+  </seclabel>
+</domain>

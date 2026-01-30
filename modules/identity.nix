@@ -13,44 +13,46 @@
 # Users are defined in profiles/ssh.nix (admin with sudo, user without).
 
 {
-  # Default hostname (overridden at runtime from /var/identity/hostname)
-  networking.hostName = lib.mkDefault "nixos";
+  # Immutable-mode identity configuration
+  config = lib.mkIf (!config.vm.mutable) {
+    # Default hostname (overridden at runtime from /var/identity/hostname)
+    networking.hostName = lib.mkDefault "nixos";
 
-  # Ensure identity directory exists on /var
-  systemd.tmpfiles.rules = [
-    "d /var/identity 0755 root root -"
-  ];
+    # Ensure identity directory exists on /var
+    systemd.tmpfiles.rules = [
+      "d /var/identity 0755 root root -"
+    ];
 
-  # Create placeholder for machine-id bind mount
-  environment.etc."machine-id" = {
-    text = "uninitialized\n";
-    mode = "0444";
-  };
-
-  # Bind mount /etc/machine-id from /var (mounts over the placeholder)
-  fileSystems."/etc/machine-id" = {
-    device = "/var/identity/machine-id";
-    options = [ "bind" ];
-    depends = [ "/var" ];
-  };
-
-  # Service to set hostname from /var at boot
-  systemd.services.vm-identity = {
-    description = "Set VM identity from /var";
-    wantedBy = [ "multi-user.target" ];
-    before = [ "network.target" ];
-    after = [ "local-fs.target" ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
+    # Create placeholder for machine-id bind mount
+    environment.etc."machine-id" = {
+      text = "uninitialized\n";
+      mode = "0444";
     };
-    script = ''
-      # Set hostname from /var/identity
-      if [ -f /var/identity/hostname ]; then
-        hostname=$(cat /var/identity/hostname)
-        ${pkgs.hostname}/bin/hostname "$hostname"
-      fi
-    '';
-  };
 
+    # Bind mount /etc/machine-id from /var (mounts over the placeholder)
+    fileSystems."/etc/machine-id" = {
+      device = "/var/identity/machine-id";
+      options = [ "bind" ];
+      depends = [ "/var" ];
+    };
+
+    # Service to set hostname from /var at boot
+    systemd.services.vm-identity = {
+      description = "Set VM identity from /var";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "network.target" ];
+      after = [ "local-fs.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        # Set hostname from /var/identity
+        if [ -f /var/identity/hostname ]; then
+          hostname=$(cat /var/identity/hostname)
+          ${pkgs.hostname}/bin/hostname "$hostname"
+        fi
+      '';
+    };
+  };
 }

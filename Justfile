@@ -80,6 +80,10 @@ resize-var name size:
 passwd name:
     @source {{backend_script}} && set_password "{{name}}"
 
+# Configure mutable mode for a VM (single read-write disk with full nix toolchain)
+mutable name:
+    @source {{backend_script}} && set_mutable "{{name}}"
+
 # List all machine configs
 list-machines:
     @source {{backend_script}} && list_machines

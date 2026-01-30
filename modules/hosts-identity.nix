@@ -9,7 +9,8 @@
 { config, lib, pkgs, ... }:
 
 {
-  config = {
+  # Immutable-mode hosts identity configuration
+  config = lib.mkIf (!config.vm.mutable) {
     # Disable NixOS's normal /etc/hosts management - we'll handle it ourselves
     environment.etc."hosts" = lib.mkForce {
       text = ''
