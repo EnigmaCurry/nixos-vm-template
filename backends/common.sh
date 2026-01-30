@@ -618,7 +618,7 @@ config_vm_interactive() {
     if [ -n "$current_memory" ]; then
         case "$current_memory" in
             "1024") memory_default="1G" ;;
-            "2048") memory_default="2G (Recommended)" ;;
+            "2048") memory_default="2G" ;;
             "4096") memory_default="4G" ;;
             "8192") memory_default="8G" ;;
             "16384") memory_default="16G" ;;
@@ -627,13 +627,13 @@ config_vm_interactive() {
         esac
     fi
     if [ -n "$memory_default" ]; then
-        memory_choice=$($SCRIPT_WIZARD choose -d "$memory_default" "Select memory size:" "2G (Recommended)" "1G" "4G" "8G" "16G" "32G" "Custom")
+        memory_choice=$($SCRIPT_WIZARD choose -d "$memory_default" "Select memory size:" "2G" "1G" "4G" "8G" "16G" "32G" "Custom")
     else
-        memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "2G (Recommended)" "1G" "4G" "8G" "16G" "32G" "Custom")
+        memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "2G" "1G" "4G" "8G" "16G" "32G" "Custom")
     fi
     case "$memory_choice" in
         "1G") memory="1024" ;;
-        "2G (Recommended)") memory="2048" ;;
+        "2G") memory="2048" ;;
         "4G") memory="4096" ;;
         "8G") memory="8192" ;;
         "16G") memory="16384" ;;
@@ -654,20 +654,20 @@ config_vm_interactive() {
     if [ -n "$current_vcpus" ]; then
         case "$current_vcpus" in
             "1") vcpu_default="1" ;;
-            "2") vcpu_default="2 (Recommended)" ;;
+            "2") vcpu_default="2" ;;
             "4") vcpu_default="4" ;;
             "8") vcpu_default="8" ;;
             *) vcpu_default="Custom" ;;
         esac
     fi
     if [ -n "$vcpu_default" ]; then
-        vcpu_choice=$($SCRIPT_WIZARD choose -d "$vcpu_default" "Select number of vCPUs:" "2 (Recommended)" "1" "4" "8" "Custom")
+        vcpu_choice=$($SCRIPT_WIZARD choose -d "$vcpu_default" "Select number of vCPUs:" "2" "1" "4" "8" "Custom")
     else
-        vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "2 (Recommended)" "1" "4" "8" "Custom")
+        vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "2" "1" "4" "8" "Custom")
     fi
     case "$vcpu_choice" in
         "1") vcpus="1" ;;
-        "2 (Recommended)") vcpus="2" ;;
+        "2") vcpus="2" ;;
         "4") vcpus="4" ;;
         "8") vcpus="8" ;;
         "Custom")
@@ -686,7 +686,7 @@ config_vm_interactive() {
     if [ -n "$current_var_size" ]; then
         case "$current_var_size" in
             "20G") disk_default="20G" ;;
-            "30G") disk_default="30G (Recommended)" ;;
+            "30G") disk_default="30G" ;;
             "50G") disk_default="50G" ;;
             "100G") disk_default="100G" ;;
             "200G") disk_default="200G" ;;
@@ -695,13 +695,13 @@ config_vm_interactive() {
         esac
     fi
     if [ -n "$disk_default" ]; then
-        disk_choice=$($SCRIPT_WIZARD choose -d "$disk_default" "Select /var disk size:" "30G (Recommended)" "20G" "50G" "100G" "200G" "500G" "Custom")
+        disk_choice=$($SCRIPT_WIZARD choose -d "$disk_default" "Select /var disk size:" "30G" "20G" "50G" "100G" "200G" "500G" "Custom")
     else
-        disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "30G (Recommended)" "20G" "50G" "100G" "200G" "500G" "Custom")
+        disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "30G" "20G" "50G" "100G" "200G" "500G" "Custom")
     fi
     case "$disk_choice" in
         "20G") var_size="20G" ;;
-        "30G (Recommended)") var_size="30G" ;;
+        "30G") var_size="30G" ;;
         "50G") var_size="50G" ;;
         "100G") var_size="100G" ;;
         "200G") var_size="200G" ;;
@@ -721,17 +721,17 @@ config_vm_interactive() {
     # Map current network to choice label
     if [ -n "$current_network" ]; then
         case "$current_network" in
-            "nat") network_default="NAT (Recommended)" ;;
+            "nat") network_default="NAT" ;;
             bridge*) network_default="Bridge" ;;
         esac
     fi
     if [ -n "$network_default" ]; then
-        network_choice=$($SCRIPT_WIZARD choose -d "$network_default" "Select network mode:" "NAT (Recommended)" "Bridge")
+        network_choice=$($SCRIPT_WIZARD choose -d "$network_default" "Select network mode:" "NAT" "Bridge")
     else
-        network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT (Recommended)" "Bridge")
+        network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT" "Bridge")
     fi
     case "$network_choice" in
-        "NAT (Recommended)") network="nat" ;;
+        "NAT") network="nat" ;;
         "Bridge") network="bridge" ;;
         *) network="nat" ;;
     esac
@@ -775,7 +775,7 @@ config_vm_interactive() {
         esac
     elif [ "$agent_key_count" -gt 0 ]; then
         local ssh_choice
-        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s)) (Recommended)" "Enter keys manually" "Skip (no SSH access)")
+        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s))" "Enter keys manually" "Skip (no SSH access)")
         case "$ssh_choice" in
             "Use current SSH agent keys"*) ssh_key_mode="agent" ;;
             "Enter keys manually") ssh_key_mode="manual" ;;
@@ -784,7 +784,7 @@ config_vm_interactive() {
         esac
     else
         local ssh_choice
-        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Enter keys manually (Recommended)" "Skip (no SSH access)")
+        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Enter keys manually" "Skip (no SSH access)")
         case "$ssh_choice" in
             "Enter keys manually"*) ssh_key_mode="manual" ;;
             "Skip"*) ssh_key_mode="skip" ;;
@@ -801,7 +801,7 @@ config_vm_interactive() {
 
         echo ""
         local same_keys
-        same_keys=$($SCRIPT_WIZARD choose "User account SSH keys:" "Same as admin (Recommended)" "Enter different keys" "No user SSH access")
+        same_keys=$($SCRIPT_WIZARD choose "User account SSH keys:" "Same as admin" "Enter different keys" "No user SSH access")
         case "$same_keys" in
             "Same as admin"*) user_keys="$admin_keys" ;;
             "Enter different keys")
