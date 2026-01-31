@@ -122,10 +122,11 @@
         RemainAfterExit = true;
       };
       script = ''
-        # Grow partition 2 (root) to fill available space
-        ${pkgs.cloud-utils}/bin/growpart /dev/vda 2 || true
+        # Grow partition 3 (root) to fill available space
+        # Layout: vda1=ESP, vda2=BIOS boot, vda3=root (nixos label)
+        ${pkgs.cloud-utils}/bin/growpart /dev/vda 3 || true
         # Resize filesystem (online resize supported for ext4)
-        ${pkgs.e2fsprogs}/bin/resize2fs /dev/vda2 || true
+        ${pkgs.e2fsprogs}/bin/resize2fs /dev/vda3 || true
       '';
     };
 
