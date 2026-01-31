@@ -173,11 +173,11 @@
     "nixos-vm-template": {
       "flake": false,
       "locked": {
-        "lastModified": 1769829680,
-        "narHash": "sha256-GxhkKyQRsF7eRMDdJIGIt48B+Tml2BETiZrSo1p/ohw=",
+        "lastModified": 1769830940,
+        "narHash": "sha256-itEJb44AZnh1qQrVYCtYVyKE5xrhLyx7wzKCDAy73C8=",
         "owner": "EnigmaCurry",
         "repo": "nixos-vm-template",
-        "rev": "b4f05dfac1a702c25ac58c1d75adfee1b57ae06e",
+        "rev": "bb6acb49bf2b914e023eba435c403e9c21dc1090",
         "type": "github"
       },
       "original": {
@@ -279,11 +279,11 @@
       },
       "locked": {
         "dir": "home-manager",
-        "lastModified": 1769830518,
-        "narHash": "sha256-LJBHwmgY+ahgQzkNYRrVvpIRZWz3JE6A9x7kWf2PQYc=",
+        "lastModified": 1769830980,
+        "narHash": "sha256-38sxaIng46D+hS0738IV0SlUmd5LI2wU56BRw+HR49M=",
         "owner": "EnigmaCurry",
         "repo": "sway-home",
-        "rev": "f7acfd93b5a2780591797a1697b8e55035f11f18",
+        "rev": "9907d345076ab812220dea483a9b4b10f7271e07",
         "type": "github"
       },
       "original": {
