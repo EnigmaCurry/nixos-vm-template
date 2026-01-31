@@ -56,6 +56,10 @@ start name:
 stop name:
     @source {{backend_script}} && backend_stop "{{name}}"
 
+# Reboot a VM (ACPI reboot)
+reboot name:
+    @source {{backend_script}} && backend_reboot "{{name}}"
+
 # Force stop a VM
 force-stop name:
     @source {{backend_script}} && backend_force_stop "{{name}}"

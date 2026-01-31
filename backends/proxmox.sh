@@ -885,6 +885,16 @@ backend_stop() {
     pve_ssh "qm shutdown $vmid"
 }
 
+# Reboot a VM (ACPI reboot)
+backend_reboot() {
+    local name="$1"
+    _pve_validate
+    local vmid
+    vmid=$(pve_get_vmid "$name")
+    echo "Rebooting VM: $name (VMID: $vmid)"
+    pve_ssh "qm reboot $vmid"
+}
+
 # Force stop a VM
 backend_force_stop() {
     local name="$1"

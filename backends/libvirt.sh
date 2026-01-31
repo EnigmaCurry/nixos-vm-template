@@ -583,6 +583,13 @@ backend_stop() {
     $VIRSH -c "$LIBVIRT_URI" shutdown "$name"
 }
 
+# Reboot a VM (ACPI reboot)
+backend_reboot() {
+    local name="$1"
+    echo "Rebooting VM: $name"
+    $VIRSH -c "$LIBVIRT_URI" reboot "$name"
+}
+
 # Force stop a VM
 backend_force_stop() {
     local name="$1"
