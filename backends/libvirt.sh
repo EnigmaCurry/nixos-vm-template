@@ -316,14 +316,92 @@ EOF
         eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
     fi
 
+    # Detect system architecture
+    local system
+    system=$(uname -m)
+    case "$system" in
+        x86_64) system="x86_64-linux" ;;
+        aarch64) system="aarch64-linux" ;;
+        *) system="x86_64-linux" ;;  # default
+    esac
+
+    # Generate /etc/nixos/flake.nix with hostname-based configuration
+    # This allows standard `nixos-rebuild switch` to work
+    local profile_imports=""
+    IFS='+' read -ra profile_parts <<< "$profile"
+    for p in "${profile_parts[@]}"; do
+        profile_imports="$profile_imports          ./profiles/${p}.nix"$'\n'
+    done
+
+    cat > "$tmp_dir/flake.nix" << FLAKE_EOF
+{
+  description = "NixOS configuration for $hostname";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    sway-home = {
+      url = "github:EnigmaCurry/sway-home?dir=home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-flatpak.url = "github:gmodena/nix-flatpak";
+  };
+
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }:
+    {
+      nixosConfigurations."$hostname" = nixpkgs.lib.nixosSystem {
+        system = "$system";
+        specialArgs = {
+          inherit sway-home nix-flatpak;
+          swayHomeInputs = sway-home.inputs;
+        };
+        modules = [
+          # Core modules
+          ./modules/base.nix
+          ./modules/filesystem.nix
+          ./modules/boot.nix
+          ./modules/overlay-etc.nix
+          ./modules/journald.nix
+          ./modules/immutable.nix
+          ./modules/mutable.nix
+          ./modules/identity.nix
+          ./modules/firewall-identity.nix
+          ./modules/dns-identity.nix
+          ./modules/hosts-identity.nix
+          ./modules/root-password.nix
+          ./modules/guest-agent.nix
+          ./modules/zram.nix
+          home-manager.nixosModules.home-manager
+          # Profile modules
+$profile_imports          # Mutable mode
+          { vm.mutable = true; }
+        ];
+      };
+    };
+}
+FLAKE_EOF
+
+    # Copy the project's flake.lock to keep inputs pinned
+    cp "$BACKEND_DIR/../flake.lock" "$tmp_dir/flake.lock"
+
+    gf_cmds="run : mount $nixos_dev /"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.nix /etc/nixos/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.lock /etc/nixos/"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/nixos/flake.nix"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/nixos/flake.lock"
+    eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+
     rm -rf "$tmp_dir"
 
     echo "Created VM disk in $OUTPUT_DIR/vms/$name/"
     echo "  disk.qcow2 ($disk_size, standalone mutable)"
     echo "  Hostname: $hostname"
     echo ""
-    echo "NOTE: This is a mutable VM. Upgrades must be done inside the VM with:"
-    echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
+    echo "NOTE: This is a mutable VM. To rebuild/upgrade from inside the VM:"
+    echo "  sudo nixos-rebuild switch"
 }
 
 # Sync identity files from machine config to existing /var disk
@@ -684,7 +762,7 @@ create_vm() {
         echo "SSH as user (no sudo): ssh user@<ip>"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
-        echo "Upgrades must be done inside the VM with nixos-rebuild."
+        echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' is ready (profile: $profile). Start with: just start $name"
         echo "Machine config: $MACHINES_DIR/$name/"
@@ -774,10 +852,22 @@ clone_vm() {
         hostname=$(cat "$dest_machine_dir/hostname")
         machine_id=$(cat "$dest_machine_dir/machine-id")
 
+        # Find the nixos root partition
+        local nixos_dev
+        nixos_dev=$($GUESTFISH --ro -a "$dest_vm_dir/disk.qcow2" <<'EOF'
+run
+findfs-label nixos
+EOF
+)
+        if [ -z "$nixos_dev" ]; then
+            echo "Error: Could not find nixos partition in cloned disk"
+            exit 1
+        fi
+
         echo "Updating identity in cloned disk..."
         $GUESTFISH -a "$dest_vm_dir/disk.qcow2" <<EOF
 run
-mount /dev/sda2 /
+mount $nixos_dev /
 write /etc/hostname "$hostname"
 write /etc/machine-id "$machine_id"
 EOF
@@ -950,10 +1040,10 @@ upgrade_vm() {
         echo "Error: Cannot upgrade mutable VMs from the host."
         echo ""
         echo "Mutable VMs have a standard read-write NixOS filesystem and must be"
-        echo "upgraded from inside the VM using nixos-rebuild:"
+        echo "upgraded from inside the VM:"
         echo ""
         echo "  ssh admin@<vm-ip>"
-        echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
+        echo "  sudo nixos-rebuild switch"
         echo ""
         echo "Or to upgrade packages:"
         echo "  nix-env -u '*'"

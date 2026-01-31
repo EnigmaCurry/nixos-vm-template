@@ -87,8 +87,9 @@
       mkProfileImage = system: profile:
         mkCombinedImage system [ profile ] { mutable = false; };
 
-      # Build a NixOS configuration for testing/debugging
-      mkNixosConfig = system: profile:
+      # Build a NixOS configuration for testing/debugging/rebuilding
+      # mutable: if true, configures as a mutable system (for nixos-rebuild on mutable VMs)
+      mkNixosConfig = system: profile: { mutable ? false }:
         nixpkgs.lib.nixosSystem {
           inherit system;
           specialArgs = {
@@ -99,6 +100,7 @@
             home-manager.nixosModules.home-manager
             ./profiles/${profile}.nix
             { nixpkgs.hostPlatform = system; }
+            { vm.mutable = mutable; }
           ];
         };
 
@@ -118,12 +120,21 @@
       );
 
       # NixOS configurations (for nixos-rebuild, testing)
+      # Includes both immutable (default) and mutable variants
+      # Mutable configs are named: <profile>-mutable-<system>
       nixosConfigurations = builtins.listToAttrs (
         builtins.concatMap (system:
-          map (profile: {
+          # Immutable configurations
+          (map (profile: {
             name = "${profile}-${system}";
-            value = mkNixosConfig system profile;
-          }) availableProfiles
+            value = mkNixosConfig system profile { mutable = false; };
+          }) availableProfiles)
+          ++
+          # Mutable configurations (for nixos-rebuild on mutable VMs)
+          (map (profile: {
+            name = "${profile}-mutable-${system}";
+            value = mkNixosConfig system profile { mutable = true; };
+          }) availableProfiles)
         ) supportedSystems
       );
 

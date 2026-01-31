@@ -104,5 +104,34 @@
     nix.gc.automatic = lib.mkForce true;
     nix.gc.dates = "weekly";
     nix.gc.options = "--delete-older-than 30d";
+
+    # Service to set hostname from /etc/hostname at boot
+    # (hostname is written by guestfish during VM creation)
+    systemd.services.vm-hostname = {
+      description = "Set hostname from /etc/hostname";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "network.target" ];
+      after = [ "local-fs.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        if [ -f /etc/hostname ]; then
+          hostname=$(cat /etc/hostname | tr -d '\n')
+          ${pkgs.hostname}/bin/hostname "$hostname"
+          echo "Hostname set to: $hostname"
+        fi
+      '';
+    };
+
+    # Copy NixOS modules and profiles to /etc/nixos for user rebuilds
+    # The flake.nix is generated during VM creation with the correct hostname
+    # Users can then run: sudo nixos-rebuild switch
+    environment.etc = {
+      "nixos/modules".source = ../modules;
+      "nixos/profiles".source = ../profiles;
+      # flake.nix and flake.lock are generated during VM creation
+    };
   };
 }
