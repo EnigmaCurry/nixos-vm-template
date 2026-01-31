@@ -254,18 +254,15 @@ sudo ufw route allow out on virbr0
 git clone https://github.com/EnigmaCurry/nixos-vm-template ~/nixos-vm-template
 cd ~/nixos-vm-template
 
-# Create a VM named "test" with the default "core" profile
-just create test
-
-# Start the VM
-just start test
+# Create a VM interactively (prompts for name, profile, resources, etc.)
+just create
 
 # Check VM status and get IP address
-just status test
+just status myvm
 
 # SSH into the VM
-just ssh test              # As 'user' (no sudo)
-just ssh admin@test        # As 'admin' (has sudo)
+just ssh myvm              # As 'user' (no sudo)
+just ssh admin@myvm        # As 'admin' (has sudo)
 ```
 
 ### Libvirt Storage
@@ -403,17 +400,14 @@ cd ~/nixos-vm-template
 # Test SSH connection to Proxmox
 BACKEND=proxmox just test-connection
 
-# Create a VM named "test" with the default "core" profile
-BACKEND=proxmox just create test
-
-# Start the VM
-BACKEND=proxmox just start test
+# Create a VM interactively (prompts for name, profile, resources, etc.)
+BACKEND=proxmox just create
 
 # Check status (requires QEMU guest agent to report IP)
-BACKEND=proxmox just status test
+BACKEND=proxmox just status myvm
 
 # SSH into the VM
-BACKEND=proxmox just ssh test
+BACKEND=proxmox just ssh myvm
 ```
 
 ### How It Works
@@ -505,10 +499,12 @@ just build docker,python,rust  # Build a combined image with multiple profiles
 
 | Command | Description |
 |---------|-------------|
-| `just create <name> [profiles] [memory] [vcpus] [var_size] [network]` | Create a new VM (profiles are comma-separated) |
+| `just config [name]` | Configure a VM interactively (prompts for all settings) |
+| `just create [name]` | Create a new VM interactively (runs config, builds image, starts VM) |
 | `just clone <source> <dest> [memory] [vcpus] [network]` | Clone a VM (copy /var, fresh identity) |
 | `just start <name>` | Start a VM |
-| `just stop <name>` | Gracefully stop a VM |
+| `just stop <name>` | Gracefully stop a VM (ACPI shutdown) |
+| `just reboot <name>` | Reboot a VM (ACPI reboot) |
 | `just force-stop <name>` | Force stop a VM |
 | `just upgrade <name>` | Rebuild image, preserve /var data |
 | `just resize <name>` | Interactively resize memory, vcpus, and /var disk |
@@ -520,10 +516,21 @@ just build docker,python,rust  # Build a combined image with multiple profiles
 | `just destroy <name>` | Remove VM and disks (preserves machine config) |
 | `just purge <name>` | Remove VM, disks, and machine config |
 
+The `config` and `create` commands are interactive and prompt for all settings
+(name, profile, memory, vcpus, disk size, network mode). No arguments are required:
+
 ```bash
-just create webserver docker 4096 4 50G   # Docker server with 4GB RAM, 4 CPUs, 50GB /var
-just create devbox docker,podman,dev 8192 8  # Full dev environment with Docker and Podman
-just create claude-vm claude,dev,docker,podman 8192 4  # Claude Code with full dev stack
+just config                # Configure a new VM interactively
+just create                # Create and start a new VM interactively
+```
+
+For scripted/non-interactive use, use the batch variants:
+
+```bash
+just config-batch webserver docker 4096 4 50G nat
+just create-batch webserver docker 4096 4 50G nat
+just create-batch devbox docker,podman,dev 8192 8  # Full dev environment with Docker and Podman
+just create-batch claude-vm claude,dev,docker,podman 8192 4  # Claude Code with full dev stack
 
 just network-config webserver nat         # Switch to NAT networking
 just network-config webserver bridge      # Interactive bridge selection (local bridges)
@@ -860,8 +867,10 @@ making complex operations safer and easier.
 For simple operations, use `just` commands directly:
 
 ```bash
+just create              # Create a new VM (interactive)
 just start myvm          # Start a VM
-just stop myvm           # Stop a VM
+just stop myvm           # Stop a VM (ACPI shutdown)
+just reboot myvm         # Reboot a VM (ACPI reboot)
 just status myvm         # Show VM status and IP
 just ssh myvm            # SSH as 'user'
 just ssh admin@myvm      # SSH as 'admin' (has sudo)
