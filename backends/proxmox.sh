@@ -1089,11 +1089,11 @@ create_vm() {
     fi
 
     backend_create_disks "$name" "$var_size"
+    backend_start "$name"
 
     echo ""
     if is_mutable "$name"; then
-        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
-        echo "Start with: BACKEND=proxmox just start $name"
+        echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
         echo "SSH as admin (sudo): ssh admin@<ip>"
         echo "SSH as user (no sudo): ssh user@<ip>"
@@ -1101,8 +1101,7 @@ create_vm() {
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
-        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
-        echo "Start with: BACKEND=proxmox just start $name"
+        echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
         echo "SSH as admin (sudo): ssh admin@<ip>"
         echo "SSH as user (no sudo): ssh user@<ip>"
@@ -1137,11 +1136,11 @@ create_vm_batch() {
     fi
 
     backend_create_disks "$name" "$var_size"
+    backend_start "$name"
 
     echo ""
     if is_mutable "$name"; then
-        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
-        echo "Start with: BACKEND=proxmox just start $name"
+        echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
         echo "SSH as admin (sudo): ssh admin@<ip>"
         echo "SSH as user (no sudo): ssh user@<ip>"
@@ -1149,8 +1148,7 @@ create_vm_batch() {
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
-        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
-        echo "Start with: BACKEND=proxmox just start $name"
+        echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
         echo "SSH as admin (sudo): ssh admin@<ip>"
         echo "SSH as user (no sudo): ssh user@<ip>"
