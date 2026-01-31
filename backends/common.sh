@@ -983,7 +983,7 @@ generate_mutable_flake() {
 
   outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }:
     {
-      nixosConfigurations."nixos" = nixpkgs.lib.nixosSystem {
+      nixosConfigurations."$hostname" = nixpkgs.lib.nixosSystem {
         system = "$system";
         specialArgs = {
           inherit sway-home nix-flatpak;
