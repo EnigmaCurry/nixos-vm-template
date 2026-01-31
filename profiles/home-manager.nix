@@ -158,6 +158,15 @@ in
         ++ [ swayHomeInputs.script-wizard.packages.${pkgs.system}.default ]
         ++ lib.optionals config.vm.mutable [ pkgs.home-manager ];
 
+      # On mutable VMs, unset the sway-home hm-upgrade alias so our wrapper script is used
+      # Use mkOrder 10000 to ensure this runs after sway-home's alias.sh is sourced
+      programs.bash.initExtra = lib.mkIf config.vm.mutable (lib.mkOrder 10000 ''
+        unalias hm-upgrade 2>/dev/null || true
+      '');
+      programs.zsh.initExtra = lib.mkIf config.vm.mutable (lib.mkOrder 10000 ''
+        unalias hm-upgrade 2>/dev/null || true
+      '');
+
       # Let home-manager manage itself
       programs.home-manager.enable = true;
     };
