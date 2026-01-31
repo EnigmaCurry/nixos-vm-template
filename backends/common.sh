@@ -106,10 +106,16 @@ list_profiles() {
 }
 
 # Initialize machine config directory (creates identity files if not present)
+# Optional 4th arg: ssh_key_mode - "agent" to use ssh-add keys, "skip" to skip SSH prompts
+# Optional 5th arg: admin_keys - pre-set admin SSH keys (newline-separated)
+# Optional 6th arg: user_keys - pre-set user SSH keys (newline-separated)
 init_machine() {
     local name="$1"
     local profile="${2:-core}"
     local network="${3:-nat}"
+    local ssh_key_mode="${4:-}"
+    local admin_keys="${5:-}"
+    local user_keys="${6:-}"
     local machine_dir="$MACHINES_DIR/$name"
     mkdir -p "$machine_dir"
 
@@ -168,31 +174,65 @@ init_machine() {
         echo "Created: $machine_dir/hostname"
     fi
 
-    # Prompt for admin authorized_keys if not present
+    # Handle admin authorized_keys
     if [ ! -f "$machine_dir/admin_authorized_keys" ]; then
-        echo ""
-        echo "Enter SSH public key(s) for 'admin' (has sudo access):"
-        echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
         printf '%s\n' "# SSH authorized_keys for 'admin' user (has sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/admin_authorized_keys"
-        cat >> "$machine_dir/admin_authorized_keys" || true
-        if [ "$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys")" -gt 0 ]; then
+
+        if [ -n "$admin_keys" ]; then
+            # Pre-set keys provided
+            echo "$admin_keys" >> "$machine_dir/admin_authorized_keys"
             echo "Saved: $machine_dir/admin_authorized_keys"
-        else
+        elif [ "$ssh_key_mode" = "agent" ]; then
+            # Use keys from SSH agent
+            if ssh-add -L 2>/dev/null >> "$machine_dir/admin_authorized_keys"; then
+                echo "Saved: $machine_dir/admin_authorized_keys (from SSH agent)"
+            else
+                echo "Warning: No keys in SSH agent, admin SSH login will be disabled"
+            fi
+        elif [ "$ssh_key_mode" = "skip" ]; then
             echo "No admin authorized_keys configured (admin SSH login will be disabled)"
+        else
+            # Interactive prompt (original behavior)
+            echo ""
+            echo "Enter SSH public key(s) for 'admin' (has sudo access):"
+            echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
+            cat >> "$machine_dir/admin_authorized_keys" || true
+            if [ "$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys")" -gt 0 ]; then
+                echo "Saved: $machine_dir/admin_authorized_keys"
+            else
+                echo "No admin authorized_keys configured (admin SSH login will be disabled)"
+            fi
         fi
     fi
 
-    # Prompt for user authorized_keys if not present
+    # Handle user authorized_keys
     if [ ! -f "$machine_dir/user_authorized_keys" ]; then
-        echo ""
-        echo "Enter SSH public key(s) for 'user' (no sudo access):"
-        echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
         printf '%s\n' "# SSH authorized_keys for 'user' account (no sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/user_authorized_keys"
-        cat >> "$machine_dir/user_authorized_keys" || true
-        if [ "$(grep -cv '^#\|^$' "$machine_dir/user_authorized_keys")" -gt 0 ]; then
+
+        if [ -n "$user_keys" ]; then
+            # Pre-set keys provided
+            echo "$user_keys" >> "$machine_dir/user_authorized_keys"
             echo "Saved: $machine_dir/user_authorized_keys"
-        else
+        elif [ "$ssh_key_mode" = "agent" ]; then
+            # Use keys from SSH agent
+            if ssh-add -L 2>/dev/null >> "$machine_dir/user_authorized_keys"; then
+                echo "Saved: $machine_dir/user_authorized_keys (from SSH agent)"
+            else
+                echo "Warning: No keys in SSH agent, user SSH login will be disabled"
+            fi
+        elif [ "$ssh_key_mode" = "skip" ]; then
             echo "No user authorized_keys configured (user SSH login will be disabled)"
+        else
+            # Interactive prompt (original behavior)
+            echo ""
+            echo "Enter SSH public key(s) for 'user' (no sudo access):"
+            echo "(Paste key, then press Enter, then Ctrl+D. Leave empty and press Ctrl+D to skip)"
+            cat >> "$machine_dir/user_authorized_keys" || true
+            if [ "$(grep -cv '^#\|^$' "$machine_dir/user_authorized_keys")" -gt 0 ]; then
+                echo "Saved: $machine_dir/user_authorized_keys"
+            else
+                echo "No user authorized_keys configured (user SSH login will be disabled)"
+            fi
         fi
     fi
 
@@ -426,6 +466,430 @@ set_mutable() {
     echo "Run 'just recreate $name' to apply the change."
 }
 
+# Configure a VM (creates machine config without creating the VM)
+# This is the configuration-only step that can be called separately from create
+config_vm() {
+    local name="$1"
+    local profile="${2:-core}"
+    local memory="${3:-2048}"
+    local vcpus="${4:-2}"
+    local var_size
+    var_size=$(normalize_size "${5:-30G}")
+    local network="${6:-nat}"
+
+    # Initialize machine config (creates identity files, prompts for SSH keys)
+    init_machine "$name" "$profile" "$network"
+
+    local machine_dir="$MACHINES_DIR/$name"
+
+    # Save resource configuration (only if not present, or if explicitly set to non-default)
+    if [ ! -f "$machine_dir/memory" ]; then
+        echo "$memory" > "$machine_dir/memory"
+        echo "Created: $machine_dir/memory (${memory}M)"
+    elif [ "$memory" != "2048" ]; then
+        echo "$memory" > "$machine_dir/memory"
+        echo "Updated: $machine_dir/memory (${memory}M)"
+    else
+        memory=$(cat "$machine_dir/memory")
+        echo "Using existing memory: ${memory}M"
+    fi
+
+    if [ ! -f "$machine_dir/vcpus" ]; then
+        echo "$vcpus" > "$machine_dir/vcpus"
+        echo "Created: $machine_dir/vcpus ($vcpus)"
+    elif [ "$vcpus" != "2" ]; then
+        echo "$vcpus" > "$machine_dir/vcpus"
+        echo "Updated: $machine_dir/vcpus ($vcpus)"
+    else
+        vcpus=$(cat "$machine_dir/vcpus")
+        echo "Using existing vcpus: $vcpus"
+    fi
+
+    if [ ! -f "$machine_dir/var_size" ]; then
+        echo "$var_size" > "$machine_dir/var_size"
+        echo "Created: $machine_dir/var_size ($var_size)"
+    elif [ "$var_size" != "30G" ]; then
+        echo "$var_size" > "$machine_dir/var_size"
+        echo "Updated: $machine_dir/var_size ($var_size)"
+    else
+        var_size=$(cat "$machine_dir/var_size")
+        echo "Using existing var_size: $var_size"
+    fi
+
+    echo ""
+    echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), memory: ${memory}M, vcpus: $vcpus, var: $var_size)"
+    echo "To create the VM, run: just create $name"
+}
+
+# Interactive VM configuration using script-wizard
+# All arguments are optional - will prompt for everything interactively
+# Set from_create=true when calling from create_vm to skip "run just create" message
+config_vm_interactive() {
+    local name="${1:-}"
+    local profile="${2:-}"
+    local from_create="${3:-false}"
+
+    # Determine how to run script-wizard
+    local SCRIPT_WIZARD=""
+    if command -v script-wizard &>/dev/null; then
+        SCRIPT_WIZARD="script-wizard"
+    elif command -v nix &>/dev/null && nix --version 2>&1 | grep -q "nix"; then
+        # Check if flakes are supported
+        if nix flake --help &>/dev/null; then
+            SCRIPT_WIZARD="nix run github:enigmacurry/script-wizard --"
+            echo "Using script-wizard via nix flakes..."
+        fi
+    fi
+
+    if [ -z "$SCRIPT_WIZARD" ]; then
+        echo "Error: script-wizard is not installed."
+        echo ""
+        echo "Install it from: https://github.com/enigmacurry/script-wizard"
+        echo ""
+        echo "Or if you have Nix with flakes enabled, it will be used automatically."
+        exit 1
+    fi
+
+    # Prompt for VM name if not provided
+    if [ -z "$name" ]; then
+        name=$($SCRIPT_WIZARD ask "Enter VM name:")
+        if [ -z "$name" ]; then
+            echo "Error: VM name is required."
+            exit 1
+        fi
+    fi
+
+    # Check if machine config already exists and load current values
+    local machine_dir="$MACHINES_DIR/$name"
+    local current_profile="" current_memory="" current_vcpus="" current_var_size="" current_network="" current_mutable=""
+    local is_reconfigure=false
+
+    if [ -d "$machine_dir" ]; then
+        echo "Machine config already exists: $machine_dir"
+        if ! $SCRIPT_WIZARD confirm "Reconfigure this VM?" no; then
+            echo "Aborted."
+            exit 0
+        fi
+        is_reconfigure=true
+        # Load current values (trim whitespace for simple values)
+        current_profile=$(cat "$machine_dir/profile" 2>/dev/null || true)
+        current_profile="${current_profile%"${current_profile##*[![:space:]]}"}"  # trim trailing
+        current_profile="${current_profile#"${current_profile%%[![:space:]]*}"}"  # trim leading
+        current_memory=$(cat "$machine_dir/memory" 2>/dev/null | tr -d '[:space:]' || true)
+        current_vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null | tr -d '[:space:]' || true)
+        current_var_size=$(cat "$machine_dir/var_size" 2>/dev/null | tr -d '[:space:]' || true)
+        current_network=$(cat "$machine_dir/network" 2>/dev/null || true)
+        current_network="${current_network%"${current_network##*[![:space:]]}"}"  # trim trailing
+        current_network="${current_network#"${current_network%%[![:space:]]*}"}"  # trim leading
+        current_mutable=$(cat "$machine_dir/mutable" 2>/dev/null | tr -d '[:space:]' || true)
+    fi
+
+    # Mutable mode selection: options are "Immutable" "Mutable" (indices 0-1)
+    echo ""
+    local mutable_choice mutable_default_idx="0"
+    if [ "$current_mutable" = "true" ]; then
+        mutable_default_idx="1"
+    fi
+    mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Mutable (read-write pet VM, use nixos-rebuild)")
+    local is_mutable_vm=false
+    if [[ "$mutable_choice" == "Mutable"* ]]; then
+        is_mutable_vm=true
+    fi
+    echo "Mode: $mutable_choice"
+
+    # Get list of available profiles (excluding core, which is always included)
+    local available_profiles=()
+    shopt -s nullglob
+    for f in profiles/*.nix; do
+        local pname
+        pname=$(basename "$f" .nix)
+        if [ "$pname" != "core" ]; then
+            available_profiles+=("$pname")
+        fi
+    done
+    shopt -u nullglob
+
+    # Prompt for profile(s) if not provided
+    if [ -z "$profile" ]; then
+        echo ""
+        local profile_default_arg=""
+        if [ -n "$current_profile" ]; then
+            # Convert comma-separated profile to JSON array, excluding core: "core,docker" -> '["docker"]'
+            local profile_without_core profile_json
+            profile_without_core=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | tr '\n' ',' | sed 's/,$//')
+            if [ -n "$profile_without_core" ]; then
+                profile_json=$(echo "$profile_without_core" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
+                profile_default_arg="--default $profile_json"
+            fi
+        fi
+        readarray -t selected_profiles < <($SCRIPT_WIZARD select $profile_default_arg "Select profile(s) to include:" "${available_profiles[@]}")
+        if [ ${#selected_profiles[@]} -eq 0 ]; then
+            profile="core"
+        else
+            profile=$(IFS=,; echo "${selected_profiles[*]}")
+        fi
+    fi
+    echo "Selected profile(s): $profile"
+
+    # Memory: options are "1G" "2G" "4G" "8G" "16G" "32G" "Custom" (indices 0-6)
+    echo ""
+    local memory_choice memory_default_idx=""
+    if [ -n "$current_memory" ]; then
+        case "$current_memory" in
+            "1024") memory_default_idx="0" ;;
+            "2048") memory_default_idx="1" ;;
+            "4096") memory_default_idx="2" ;;
+            "8192") memory_default_idx="3" ;;
+            "16384") memory_default_idx="4" ;;
+            "32768") memory_default_idx="5" ;;
+            *) memory_default_idx="6" ;;  # Custom
+        esac
+    fi
+    if [ -n "$memory_default_idx" ]; then
+        memory_choice=$($SCRIPT_WIZARD choose -d "$memory_default_idx" "Select memory size:" "1G" "2G" "4G" "8G" "16G" "32G" "Custom")
+    else
+        memory_choice=$($SCRIPT_WIZARD choose "Select memory size:" "1G" "2G" "4G" "8G" "16G" "32G" "Custom")
+    fi
+    case "$memory_choice" in
+        "1G") memory="1024" ;;
+        "2G") memory="2048" ;;
+        "4G") memory="4096" ;;
+        "8G") memory="8192" ;;
+        "16G") memory="16384" ;;
+        "32G") memory="32768" ;;
+        "Custom")
+            local custom_mem
+            custom_mem=$($SCRIPT_WIZARD ask "Enter memory in MB (e.g., 3072):" "$current_memory")
+            memory="${custom_mem:-2048}"
+            ;;
+        *) memory="2048" ;;
+    esac
+    echo "Memory: ${memory}M"
+
+    # vCPU selection
+    echo ""
+    # vCPUs: options are "1" "2" "4" "8" "Custom" (indices 0-4)
+    local vcpu_choice vcpu_default_idx=""
+    if [ -n "$current_vcpus" ]; then
+        case "$current_vcpus" in
+            "1") vcpu_default_idx="0" ;;
+            "2") vcpu_default_idx="1" ;;
+            "4") vcpu_default_idx="2" ;;
+            "8") vcpu_default_idx="3" ;;
+            *) vcpu_default_idx="4" ;;  # Custom
+        esac
+    fi
+    if [ -n "$vcpu_default_idx" ]; then
+        vcpu_choice=$($SCRIPT_WIZARD choose -d "$vcpu_default_idx" "Select number of vCPUs:" "1" "2" "4" "8" "Custom")
+    else
+        vcpu_choice=$($SCRIPT_WIZARD choose "Select number of vCPUs:" "1" "2" "4" "8" "Custom")
+    fi
+    case "$vcpu_choice" in
+        "1") vcpus="1" ;;
+        "2") vcpus="2" ;;
+        "4") vcpus="4" ;;
+        "8") vcpus="8" ;;
+        "Custom")
+            local custom_vcpus
+            custom_vcpus=$($SCRIPT_WIZARD ask "Enter number of vCPUs:" "$current_vcpus")
+            vcpus="${custom_vcpus:-2}"
+            ;;
+        *) vcpus="2" ;;
+    esac
+    echo "vCPUs: $vcpus"
+
+    # Disk: options are "20G" "30G" "50G" "100G" "200G" "500G" "Custom" (indices 0-6)
+    echo ""
+    local disk_choice disk_default_idx=""
+    if [ -n "$current_var_size" ]; then
+        case "$current_var_size" in
+            "20G") disk_default_idx="0" ;;
+            "30G") disk_default_idx="1" ;;
+            "50G") disk_default_idx="2" ;;
+            "100G") disk_default_idx="3" ;;
+            "200G") disk_default_idx="4" ;;
+            "500G") disk_default_idx="5" ;;
+            *) disk_default_idx="6" ;;  # Custom
+        esac
+    fi
+    if [ -n "$disk_default_idx" ]; then
+        disk_choice=$($SCRIPT_WIZARD choose -d "$disk_default_idx" "Select /var disk size:" "20G" "30G" "50G" "100G" "200G" "500G" "Custom")
+    else
+        disk_choice=$($SCRIPT_WIZARD choose "Select /var disk size:" "20G" "30G" "50G" "100G" "200G" "500G" "Custom")
+    fi
+    case "$disk_choice" in
+        "20G") var_size="20G" ;;
+        "30G") var_size="30G" ;;
+        "50G") var_size="50G" ;;
+        "100G") var_size="100G" ;;
+        "200G") var_size="200G" ;;
+        "500G") var_size="500G" ;;
+        "Custom")
+            local custom_size
+            custom_size=$($SCRIPT_WIZARD ask "Enter disk size (e.g., 40G):" "$current_var_size")
+            var_size="${custom_size:-30G}"
+            ;;
+        *) var_size="30G" ;;
+    esac
+    echo "Disk size: $var_size"
+
+    # Network: options are "NAT" "Bridge" (indices 0-1)
+    echo ""
+    local network_choice network_default_idx=""
+    if [ -n "$current_network" ]; then
+        case "$current_network" in
+            "nat") network_default_idx="0" ;;
+            bridge*) network_default_idx="1" ;;
+        esac
+    fi
+    if [ -n "$network_default_idx" ]; then
+        network_choice=$($SCRIPT_WIZARD choose -d "$network_default_idx" "Select network mode:" "NAT" "Bridge")
+    else
+        network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT" "Bridge")
+    fi
+    case "$network_choice" in
+        "NAT") network="nat" ;;
+        "Bridge") network="bridge" ;;
+        *) network="nat" ;;
+    esac
+    echo "Network: $network"
+
+    # SSH keys selection
+    echo ""
+    local ssh_key_mode=""
+    local admin_keys=""
+    local user_keys=""
+
+    # Check if SSH agent has keys
+    local agent_key_count=0
+    if ssh-add -L &>/dev/null; then
+        agent_key_count=$(ssh-add -L 2>/dev/null | wc -l)
+    fi
+
+    # Check if existing keys are configured
+    local has_existing_keys=false
+    if [ "$is_reconfigure" = true ] && [ -f "$machine_dir/admin_authorized_keys" ]; then
+        local existing_key_count
+        existing_key_count=$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys" 2>/dev/null || echo "0")
+        if [ "$existing_key_count" -gt 0 ]; then
+            has_existing_keys=true
+        fi
+    fi
+
+    if [ "$has_existing_keys" = true ]; then
+        local ssh_choice
+        if [ "$agent_key_count" -gt 0 ]; then
+            ssh_choice=$($SCRIPT_WIZARD choose --default "Keep existing keys" "SSH authorized keys:" "Keep existing keys" "Use current SSH agent keys ($agent_key_count key(s))" "Enter keys manually" "Skip (no SSH access)")
+        else
+            ssh_choice=$($SCRIPT_WIZARD choose --default "Keep existing keys" "SSH authorized keys:" "Keep existing keys" "Enter keys manually" "Skip (no SSH access)")
+        fi
+        case "$ssh_choice" in
+            "Keep existing keys"*) ssh_key_mode="keep" ;;
+            "Use current SSH agent keys"*) ssh_key_mode="agent" ;;
+            "Enter keys manually") ssh_key_mode="manual" ;;
+            "Skip"*) ssh_key_mode="skip" ;;
+            *) ssh_key_mode="keep" ;;
+        esac
+    elif [ "$agent_key_count" -gt 0 ]; then
+        local ssh_choice
+        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Use current SSH agent keys ($agent_key_count key(s))" "Enter keys manually" "Skip (no SSH access)")
+        case "$ssh_choice" in
+            "Use current SSH agent keys"*) ssh_key_mode="agent" ;;
+            "Enter keys manually") ssh_key_mode="manual" ;;
+            "Skip"*) ssh_key_mode="skip" ;;
+            *) ssh_key_mode="agent" ;;
+        esac
+    else
+        local ssh_choice
+        ssh_choice=$($SCRIPT_WIZARD choose "SSH authorized keys:" "Enter keys manually" "Skip (no SSH access)")
+        case "$ssh_choice" in
+            "Enter keys manually"*) ssh_key_mode="manual" ;;
+            "Skip"*) ssh_key_mode="skip" ;;
+            *) ssh_key_mode="manual" ;;
+        esac
+    fi
+
+    if [ "$ssh_key_mode" = "manual" ]; then
+        echo ""
+        echo "Enter SSH public key(s) for 'admin' (has sudo access):"
+        admin_keys=$($SCRIPT_WIZARD editor "Enter admin SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+        # Remove comment lines
+        admin_keys=$(echo "$admin_keys" | grep -v '^#' | grep -v '^$' || true)
+
+        echo ""
+        local same_keys
+        same_keys=$($SCRIPT_WIZARD choose "User account SSH keys:" "Same as admin" "Enter different keys" "No user SSH access")
+        case "$same_keys" in
+            "Same as admin"*) user_keys="$admin_keys" ;;
+            "Enter different keys")
+                echo ""
+                echo "Enter SSH public key(s) for 'user' (no sudo access):"
+                user_keys=$($SCRIPT_WIZARD editor "Enter user SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+                user_keys=$(echo "$user_keys" | grep -v '^#' | grep -v '^$' || true)
+                ;;
+            *) user_keys="" ;;
+        esac
+    fi
+
+    echo ""
+    echo "Configuration summary:"
+    echo "  Name:    $name"
+    echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || echo "immutable")"
+    echo "  Profile: $profile"
+    echo "  Memory:  ${memory}M"
+    echo "  vCPUs:   $vcpus"
+    echo "  Disk:    $var_size"
+    echo "  Network: $network"
+    echo "  SSH:     $ssh_key_mode"
+    echo ""
+
+    if ! $SCRIPT_WIZARD confirm "Create this configuration?" yes; then
+        echo "Aborted."
+        exit 0
+    fi
+
+    # Initialize machine with collected values
+    if [ "$ssh_key_mode" = "keep" ]; then
+        # Keep existing keys - just update other settings
+        init_machine "$name" "$profile" "$network" "skip"
+    elif [ "$ssh_key_mode" = "manual" ]; then
+        init_machine "$name" "$profile" "$network" "" "$admin_keys" "$user_keys"
+    else
+        init_machine "$name" "$profile" "$network" "$ssh_key_mode"
+    fi
+
+    # Save resource configuration
+    echo "$memory" > "$machine_dir/memory"
+    echo "Created: $machine_dir/memory (${memory}M)"
+
+    echo "$vcpus" > "$machine_dir/vcpus"
+    echo "Created: $machine_dir/vcpus ($vcpus)"
+
+    local normalized_var_size
+    normalized_var_size=$(normalize_size "$var_size")
+    echo "$normalized_var_size" > "$machine_dir/var_size"
+    echo "Created: $machine_dir/var_size ($normalized_var_size)"
+
+    # Save mutable mode
+    if [ "$is_mutable_vm" = true ]; then
+        echo "true" > "$machine_dir/mutable"
+        echo "Created: $machine_dir/mutable (true)"
+    else
+        rm -f "$machine_dir/mutable"
+        echo "Removed: $machine_dir/mutable (immutable mode)"
+    fi
+
+    echo ""
+    local mode_str="immutable"
+    if [ "$is_mutable_vm" = true ]; then
+        mode_str="mutable"
+    fi
+    echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), mode: $mode_str, memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
+    if [ "$from_create" != "true" ]; then
+        echo "To create the VM, run: just create $name"
+    fi
+}
+
 # List all machine configs
 list_machines() {
     echo "Machine configs in $MACHINES_DIR/:"
@@ -483,6 +947,63 @@ stop_graceful() {
 clean() {
     rm -rf "$OUTPUT_DIR"
     echo "Cleaned $OUTPUT_DIR/"
+}
+
+# Generate flake.nix content for mutable VMs
+# Usage: generate_mutable_flake <hostname> <system> <profile>
+# Outputs flake.nix content to stdout
+generate_mutable_flake() {
+    local hostname="$1"
+    local system="$2"
+    local profile="$3"
+
+    # Build profile imports
+    local profile_imports=""
+    IFS=',' read -ra profile_parts <<< "$profile"
+    for p in "${profile_parts[@]}"; do
+        profile_imports="$profile_imports          ./profiles/${p}.nix"$'\n'
+    done
+
+    cat << FLAKE_EOF
+{
+  description = "NixOS VM configuration";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    sway-home = {
+      url = "github:EnigmaCurry/sway-home?dir=home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-flatpak.url = "github:gmodena/nix-flatpak";
+  };
+
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }:
+    {
+      nixosConfigurations."$hostname" = nixpkgs.lib.nixosSystem {
+        system = "$system";
+        specialArgs = {
+          inherit sway-home nix-flatpak;
+          swayHomeInputs = sway-home.inputs;
+        };
+        modules = [
+          # Core modules (see modules/default.nix)
+          ./modules
+          home-manager.nixosModules.home-manager
+          # Profile modules
+$profile_imports          # VM-specific settings
+          {
+            vm.mutable = true;
+            networking.hostName = "$hostname";
+          }
+        ];
+      };
+    };
+}
+FLAKE_EOF
 }
 
 # Enter development shell

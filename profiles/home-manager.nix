@@ -5,8 +5,28 @@
 
 let
   regularUser = config.core.regularUser;
+  swayHomePath = "$HOME/git/vendor/enigmacurry/sway-home";
+  swayHomeRepo = "https://github.com/enigmacurry/sway-home.git";
+
+  # Wrapper script for hm-upgrade that clones sway-home if needed
+  hmUpgradeScript = pkgs.writeShellScriptBin "hm-upgrade" ''
+    set -e
+    SWAY_HOME="${swayHomePath}"
+    SWAY_HOME_REPO="${swayHomeRepo}"
+
+    if [ ! -d "$SWAY_HOME" ]; then
+      echo "Cloning sway-home repository..."
+      mkdir -p "$(dirname "$SWAY_HOME")"
+      ${pkgs.git}/bin/git clone "$SWAY_HOME_REPO" "$SWAY_HOME"
+      echo "sway-home cloned."
+    fi
+
+    exec ${pkgs.just}/bin/just -f "$SWAY_HOME/Justfile" hm-upgrade
+  '';
 in
 {
+  # On mutable VMs, provide hm-upgrade script (overrides sway-home's alias)
+  environment.systemPackages = lib.mkIf config.vm.mutable [ hmUpgradeScript ];
 
   # The standard home-manager activation fails on immutable systems because
   # nix-store commands require a writable /nix with a valid database.
@@ -133,8 +153,19 @@ in
       ];
 
       # Install packages from sway-home
+      # On mutable VMs, include home-manager CLI for hm-upgrade
       home.packages = import "${sway-home}/modules/packages.nix" { inherit pkgs; }
-        ++ [ swayHomeInputs.script-wizard.packages.${pkgs.system}.default ];
+        ++ [ swayHomeInputs.script-wizard.packages.${pkgs.system}.default ]
+        ++ lib.optionals config.vm.mutable [ pkgs.home-manager ];
+
+      # On mutable VMs, unset the sway-home hm-upgrade alias so our wrapper script is used
+      # Use mkOrder 10000 to ensure this runs after sway-home's alias.sh is sourced
+      programs.bash.initExtra = lib.mkIf config.vm.mutable (lib.mkOrder 10000 ''
+        unalias hm-upgrade 2>/dev/null || true
+      '');
+      programs.zsh.initExtra = lib.mkIf config.vm.mutable (lib.mkOrder 10000 ''
+        unalias hm-upgrade 2>/dev/null || true
+      '');
 
       # Let home-manager manage itself
       programs.home-manager.enable = true;

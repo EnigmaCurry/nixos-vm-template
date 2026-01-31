@@ -14,6 +14,10 @@
   };
 
   config = lib.mkIf config.vm.mutable {
+    # Don't let NixOS manage /etc/hostname - we set it via guestfish and vm-hostname service
+    # This prevents NixOS from overwriting our hostname during activation
+    networking.hostName = lib.mkForce "";
+
     # Standard writable root filesystem
     # Use mkForce to override nixos-generators qcow format defaults
     # Keep the label-based device from nixos-generators but make it read-write
@@ -104,5 +108,52 @@
     nix.gc.automatic = lib.mkForce true;
     nix.gc.dates = "weekly";
     nix.gc.options = "--delete-older-than 30d";
+
+    # Include cloud-utils for growpart
+    environment.systemPackages = [ pkgs.cloud-utils ];
+
+    # Grow root partition and filesystem on boot if disk was resized
+    systemd.services.grow-root-partition = {
+      description = "Grow root partition to fill disk";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "local-fs.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        # Grow partition 3 (root) to fill available space
+        # Layout: vda1=ESP, vda2=BIOS boot, vda3=root (nixos label)
+        ${pkgs.cloud-utils}/bin/growpart /dev/vda 3 || true
+        # Resize filesystem (online resize supported for ext4)
+        ${pkgs.e2fsprogs}/bin/resize2fs /dev/vda3 || true
+      '';
+    };
+
+    # Service to set hostname from /etc/hostname at boot
+    # (hostname is written by guestfish during VM creation)
+    # Runs early in boot before network services start
+    systemd.services.vm-hostname = {
+      description = "Set hostname from /etc/hostname";
+      wantedBy = [ "sysinit.target" ];
+      before = [ "network-pre.target" "systemd-hostnamed.service" ];
+      after = [ "local-fs.target" ];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        if [ -f /etc/hostname ]; then
+          hostname=$(cat /etc/hostname | tr -d '\n')
+          ${pkgs.hostname}/bin/hostname "$hostname"
+          echo "Hostname set to: $hostname"
+        fi
+      '';
+    };
+
+    # NixOS modules and profiles are copied to /etc/nixos/ during VM creation
+    # via guestfish (alongside flake.nix and flake.lock). This avoids pure
+    # evaluation issues that occur when environment.etc references paths.
   };
 }

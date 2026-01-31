@@ -554,6 +554,35 @@ EOF
         eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
     fi
 
+    # Detect system architecture
+    local system
+    system=$(uname -m)
+    case "$system" in
+        x86_64) system="x86_64-linux" ;;
+        aarch64) system="aarch64-linux" ;;
+        *) system="x86_64-linux" ;;  # default
+    esac
+
+    # Generate /etc/nixos/flake.nix for nixos-rebuild
+    generate_mutable_flake "$hostname" "$system" "$profile" > "$tmp_dir/flake.nix"
+
+    # Copy the project's flake.lock to keep inputs pinned
+    cp "$BACKEND_DIR/../flake.lock" "$tmp_dir/flake.lock"
+
+    # Copy modules and profiles directories for nixos-rebuild
+    # Use --no-preserve=mode to avoid read-only files from nix store
+    cp -r --no-preserve=mode "$BACKEND_DIR/../modules" "$tmp_dir/modules"
+    cp -r --no-preserve=mode "$BACKEND_DIR/../profiles" "$tmp_dir/profiles"
+
+    gf_cmds="run : mount $nixos_dev /"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.nix /etc/nixos/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.lock /etc/nixos/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/modules /etc/nixos/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/profiles /etc/nixos/"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/nixos/flake.nix"
+    gf_cmds="$gf_cmds : chmod 0644 /etc/nixos/flake.lock"
+    eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
+
     rm -rf "$tmp_dir"
 
     # Determine VMID: user-specified > existing file > auto-allocate
@@ -652,8 +681,8 @@ EOF
     echo "  Disk imported to $PVE_STORAGE ($disk_size)"
     echo "  Hostname: $hostname"
     echo ""
-    echo "NOTE: This is a mutable VM. Upgrades must be done inside the VM with:"
-    echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
+    echo "NOTE: This is a mutable VM. To rebuild/upgrade from inside the VM:"
+    echo "  sudo nixos-rebuild switch"
 }
 
 # Sync identity files from machine config to existing /var disk on Proxmox
@@ -1040,15 +1069,17 @@ backend_cleanup() {
 # Create a new VM: build profile, create machine config, create disks, configure
 create_vm() {
     local name="$1"
-    local profile="${2:-core}"
-    local memory="${3:-2048}"
-    local vcpus="${4:-2}"
-    local var_size
-    var_size=$(normalize_size "${5:-30G}")
-    local network="${6:-nat}"
 
-    # Initialize machine config first (so we can check mutable status)
-    init_machine "$name" "$profile" "$network"
+    # Configure machine interactively (prompts for all settings)
+    config_vm_interactive "$name" "" "true"
+
+    # Read back the configured values from machine config
+    local machine_dir="$MACHINES_DIR/$name"
+    local profile memory vcpus var_size
+    profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "core")
+    memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
+    vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
+    var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "30G")
 
     # Build appropriate image variant
     if is_mutable "$name"; then
@@ -1056,10 +1087,6 @@ create_vm() {
     else
         build_profile "$profile" "false"
     fi
-
-    # Save memory/vcpus to machine config
-    echo "$memory" > "$MACHINES_DIR/$name/memory"
-    echo "$vcpus" > "$MACHINES_DIR/$name/vcpus"
 
     backend_create_disks "$name" "$var_size"
 
@@ -1072,7 +1099,55 @@ create_vm() {
         echo "SSH as user (no sudo): ssh user@<ip>"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
-        echo "Upgrades must be done inside the VM with nixos-rebuild."
+        echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
+    else
+        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
+        echo "Start with: BACKEND=proxmox just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+    fi
+}
+
+# Create a new VM non-interactively with explicit values (for scripting)
+create_vm_batch() {
+    local name="$1"
+    local profile="${2:-core}"
+    local memory="${3:-2048}"
+    local vcpus="${4:-2}"
+    local var_size
+    var_size=$(normalize_size "${5:-30G}")
+    local network="${6:-nat}"
+
+    # Configure machine non-interactively
+    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network"
+
+    # Read back the configured values from machine config
+    local machine_dir="$MACHINES_DIR/$name"
+    profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "$profile")
+    memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "$memory")
+    vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "$vcpus")
+    var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "$var_size")
+
+    # Build appropriate image variant
+    if is_mutable "$name"; then
+        build_profile "$profile" "true"
+    else
+        build_profile "$profile" "false"
+    fi
+
+    backend_create_disks "$name" "$var_size"
+
+    echo ""
+    if is_mutable "$name"; then
+        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
+        echo "Start with: BACKEND=proxmox just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo ""
+        echo "NOTE: This is a mutable VM with full nix toolchain."
+        echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Start with: BACKEND=proxmox just start $name"
@@ -1362,10 +1437,10 @@ upgrade_vm() {
         echo "Error: Cannot upgrade mutable VMs from the host."
         echo ""
         echo "Mutable VMs have a standard read-write NixOS filesystem and must be"
-        echo "upgraded from inside the VM using nixos-rebuild:"
+        echo "upgraded from inside the VM:"
         echo ""
         echo "  ssh admin@<vm-ip>"
-        echo "  sudo nixos-rebuild switch --flake <your-flake>#<config>"
+        echo "  sudo nixos-rebuild switch"
         echo ""
         echo "Or to upgrade packages:"
         echo "  nix-env -u '*'"
