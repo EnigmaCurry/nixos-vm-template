@@ -14,6 +14,10 @@
   };
 
   config = lib.mkIf config.vm.mutable {
+    # Don't let NixOS manage /etc/hostname - we set it via guestfish and vm-hostname service
+    # This prevents NixOS from overwriting our hostname during activation
+    networking.hostName = lib.mkForce "";
+
     # Standard writable root filesystem
     # Use mkForce to override nixos-generators qcow format defaults
     # Keep the label-based device from nixos-generators but make it read-write
@@ -107,11 +111,13 @@
 
     # Service to set hostname from /etc/hostname at boot
     # (hostname is written by guestfish during VM creation)
+    # Runs early in boot before network services start
     systemd.services.vm-hostname = {
       description = "Set hostname from /etc/hostname";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "network.target" ];
+      wantedBy = [ "sysinit.target" ];
+      before = [ "network-pre.target" "systemd-hostnamed.service" ];
       after = [ "local-fs.target" ];
+      unitConfig.DefaultDependencies = false;
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
