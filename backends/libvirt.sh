@@ -359,21 +359,8 @@ EOF
           swayHomeInputs = sway-home.inputs;
         };
         modules = [
-          # Core modules
-          ./modules/base.nix
-          ./modules/filesystem.nix
-          ./modules/boot.nix
-          ./modules/overlay-etc.nix
-          ./modules/journald.nix
-          ./modules/immutable.nix
-          ./modules/mutable.nix
-          ./modules/identity.nix
-          ./modules/firewall-identity.nix
-          ./modules/dns-identity.nix
-          ./modules/hosts-identity.nix
-          ./modules/root-password.nix
-          ./modules/guest-agent.nix
-          ./modules/zram.nix
+          # Core modules (see modules/default.nix)
+          ./modules
           home-manager.nixosModules.home-manager
           # Profile modules
 $profile_imports          # Mutable mode

@@ -26,23 +26,8 @@
       supportedSystems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = lib.genAttrs supportedSystems;
 
-      # Core modules (always included)
-      coreModules = [
-        ./modules/base.nix
-        ./modules/filesystem.nix
-        ./modules/boot.nix
-        ./modules/overlay-etc.nix
-        ./modules/journald.nix
-        ./modules/immutable.nix
-        ./modules/mutable.nix
-        ./modules/identity.nix
-        ./modules/firewall-identity.nix
-        ./modules/dns-identity.nix
-        ./modules/hosts-identity.nix
-        ./modules/root-password.nix
-        ./modules/guest-agent.nix
-        ./modules/zram.nix
-      ];
+      # Core modules (always included) - see modules/default.nix for the list
+      coreModules = [ ./modules ];
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
