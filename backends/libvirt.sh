@@ -328,7 +328,7 @@ EOF
     # Generate /etc/nixos/flake.nix with hostname-based configuration
     # This allows standard `nixos-rebuild switch` to work
     local profile_imports=""
-    IFS='+' read -ra profile_parts <<< "$profile"
+    IFS=',' read -ra profile_parts <<< "$profile"
     for p in "${profile_parts[@]}"; do
         profile_imports="$profile_imports          ./profiles/${p}.nix"$'\n'
     done
