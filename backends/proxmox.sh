@@ -1118,6 +1118,49 @@ backend_cleanup() {
 # Create a new VM: build profile, create machine config, create disks, configure
 create_vm() {
     local name="$1"
+
+    # Configure machine interactively (prompts for all settings)
+    config_vm_interactive "$name" "" "true"
+
+    # Read back the configured values from machine config
+    local machine_dir="$MACHINES_DIR/$name"
+    local profile memory vcpus var_size
+    profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "core")
+    memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "2048")
+    vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
+    var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "30G")
+
+    # Build appropriate image variant
+    if is_mutable "$name"; then
+        build_profile "$profile" "true"
+    else
+        build_profile "$profile" "false"
+    fi
+
+    backend_create_disks "$name" "$var_size"
+
+    echo ""
+    if is_mutable "$name"; then
+        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
+        echo "Start with: BACKEND=proxmox just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo ""
+        echo "NOTE: This is a mutable VM with full nix toolchain."
+        echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
+    else
+        echo "VM '$name' is ready on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
+        echo "Start with: BACKEND=proxmox just start $name"
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@<ip>"
+        echo "SSH as user (no sudo): ssh user@<ip>"
+    fi
+}
+
+# Create a new VM non-interactively with explicit values (for scripting)
+create_vm_batch() {
+    local name="$1"
     local profile="${2:-core}"
     local memory="${3:-2048}"
     local vcpus="${4:-2}"
@@ -1125,10 +1168,10 @@ create_vm() {
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
 
-    # Configure machine first (creates identity files, saves resource config)
+    # Configure machine non-interactively
     config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network"
 
-    # Read back the configured values (may have been normalized or pre-existing)
+    # Read back the configured values from machine config
     local machine_dir="$MACHINES_DIR/$name"
     profile=$(cat "$machine_dir/profile" 2>/dev/null || echo "$profile")
     memory=$(cat "$machine_dir/memory" 2>/dev/null || echo "$memory")

@@ -523,9 +523,11 @@ config_vm() {
 
 # Interactive VM configuration using script-wizard
 # All arguments are optional - will prompt for everything interactively
+# Set from_create=true when calling from create_vm to skip "run just create" message
 config_vm_interactive() {
     local name="${1:-}"
     local profile="${2:-}"
+    local from_create="${3:-false}"
 
     # Determine how to run script-wizard
     local SCRIPT_WIZARD=""
@@ -883,7 +885,9 @@ config_vm_interactive() {
         mode_str="mutable"
     fi
     echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), mode: $mode_str, memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
-    echo "To create the VM, run: just create $name"
+    if [ "$from_create" != "true" ]; then
+        echo "To create the VM, run: just create $name"
+    fi
 }
 
 # List all machine configs
