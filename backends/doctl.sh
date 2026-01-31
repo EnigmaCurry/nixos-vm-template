@@ -28,24 +28,34 @@ DO_VPC_UUID="${DO_VPC_UUID:-}"  # Optional: use default VPC if not set
 DO_SSH_KEY_IDS="${DO_SSH_KEY_IDS:-}"  # Comma-separated SSH key IDs or fingerprints
 DO_IMAGE_UPLOAD_TIMEOUT="${DO_IMAGE_UPLOAD_TIMEOUT:-1800}"  # 30 min default
 
-# doctl command (can be overridden)
-DOCTL="${DOCTL:-doctl}"
+# doctl command: use system binary if available, otherwise nix run
+_detect_doctl() {
+    if [ -n "${DOCTL:-}" ]; then
+        echo "$DOCTL"
+    elif command -v doctl &>/dev/null; then
+        echo "doctl"
+    else
+        echo "$NIX run nixpkgs#doctl --"
+    fi
+}
+DOCTL="$(_detect_doctl)"
 
 # --- Validation ---
 
 _do_validate() {
-    if ! command -v "$DOCTL" &>/dev/null; then
+    # Test that doctl is available
+    if ! $DOCTL version &>/dev/null; then
         echo "Error: doctl CLI not found."
         echo ""
-        echo "Install doctl: https://docs.digitalocean.com/reference/doctl/how-to/install/"
-        echo "Then authenticate: doctl auth init"
+        echo "Install: https://docs.digitalocean.com/reference/doctl/how-to/install/"
+        echo "Or use: nix run nixpkgs#doctl -- <command>"
         exit 1
     fi
 
     # Check if authenticated
     if ! $DOCTL account get &>/dev/null; then
         echo "Error: doctl not authenticated."
-        echo "Run: doctl auth init"
+        echo "Run: $DOCTL auth init"
         exit 1
     fi
 }
