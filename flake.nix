@@ -47,22 +47,29 @@
 
       # Build a combined VM image for a given system and list of profiles
       # mutable: if true, builds a standard read-write NixOS system
-      mkCombinedImage = system: profileList: { mutable ? false }:
+      # format: "qcow" (default, for libvirt/proxmox) or "do" (DigitalOcean)
+      mkCombinedImage = system: profileList: { mutable ? false, format ? "qcow" }:
         let
           # Always include core, sort for canonical naming, dedupe
           allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
           profileModules = map (p: ./profiles/${p}.nix) allProfiles;
+          # DO images need larger default disk size (can be resized after upload)
+          formatSpecificModules = if format == "do" then [{
+            # DigitalOcean-specific settings
+            virtualisation.diskSize = 8 * 1024;  # 8GB base image
+            # Override DO module's empty hostname - will be set via cloud-init
+            networking.hostName = lib.mkForce "nixos";
+          }] else [];
         in
         nixos-generators.nixosGenerate {
-          inherit system;
-          format = "qcow";
+          inherit system format;
           specialArgs = {
             inherit sway-home nix-flatpak;
             swayHomeInputs = sway-home.inputs;
           };
           modules = coreModules ++ [
             home-manager.nixosModules.home-manager
-          ] ++ profileModules ++ [
+          ] ++ profileModules ++ formatSpecificModules ++ [
             { nixpkgs.hostPlatform = system; }
             { vm.mutable = mutable; }
           ];

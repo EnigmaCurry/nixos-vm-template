@@ -55,11 +55,13 @@ is_mutable() {
 }
 
 # Build a profile's base image (supports comma-separated profile combinations)
-# Usage: build_profile <profiles> [mutable]
+# Usage: build_profile <profiles> [mutable] [format]
 # If mutable=true, builds a mutable (read-write) image
+# format: "qcow" (default) or "do" (DigitalOcean)
 build_profile() {
     local profiles="${1:-core}"
     local mutable="${2:-false}"
+    local format="${3:-qcow}"
 
     # Normalize to canonical profile key
     local profile_key
@@ -69,10 +71,14 @@ build_profile() {
     local output_key="$profile_key"
     if [ "$mutable" = "true" ]; then
         output_key="${profile_key}-mutable"
-        echo "Building mutable profile: $profile_key"
-    else
-        echo "Building immutable profile: $profile_key"
     fi
+
+    # Add format suffix for non-default formats
+    if [ "$format" != "qcow" ]; then
+        output_key="${output_key}-${format}"
+    fi
+
+    echo "Building profile: $profile_key (mutable=$mutable, format=$format)"
     mkdir -p "$OUTPUT_DIR/profiles"
 
     # Convert comma-separated to nix list format: "docker,python" -> '["docker" "python"]'
@@ -81,7 +87,7 @@ build_profile() {
 
     $NIX build --impure --expr "
       let flake = builtins.getFlake \"$SCRIPT_DIR\";
-      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; }
+      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; format = \"$format\"; }
     " --out-link "$OUTPUT_DIR/profiles/$output_key"
 
     echo "Built: $OUTPUT_DIR/profiles/$output_key"
