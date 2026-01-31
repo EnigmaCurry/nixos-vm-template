@@ -109,6 +109,26 @@
     nix.gc.dates = "weekly";
     nix.gc.options = "--delete-older-than 30d";
 
+    # Include cloud-utils for growpart
+    environment.systemPackages = [ pkgs.cloud-utils ];
+
+    # Grow root partition and filesystem on boot if disk was resized
+    systemd.services.grow-root-partition = {
+      description = "Grow root partition to fill disk";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "local-fs.target" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        # Grow partition 2 (root) to fill available space
+        ${pkgs.cloud-utils}/bin/growpart /dev/vda 2 || true
+        # Resize filesystem (online resize supported for ext4)
+        ${pkgs.e2fsprogs}/bin/resize2fs /dev/vda2 || true
+      '';
+    };
+
     # Service to set hostname from /etc/hostname at boot
     # (hostname is written by guestfish during VM creation)
     # Runs early in boot before network services start
