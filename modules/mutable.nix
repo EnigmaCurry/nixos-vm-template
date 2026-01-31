@@ -4,7 +4,7 @@
 #
 # Other modules check config.vm.mutable to conditionally enable
 # immutable-specific features (bind mounts, identity loading, etc.)
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, vmModulesPath ? null, vmProfilesPath ? null, ... }:
 
 {
   options.vm.mutable = lib.mkOption {
@@ -128,9 +128,10 @@
     # Copy NixOS modules and profiles to /etc/nixos for user rebuilds
     # The flake.nix is generated during VM creation with the correct hostname
     # Users can then run: sudo nixos-rebuild switch
+    # Paths are passed via specialArgs from the flake to avoid pure eval issues
     environment.etc = {
-      "nixos/modules".source = ../modules;
-      "nixos/profiles".source = ../profiles;
+      "nixos/modules".source = if vmModulesPath != null then vmModulesPath else ../modules;
+      "nixos/profiles".source = if vmProfilesPath != null then vmProfilesPath else ../profiles;
       # flake.nix and flake.lock are generated during VM creation
     };
   };

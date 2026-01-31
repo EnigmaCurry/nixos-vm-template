@@ -988,6 +988,9 @@ generate_mutable_flake() {
         specialArgs = {
           inherit sway-home nix-flatpak;
           swayHomeInputs = sway-home.inputs;
+          # Paths for mutable.nix to copy to /etc/nixos
+          vmModulesPath = ./modules;
+          vmProfilesPath = ./profiles;
         };
         modules = [
           # Core modules (see modules/default.nix)
