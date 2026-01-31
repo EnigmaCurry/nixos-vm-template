@@ -5,8 +5,20 @@
 
 let
   regularUser = config.core.regularUser;
+  swayHomePath = "~/git/vendor/enigmacurry/sway-home";
+  swayHomeRepo = "https://github.com/enigmacurry/sway-home.git";
 in
 {
+  # On mutable VMs, clone sway-home repo on first login so hm-upgrade works
+  # The hm-upgrade alias calls: just -f ~/git/vendor/enigmacurry/sway-home/Justfile hm-upgrade
+  environment.interactiveShellInit = lib.mkIf config.vm.mutable ''
+    if [ "$(id -u)" != "0" ] && [ ! -d "${swayHomePath}" ]; then
+      echo "Cloning sway-home repository for hm-upgrade support..."
+      mkdir -p ~/git/vendor/enigmacurry
+      ${pkgs.git}/bin/git clone ${swayHomeRepo} ${swayHomePath}
+      echo "sway-home cloned. You can now run 'hm-upgrade' to update home-manager."
+    fi
+  '';
 
   # The standard home-manager activation fails on immutable systems because
   # nix-store commands require a writable /nix with a valid database.
