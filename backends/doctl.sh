@@ -10,15 +10,39 @@ BACKEND_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$BACKEND_DIR/common.sh"
 
 # Override build_profile to use DO format by default
-# Saves the original function and wraps it
-_common_build_profile=$(declare -f build_profile)
-eval "_original${_common_build_profile}"
-
 build_profile() {
     local profiles="${1:-core}"
     local mutable="${2:-false}"
-    # Force DO format for this backend
-    _original_build_profile "$profiles" "$mutable" "do"
+    local format="${3:-do}"  # Default to DO format for this backend
+
+    # Normalize to canonical profile key
+    local profile_key
+    profile_key=$(normalize_profiles "$profiles")
+
+    # Add mutable suffix for mutable images
+    local output_key="$profile_key"
+    if [ "$mutable" = "true" ]; then
+        output_key="${profile_key}-mutable"
+    fi
+
+    # Add format suffix for non-qcow formats
+    if [ "$format" != "qcow" ]; then
+        output_key="${output_key}-${format}"
+    fi
+
+    echo "Building profile: $profile_key (mutable=$mutable, format=$format)"
+    mkdir -p "$OUTPUT_DIR/profiles"
+
+    # Convert comma-separated to nix list format
+    local nix_list
+    nix_list=$(echo "$profile_key" | sed 's/,/" "/g' | sed 's/^/["/;s/$/"]/')
+
+    $NIX build --impure --expr "
+      let flake = builtins.getFlake \"$SCRIPT_DIR\";
+      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; format = \"$format\"; }
+    " --out-link "$OUTPUT_DIR/profiles/$output_key"
+
+    echo "Built: $OUTPUT_DIR/profiles/$output_key"
 }
 
 # Backend-specific environment defaults
