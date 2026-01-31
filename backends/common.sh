@@ -559,7 +559,7 @@ config_vm_interactive() {
 
     # Check if machine config already exists and load current values
     local machine_dir="$MACHINES_DIR/$name"
-    local current_profile="" current_memory="" current_vcpus="" current_var_size="" current_network=""
+    local current_profile="" current_memory="" current_vcpus="" current_var_size="" current_network="" current_mutable=""
     local is_reconfigure=false
 
     if [ -d "$machine_dir" ]; then
@@ -579,7 +579,21 @@ config_vm_interactive() {
         current_network=$(cat "$machine_dir/network" 2>/dev/null || true)
         current_network="${current_network%"${current_network##*[![:space:]]}"}"  # trim trailing
         current_network="${current_network#"${current_network%%[![:space:]]*}"}"  # trim leading
+        current_mutable=$(cat "$machine_dir/mutable" 2>/dev/null | tr -d '[:space:]' || true)
     fi
+
+    # Mutable mode selection: options are "Immutable" "Mutable" (indices 0-1)
+    echo ""
+    local mutable_choice mutable_default_idx="0"
+    if [ "$current_mutable" = "true" ]; then
+        mutable_default_idx="1"
+    fi
+    mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Mutable (read-write pet VM, use nixos-rebuild)")
+    local is_mutable_vm=false
+    if [[ "$mutable_choice" == "Mutable"* ]]; then
+        is_mutable_vm=true
+    fi
+    echo "Mode: $mutable_choice"
 
     # Get list of available profiles (excluding core, which is always included)
     local available_profiles=()
@@ -818,6 +832,7 @@ config_vm_interactive() {
     echo ""
     echo "Configuration summary:"
     echo "  Name:    $name"
+    echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || echo "immutable")"
     echo "  Profile: $profile"
     echo "  Memory:  ${memory}M"
     echo "  vCPUs:   $vcpus"
@@ -853,8 +868,21 @@ config_vm_interactive() {
     echo "$normalized_var_size" > "$machine_dir/var_size"
     echo "Created: $machine_dir/var_size ($normalized_var_size)"
 
+    # Save mutable mode
+    if [ "$is_mutable_vm" = true ]; then
+        echo "true" > "$machine_dir/mutable"
+        echo "Created: $machine_dir/mutable (true)"
+    else
+        rm -f "$machine_dir/mutable"
+        echo "Removed: $machine_dir/mutable (immutable mode)"
+    fi
+
     echo ""
-    echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
+    local mode_str="immutable"
+    if [ "$is_mutable_vm" = true ]; then
+        mode_str="mutable"
+    fi
+    echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), mode: $mode_str, memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
     echo "To create the VM, run: just create $name"
 }
 
