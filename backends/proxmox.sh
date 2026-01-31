@@ -570,8 +570,9 @@ EOF
     cp "$BACKEND_DIR/../flake.lock" "$tmp_dir/flake.lock"
 
     # Copy modules and profiles directories for nixos-rebuild
-    cp -r "$BACKEND_DIR/../modules" "$tmp_dir/modules"
-    cp -r "$BACKEND_DIR/../profiles" "$tmp_dir/profiles"
+    # Use --no-preserve=mode to avoid read-only files from nix store
+    cp -r --no-preserve=mode "$BACKEND_DIR/../modules" "$tmp_dir/modules"
+    cp -r --no-preserve=mode "$BACKEND_DIR/../profiles" "$tmp_dir/profiles"
 
     gf_cmds="run : mount $nixos_dev /"
     gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.nix /etc/nixos/"
