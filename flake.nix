@@ -59,8 +59,6 @@
           specialArgs = {
             inherit sway-home nix-flatpak;
             swayHomeInputs = sway-home.inputs;
-            vmModulesPath = ./modules;
-            vmProfilesPath = ./profiles;
           };
           modules = coreModules ++ [
             home-manager.nixosModules.home-manager
@@ -82,8 +80,6 @@
           specialArgs = {
             inherit sway-home nix-flatpak;
             swayHomeInputs = sway-home.inputs;
-            vmModulesPath = ./modules;
-            vmProfilesPath = ./profiles;
           };
           modules = coreModules ++ [
             home-manager.nixosModules.home-manager

@@ -569,9 +569,15 @@ EOF
     # Copy the project's flake.lock to keep inputs pinned
     cp "$BACKEND_DIR/../flake.lock" "$tmp_dir/flake.lock"
 
+    # Copy modules and profiles directories for nixos-rebuild
+    cp -r "$BACKEND_DIR/../modules" "$tmp_dir/modules"
+    cp -r "$BACKEND_DIR/../profiles" "$tmp_dir/profiles"
+
     gf_cmds="run : mount $nixos_dev /"
     gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.nix /etc/nixos/"
     gf_cmds="$gf_cmds : copy-in $tmp_dir/flake.lock /etc/nixos/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/modules /etc/nixos/"
+    gf_cmds="$gf_cmds : copy-in $tmp_dir/profiles /etc/nixos/"
     gf_cmds="$gf_cmds : chmod 0644 /etc/nixos/flake.nix"
     gf_cmds="$gf_cmds : chmod 0644 /etc/nixos/flake.lock"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
