@@ -949,6 +949,63 @@ clean() {
     echo "Cleaned $OUTPUT_DIR/"
 }
 
+# Generate flake.nix content for mutable VMs
+# Usage: generate_mutable_flake <hostname> <system> <profile>
+# Outputs flake.nix content to stdout
+generate_mutable_flake() {
+    local hostname="$1"
+    local system="$2"
+    local profile="$3"
+
+    # Build profile imports
+    local profile_imports=""
+    IFS=',' read -ra profile_parts <<< "$profile"
+    for p in "${profile_parts[@]}"; do
+        profile_imports="$profile_imports          ./profiles/${p}.nix"$'\n'
+    done
+
+    cat << FLAKE_EOF
+{
+  description = "NixOS VM configuration";
+
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    sway-home = {
+      url = "github:EnigmaCurry/sway-home?dir=home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    nix-flatpak.url = "github:gmodena/nix-flatpak";
+  };
+
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }:
+    {
+      nixosConfigurations."nixos" = nixpkgs.lib.nixosSystem {
+        system = "$system";
+        specialArgs = {
+          inherit sway-home nix-flatpak;
+          swayHomeInputs = sway-home.inputs;
+        };
+        modules = [
+          # Core modules (see modules/default.nix)
+          ./modules
+          home-manager.nixosModules.home-manager
+          # Profile modules
+$profile_imports          # VM-specific settings
+          {
+            vm.mutable = true;
+            networking.hostName = "$hostname";
+          }
+        ];
+      };
+    };
+}
+FLAKE_EOF
+}
+
 # Enter development shell
 dev_shell() {
     $NIX develop

@@ -326,50 +326,7 @@ EOF
     esac
 
     # Generate /etc/nixos/flake.nix for nixos-rebuild
-    # Uses "nixos" as the configuration name to match the default hostname
-    local profile_imports=""
-    IFS=',' read -ra profile_parts <<< "$profile"
-    for p in "${profile_parts[@]}"; do
-        profile_imports="$profile_imports          ./profiles/${p}.nix"$'\n'
-    done
-
-    cat > "$tmp_dir/flake.nix" << FLAKE_EOF
-{
-  description = "NixOS VM configuration";
-
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    home-manager = {
-      url = "github:nix-community/home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    sway-home = {
-      url = "github:EnigmaCurry/sway-home?dir=home-manager";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-    nix-flatpak.url = "github:gmodena/nix-flatpak";
-  };
-
-  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }:
-    {
-      nixosConfigurations."nixos" = nixpkgs.lib.nixosSystem {
-        system = "$system";
-        specialArgs = {
-          inherit sway-home nix-flatpak;
-          swayHomeInputs = sway-home.inputs;
-        };
-        modules = [
-          # Core modules (see modules/default.nix)
-          ./modules
-          home-manager.nixosModules.home-manager
-          # Profile modules
-$profile_imports          # Mutable mode
-          { vm.mutable = true; }
-        ];
-      };
-    };
-}
-FLAKE_EOF
+    generate_mutable_flake "$hostname" "$system" "$profile" > "$tmp_dir/flake.nix"
 
     # Copy the project's flake.lock to keep inputs pinned
     cp "$BACKEND_DIR/../flake.lock" "$tmp_dir/flake.lock"
