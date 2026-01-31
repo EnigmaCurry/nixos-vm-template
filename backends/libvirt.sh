@@ -325,8 +325,8 @@ EOF
         *) system="x86_64-linux" ;;  # default
     esac
 
-    # Generate /etc/nixos/flake.nix with hostname-based configuration
-    # This allows standard `nixos-rebuild switch` to work
+    # Generate /etc/nixos/flake.nix for nixos-rebuild
+    # Uses "nixos" as the configuration name to match the default hostname
     local profile_imports=""
     IFS=',' read -ra profile_parts <<< "$profile"
     for p in "${profile_parts[@]}"; do
@@ -335,7 +335,7 @@ EOF
 
     cat > "$tmp_dir/flake.nix" << FLAKE_EOF
 {
-  description = "NixOS configuration for $hostname";
+  description = "NixOS VM configuration";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -352,7 +352,7 @@ EOF
 
   outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }:
     {
-      nixosConfigurations."$hostname" = nixpkgs.lib.nixosSystem {
+      nixosConfigurations."nixos" = nixpkgs.lib.nixosSystem {
         system = "$system";
         specialArgs = {
           inherit sway-home nix-flatpak;
