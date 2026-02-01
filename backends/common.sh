@@ -567,6 +567,10 @@ config_vm_interactive() {
     if [ -d "$machine_dir" ]; then
         echo "Machine config already exists: $machine_dir"
         if ! $SCRIPT_WIZARD confirm "Reconfigure this VM?" no; then
+            if [ "$from_create" = "true" ]; then
+                echo "Using existing config."
+                return 0
+            fi
             echo "Aborted."
             exit 0
         fi
