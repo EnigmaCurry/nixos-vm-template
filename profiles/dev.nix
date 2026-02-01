@@ -46,7 +46,7 @@
   ];
 
   # Set PKG_CONFIG_PATH so cargo builds can find dev libraries
-  environment.sessionVariables.PKG_CONFIG_PATH = lib.makeSearchPath "lib/pkgconfig" [
-    pkgs.udev.dev
-  ];
+  environment.extraInit = ''
+    export PKG_CONFIG_PATH="${lib.makeSearchPath "lib/pkgconfig" [ pkgs.udev.dev ]}''${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+  '';
 }
