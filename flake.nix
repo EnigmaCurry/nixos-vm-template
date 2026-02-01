@@ -3,10 +3,6 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    nixos-generators = {
-      url = "github:nix-community/nixos-generators";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -18,7 +14,7 @@
     nix-flatpak.url = "github:gmodena/nix-flatpak";
   };
 
-  outputs = { self, nixpkgs, nixos-generators, home-manager, sway-home, nix-flatpak, ... }@inputs:
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }@inputs:
     let
       lib = nixpkgs.lib;
 
@@ -47,26 +43,36 @@
 
       # Build a combined VM image for a given system and list of profiles
       # mutable: if true, builds a standard read-write NixOS system
+      # Uses native nixpkgs image building (qemu-efi format)
       mkCombinedImage = system: profileList: { mutable ? false }:
         let
           # Always include core, sort for canonical naming, dedupe
           allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
           profileModules = map (p: ./profiles/${p}.nix) allProfiles;
-        in
-        nixos-generators.nixosGenerate {
-          inherit system;
-          format = "qcow";
-          specialArgs = {
-            inherit sway-home nix-flatpak;
-            swayHomeInputs = sway-home.inputs;
+
+          nixosConfig = nixpkgs.lib.nixosSystem {
+            inherit system;
+            specialArgs = {
+              inherit sway-home nix-flatpak;
+              swayHomeInputs = sway-home.inputs;
+            };
+            modules = coreModules ++ [
+              # Native nixpkgs disk image module (replaces nixos-generators)
+              "${nixpkgs}/nixos/modules/virtualisation/disk-image.nix"
+              home-manager.nixosModules.home-manager
+            ] ++ profileModules ++ [
+              { nixpkgs.hostPlatform = system; }
+              { vm.mutable = mutable; }
+              # Configure image format (qcow2 with EFI/systemd-boot)
+              {
+                image.baseName = "nixos";
+                image.format = "qcow2";
+                image.efiSupport = true;
+              }
+            ];
           };
-          modules = coreModules ++ [
-            home-manager.nixosModules.home-manager
-          ] ++ profileModules ++ [
-            { nixpkgs.hostPlatform = system; }
-            { vm.mutable = mutable; }
-          ];
-        };
+        in
+        nixosConfig.config.system.build.image;
 
       # Build a VM image for a given system and single profile (legacy compatibility)
       mkProfileImage = system: profile:
