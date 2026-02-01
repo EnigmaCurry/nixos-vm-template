@@ -125,6 +125,8 @@
         # Grow partition 2 (root) to fill available space
         # Layout: vda1=ESP, vda2=root (nixos label)
         ${pkgs.cloud-utils}/bin/growpart /dev/vda 2 || true
+        # Re-read partition table so kernel sees new size
+        ${pkgs.parted}/bin/partprobe /dev/vda || true
         # Resize filesystem (online resize supported for ext4)
         ${pkgs.e2fsprogs}/bin/resize2fs /dev/vda2 || true
       '';

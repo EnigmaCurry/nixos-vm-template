@@ -29,6 +29,8 @@
         script = ''
           # Grow partition to fill available space
           ${pkgs.cloud-utils}/bin/growpart /dev/vdb 1 || true
+          # Re-read partition table so kernel sees new size
+          ${pkgs.parted}/bin/partprobe /dev/vdb || true
           # Resize filesystem (online resize supported for ext4)
           ${pkgs.e2fsprogs}/bin/resize2fs /dev/vdb1 || true
         '';
