@@ -488,12 +488,7 @@ backend_generate_config() {
     local sound_devices=""
     if is_pipewire "$name"; then
         # Use PulseAudio backend (works with PipeWire's PulseAudio compatibility)
-        sound_devices="
-    <!-- Sound device (pipewire audio passthrough to host) -->
-    <sound model='ich9'>
-      <audio id='1'/>
-    </sound>
-    <audio id='1' type='pulseaudio' serverName='/run/user/${owner_uid}/pulse/native'/>"
+        sound_devices="    <sound model='ich9'><audio id='1'/></sound><audio id='1' type='pulseaudio' serverName='/run/user/${owner_uid}/pulse/native'/>"
     fi
 
     # Choose template based on mutable mode
