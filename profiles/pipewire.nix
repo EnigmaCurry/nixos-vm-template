@@ -36,7 +36,9 @@
       pulseaudio       # pactl, paplay utilities
 
       # ALSA tools and development libraries
-      alsa-lib         # ALSA library and headers (provides alsa.pc for cargo builds)
+      alsa-lib         # ALSA library
+      alsa-lib.dev     # ALSA headers and pkg-config (for cargo builds)
+      pkg-config       # pkg-config tool
       alsa-utils       # aplay, arecord, amixer, speaker-test
       alsa-plugins     # Additional ALSA plugins
 
@@ -47,6 +49,9 @@
       soundfont-ydp-grand
       x42-gmsynth
     ];
+
+    # Set PKG_CONFIG_PATH so cargo builds can find alsa.pc
+    environment.sessionVariables.PKG_CONFIG_PATH = "/run/current-system/sw/lib/pkgconfig";
 
     # Configure ALSA to use pipewire as the default device
     environment.etc."asound.conf".text = ''
