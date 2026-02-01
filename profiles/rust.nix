@@ -1,6 +1,9 @@
 # Rust development profile - rustup with rust-analyzer
 { config, lib, pkgs, ... }:
 
+let
+  regularUser = config.core.regularUser;
+in
 {
   imports = [
     ../modules/sqlite.nix
@@ -13,9 +16,9 @@
       pkg-config
     ];
 
-    # Initialize rustup on first interactive shell login (skip for root)
+    # Initialize rustup on first interactive shell login (only for regular user)
     environment.interactiveShellInit = ''
-      if [ "$(id -u)" != "0" ] && [ ! -d "$HOME/.rustup" ]; then
+      if [ "$(whoami)" = "${regularUser}" ] && [ ! -d "$HOME/.rustup" ]; then
         echo "Initializing rustup with stable toolchain..."
         rustup default stable
         rustup component add rust-analyzer
