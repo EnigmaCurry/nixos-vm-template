@@ -26,9 +26,25 @@
 
     # Install useful audio tools
     environment.systemPackages = with pkgs; [
-      pavucontrol      # PulseAudio volume control (works with pipewire)
-      pulseaudio       # For pactl, paplay utilities
-      alsa-utils       # For aplay, speaker-test
+      # Pipewire tools
+      pipewire         # pw-top, pw-cli, pw-dump, pw-mon
+      wireplumber      # wpctl (session manager CLI)
+
+      # PulseAudio-compatible tools (work with pipewire)
+      pamixer          # CLI mixer
+      pulsemixer       # TUI mixer
+      pulseaudio       # pactl, paplay utilities
+
+      # ALSA tools
+      alsa-utils       # aplay, arecord, amixer, speaker-test
+      alsa-plugins     # Additional ALSA plugins
+
+      # MIDI synthesizers and soundfonts
+      fluidsynth
+      soundfont-fluid
+      soundfont-generaluser
+      soundfont-ydp-grand
+      x42-gmsynth
     ];
 
     # Configure ALSA to use pipewire as the default device
