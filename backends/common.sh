@@ -54,6 +54,20 @@ is_mutable() {
     fi
 }
 
+# Check if a machine has pipewire audio enabled
+# Returns 0 (true) if "pipewire" is in the machine's profile list
+is_pipewire() {
+    local name="$1"
+    local profile_file="$MACHINES_DIR/$name/profile"
+    if [ -f "$profile_file" ]; then
+        local profiles
+        profiles=$(cat "$profile_file" 2>/dev/null)
+        [[ ",$profiles," == *",pipewire,"* ]]
+    else
+        return 1
+    fi
+}
+
 # Build a profile's base image (supports comma-separated profile combinations)
 # Usage: build_profile <profiles> [mutable]
 # If mutable=true, builds a mutable (read-write) image

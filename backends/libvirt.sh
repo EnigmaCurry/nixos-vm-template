@@ -484,6 +484,18 @@ backend_generate_config() {
     owner_uid=$(id -u)
     owner_gid=$(id -g)
 
+    # Generate sound device XML if pipewire profile is enabled
+    local sound_devices=""
+    if is_pipewire "$name"; then
+        # Use PulseAudio backend (works with PipeWire's PulseAudio compatibility)
+        sound_devices="
+    <!-- Sound device (pipewire audio passthrough to host) -->
+    <sound model='ich9'>
+      <audio id='1'/>
+    </sound>
+    <audio id='1' type='pulseaudio' serverName='/run/user/${owner_uid}/pulse/native'/>"
+    fi
+
     # Choose template based on mutable mode
     if is_mutable "$name"; then
         local disk
@@ -501,6 +513,7 @@ backend_generate_config() {
             -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
             -e "s|@@OWNER_UID@@|$owner_uid|g" \
             -e "s|@@OWNER_GID@@|$owner_gid|g" \
+            -e "s|@@SOUND_DEVICES@@|$sound_devices|g" \
             "$LIBVIRT_DIR/template-mutable.xml" > "$LIBVIRT_DIR/$name.xml"
     else
         local boot_disk var_disk
@@ -520,6 +533,7 @@ backend_generate_config() {
             -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
             -e "s|@@OWNER_UID@@|$owner_uid|g" \
             -e "s|@@OWNER_GID@@|$owner_gid|g" \
+            -e "s|@@SOUND_DEVICES@@|$sound_devices|g" \
             "$LIBVIRT_DIR/template.xml" > "$LIBVIRT_DIR/$name.xml"
     fi
 
