@@ -30,5 +30,15 @@
       pulseaudio       # For pactl, paplay utilities
       alsa-utils       # For aplay, speaker-test
     ];
+
+    # Configure ALSA to use pipewire as the default device
+    environment.etc."asound.conf".text = ''
+      pcm.!default {
+        type pipewire
+      }
+      ctl.!default {
+        type pipewire
+      }
+    '';
   };
 }
