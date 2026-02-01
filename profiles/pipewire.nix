@@ -51,7 +51,9 @@
     ];
 
     # Set PKG_CONFIG_PATH so cargo builds can find alsa.pc
-    environment.sessionVariables.PKG_CONFIG_PATH = "/run/current-system/sw/lib/pkgconfig";
+    environment.sessionVariables.PKG_CONFIG_PATH = lib.makeSearchPath "lib/pkgconfig" [
+      pkgs.alsa-lib.dev
+    ];
 
     # Configure ALSA to use pipewire as the default device
     environment.etc."asound.conf".text = ''
