@@ -155,7 +155,7 @@ in
       # Install packages from sway-home
       # On mutable VMs, include home-manager CLI for hm-upgrade
       home.packages = import "${sway-home}/modules/packages.nix" { inherit pkgs; }
-        ++ [ swayHomeInputs.script-wizard.packages.${pkgs.system}.default ]
+        ++ [ swayHomeInputs.script-wizard.packages.${pkgs.stdenv.hostPlatform.system}.default ]
         ++ lib.optionals config.vm.mutable [ pkgs.home-manager ];
 
       # On mutable VMs, unset the sway-home hm-upgrade alias so our wrapper script is used

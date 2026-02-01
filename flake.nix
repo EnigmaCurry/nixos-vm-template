@@ -51,7 +51,6 @@
           profileModules = map (p: ./profiles/${p}.nix) allProfiles;
 
           nixosConfig = nixpkgs.lib.nixosSystem {
-            inherit system;
             specialArgs = {
               inherit sway-home nix-flatpak;
               swayHomeInputs = sway-home.inputs;
@@ -82,7 +81,6 @@
       # mutable: if true, configures as a mutable system (for nixos-rebuild on mutable VMs)
       mkNixosConfig = system: profile: { mutable ? false }:
         nixpkgs.lib.nixosSystem {
-          inherit system;
           specialArgs = {
             inherit sway-home nix-flatpak;
             swayHomeInputs = sway-home.inputs;
