@@ -15,7 +15,7 @@
     };
 
     # Disable PulseAudio (pipewire replaces it)
-    hardware.pulseaudio.enable = false;
+    services.pulseaudio.enable = false;
 
     # Enable rtkit for realtime scheduling (improves audio latency)
     security.rtkit.enable = true;
