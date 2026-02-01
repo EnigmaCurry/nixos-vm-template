@@ -35,7 +35,8 @@
       pulsemixer       # TUI mixer
       pulseaudio       # pactl, paplay utilities
 
-      # ALSA tools
+      # ALSA tools and development libraries
+      alsa-lib         # ALSA library and headers (provides alsa.pc for cargo builds)
       alsa-utils       # aplay, arecord, amixer, speaker-test
       alsa-plugins     # Additional ALSA plugins
 
