@@ -41,13 +41,6 @@
       pkg-config       # pkg-config tool
       alsa-utils       # aplay, arecord, amixer, speaker-test
       alsa-plugins     # Additional ALSA plugins
-
-      # MIDI synthesizers and soundfonts
-      fluidsynth
-      soundfont-fluid
-      soundfont-generaluser
-      soundfont-ydp-grand
-      x42-gmsynth
     ];
 
     # Set PKG_CONFIG_PATH so cargo builds can find alsa.pc
