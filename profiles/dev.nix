@@ -28,6 +28,8 @@
     gnumake
     openssl
     xdg-utils
+    pkg-config
+    udev.dev
 
     # Network tools
     wget
