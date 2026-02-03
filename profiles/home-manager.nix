@@ -88,6 +88,22 @@ in
             subname=$(basename "$subitem")
             [[ "$subname" == "." || "$subname" == ".." ]] && continue
             [[ ! -e "$subitem" ]] && continue
+            # For .config/git, create writable directory and symlink files inside
+            # This allows config.local and other user files while config is immutable
+            if [[ "$subname" == "git" && -d "$subitem" ]]; then
+              echo "    Merging (partial writable): .config/$subname"
+              mkdir -p "$HOME/.config/git"
+              for gitfile in "$subitem"/* "$subitem"/.*; do
+                gitname=$(basename "$gitfile")
+                [[ "$gitname" == "." || "$gitname" == ".." ]] && continue
+                [[ ! -e "$gitfile" ]] && continue
+                if [[ ! -e "$HOME/.config/git/$gitname" ]]; then
+                  ln -sfn "$gitfile" "$HOME/.config/git/$gitname"
+                  echo "      Created: .config/git/$gitname -> $gitfile"
+                fi
+              done
+              continue
+            fi
             if [[ ! -e "$HOME/.config/$subname" ]]; then
               ln -sfn "$subitem" "$HOME/.config/$subname"
               echo "    Created: .config/$subname -> $subitem"
