@@ -23,6 +23,7 @@
     inotify-tools
     w3m
     asciinema
+    imagemagick
 
     # Development tools
     gnumake
