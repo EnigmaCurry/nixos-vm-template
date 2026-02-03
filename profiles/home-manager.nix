@@ -79,6 +79,23 @@ in
           continue
         fi
 
+        # For .config, create the directory and symlink contents inside
+        # This keeps .config writable so apps can create their own config files
+        if [[ "$name" == ".config" && -d "$f" ]]; then
+          echo "  Merging (partial writable): $name"
+          mkdir -p "$HOME/.config"
+          for subitem in "$f"/* "$f"/.*; do
+            subname=$(basename "$subitem")
+            [[ "$subname" == "." || "$subname" == ".." ]] && continue
+            [[ ! -e "$subitem" ]] && continue
+            if [[ ! -e "$HOME/.config/$subname" ]]; then
+              ln -sfn "$subitem" "$HOME/.config/$subname"
+              echo "    Created: .config/$subname -> $subitem"
+            fi
+          done
+          continue
+        fi
+
         # For .local, create the directory structure but symlink contents
         # This preserves managed files while allowing writable state dirs
         if [[ "$name" == ".local" && -d "$f" ]]; then
