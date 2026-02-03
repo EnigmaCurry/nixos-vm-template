@@ -41,6 +41,7 @@
       parted
       unzip
       wireguard-tools
+      file
     ];
 
     # Enable firewall - blocks all incoming by default
