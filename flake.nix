@@ -12,9 +12,13 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nix-flatpak.url = "github:gmodena/nix-flatpak";
+    opencode = {
+      url = "github:AnomalyCo/opencode";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, ... }@inputs:
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, ... }@inputs:
     let
       lib = nixpkgs.lib;
 
@@ -52,7 +56,7 @@
 
           nixosConfig = nixpkgs.lib.nixosSystem {
             specialArgs = {
-              inherit sway-home nix-flatpak;
+              inherit sway-home nix-flatpak opencode;
               swayHomeInputs = sway-home.inputs;
             };
             modules = coreModules ++ [
@@ -82,7 +86,7 @@
       mkNixosConfig = system: profile: { mutable ? false }:
         nixpkgs.lib.nixosSystem {
           specialArgs = {
-            inherit sway-home nix-flatpak;
+            inherit sway-home nix-flatpak opencode;
             swayHomeInputs = sway-home.inputs;
           };
           modules = coreModules ++ [
