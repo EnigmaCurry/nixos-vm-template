@@ -367,6 +367,7 @@ backend_create_disks() {
         --name $name \
         --bios ovmf \
         --machine q35 \
+        --cpu host \
         --agent 1 \
         --cores $vcpus \
         --memory $memory \
@@ -635,6 +636,7 @@ EOF
         --name $name \
         --bios ovmf \
         --machine q35 \
+        --cpu host \
         --agent 1 \
         --cores $vcpus \
         --memory $memory \
