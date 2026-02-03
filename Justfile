@@ -32,7 +32,7 @@ config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" net
     @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
 
 # Create a new VM interactively (prompts for all settings)
-create name="":
+create name:
     @source {{backend_script}} && create_vm "{{name}}"
 
 # Create a new VM non-interactively with explicit values
