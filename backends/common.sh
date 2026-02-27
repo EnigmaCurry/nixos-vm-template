@@ -634,7 +634,7 @@ config_vm_interactive() {
         if [ -n "$current_profile" ]; then
             # Convert comma-separated profile to JSON array, excluding core: "core,docker" -> '["docker"]'
             local profile_without_core profile_json
-            profile_without_core=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | tr '\n' ',' | sed 's/,$//')
+            profile_without_core=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | tr '\n' ',' | sed 's/,$//' || true)
             if [ -n "$profile_without_core" ]; then
                 profile_json=$(echo "$profile_without_core" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
                 profile_default_args=(--default "$profile_json")
