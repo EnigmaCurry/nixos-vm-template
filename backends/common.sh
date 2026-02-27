@@ -830,8 +830,8 @@ config_vm_interactive() {
     if [ "$ssh_key_mode" = "manual" ]; then
         echo ""
         echo "Enter SSH public key(s) for 'admin' (has sudo access):"
-        admin_keys=$($SCRIPT_WIZARD editor "Enter admin SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
-        # Remove comment lines
+        echo "(Paste key(s), one per line, then press Ctrl+D to finish)"
+        admin_keys=$(cat || true)
         admin_keys=$(echo "$admin_keys" | grep -v '^#' | grep -v '^$' || true)
 
         echo ""
@@ -842,7 +842,8 @@ config_vm_interactive() {
             "Enter different keys")
                 echo ""
                 echo "Enter SSH public key(s) for 'user' (no sudo access):"
-                user_keys=$($SCRIPT_WIZARD editor "Enter user SSH public keys (one per line)" --default "# Paste your public key(s) here, one per line")
+                echo "(Paste key(s), one per line, then press Ctrl+D to finish)"
+                user_keys=$(cat || true)
                 user_keys=$(echo "$user_keys" | grep -v '^#' | grep -v '^$' || true)
                 ;;
             *) user_keys="" ;;
