@@ -640,10 +640,12 @@ config_vm_interactive() {
                 profile_default_args=(--default "$profile_json")
             fi
         fi
-        readarray -t selected_profiles < <($SCRIPT_WIZARD select "${profile_default_args[@]}" "Select profile(s) to include:" "${available_profiles[@]}")
-        if [ ${#selected_profiles[@]} -eq 0 ]; then
+        local select_output
+        select_output=$($SCRIPT_WIZARD select ${profile_default_args[@]+"${profile_default_args[@]}"} "Select profile(s) to include:" "${available_profiles[@]}") || true
+        if [ -z "$select_output" ]; then
             profile="core"
         else
+            readarray -t selected_profiles <<< "$select_output"
             profile=$(IFS=,; echo "${selected_profiles[*]}")
         fi
     fi
