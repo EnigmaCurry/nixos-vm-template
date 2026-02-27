@@ -630,17 +630,17 @@ config_vm_interactive() {
     # Prompt for profile(s) if not provided
     if [ -z "$profile" ]; then
         echo ""
-        local profile_default_arg=""
+        local profile_default_args=()
         if [ -n "$current_profile" ]; then
             # Convert comma-separated profile to JSON array, excluding core: "core,docker" -> '["docker"]'
             local profile_without_core profile_json
             profile_without_core=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | tr '\n' ',' | sed 's/,$//')
             if [ -n "$profile_without_core" ]; then
                 profile_json=$(echo "$profile_without_core" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
-                profile_default_arg="--default $profile_json"
+                profile_default_args=(--default "$profile_json")
             fi
         fi
-        readarray -t selected_profiles < <($SCRIPT_WIZARD select $profile_default_arg "Select profile(s) to include:" "${available_profiles[@]}")
+        readarray -t selected_profiles < <($SCRIPT_WIZARD select "${profile_default_args[@]}" "Select profile(s) to include:" "${available_profiles[@]}")
         if [ ${#selected_profiles[@]} -eq 0 ]; then
             profile="core"
         else
