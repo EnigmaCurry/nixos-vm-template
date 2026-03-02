@@ -967,23 +967,19 @@ config_vm_interactive() {
                 local lb_labels=()
                 while IFS= read -r br; do
                     [ -z "$br" ] && continue
+                    local lb_state
+                    lb_state=$(cat "/sys/class/net/$br/operstate" 2>/dev/null || echo "unknown")
                     local lb_ip
                     lb_ip=$(ip -4 addr show dev "$br" 2>/dev/null | awk '/inet /{print $2; exit}')
                     local lb_ports=""
                     if [ -d "/sys/class/net/$br/brif" ]; then
                         lb_ports=$(ls "/sys/class/net/$br/brif" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
                     fi
-                    local lb_detail=""
-                    [ -n "$lb_ip" ] && lb_detail="$lb_ip"
-                    if [ -n "$lb_ports" ]; then
-                        lb_detail="${lb_detail:+$lb_detail, }$lb_ports"
-                    fi
+                    local lb_detail="$lb_state"
+                    [ -n "$lb_ip" ] && lb_detail="$lb_detail, $lb_ip"
+                    [ -n "$lb_ports" ] && lb_detail="$lb_detail, $lb_ports"
                     lb_bridges+=("$br")
-                    if [ -n "$lb_detail" ]; then
-                        lb_labels+=("$br ($lb_detail)")
-                    else
-                        lb_labels+=("$br")
-                    fi
+                    lb_labels+=("$br ($lb_detail)")
                 done < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-|fwbr)' || true)
 
                 if [ ${#lb_bridges[@]} -eq 0 ]; then
@@ -1011,6 +1007,44 @@ config_vm_interactive() {
                 lb_choice=$($SCRIPT_WIZARD choose ${lb_default_args[@]+"${lb_default_args[@]}"} "Select network bridge:" "${lb_labels[@]}")
                 local selected_bridge="${lb_choice%% *}"
                 network="bridge:$selected_bridge"
+
+                # Check if bridge has no physical interfaces and offer to add one
+                local br_ports
+                br_ports=$(ls "/sys/class/net/$selected_bridge/brif" 2>/dev/null || true)
+                if [ -z "$br_ports" ]; then
+                    echo "Bridge '$selected_bridge' has no physical interfaces attached."
+                    if $SCRIPT_WIZARD confirm "Add a physical interface to $selected_bridge?" yes; then
+                        # List available physical interfaces (not bridges, not loopback, not virtual)
+                        local phys_ifaces=()
+                        while IFS= read -r iface; do
+                            [ -z "$iface" ] && continue
+                            # Skip loopback, bridges, veth, and virtual interfaces
+                            [ -d "/sys/class/net/$iface/bridge" ] && continue
+                            local iface_type
+                            iface_type=$(cat "/sys/class/net/$iface/type" 2>/dev/null || echo "0")
+                            [ "$iface_type" != "1" ] && continue  # only Ethernet (type 1)
+                            [ -e "/sys/class/net/$iface/device" ] || continue  # must be a real device
+                            local iface_state
+                            iface_state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown")
+                            local iface_ip
+                            iface_ip=$(ip -4 addr show dev "$iface" 2>/dev/null | awk '/inet /{print $2; exit}')
+                            local iface_detail="$iface_state"
+                            [ -n "$iface_ip" ] && iface_detail="$iface_detail, $iface_ip"
+                            phys_ifaces+=("$iface ($iface_detail)")
+                        done < <(ls /sys/class/net/ 2>/dev/null | grep -vE '^(lo|veth|fwbr|fwln|fwpr|tap|virbr|docker|br-)' || true)
+
+                        if [ ${#phys_ifaces[@]} -eq 0 ]; then
+                            echo "No physical interfaces found to bridge."
+                        else
+                            local phys_choice
+                            phys_choice=$($SCRIPT_WIZARD choose "Select interface to add to $selected_bridge:" "${phys_ifaces[@]}")
+                            local phys_iface="${phys_choice%% *}"
+                            echo "Adding $phys_iface to bridge $selected_bridge (persistent via NetworkManager)..."
+                            sudo nmcli connection add type bridge-slave ifname "$phys_iface" master "$selected_bridge"
+                            echo "Interface $phys_iface added to $selected_bridge."
+                        fi
+                    fi
+                fi
 
                 # Check if bridge is down and offer to bring it up
                 local br_state
