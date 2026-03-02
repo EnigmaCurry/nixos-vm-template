@@ -59,57 +59,6 @@ read-write NixOS system. Mutable VMs provide:
 - Cannot use `just upgrade` from the host (must upgrade inside VM)
 - Loses the corruption-resistance of a read-only root
 
-### Creating a Mutable VM
-
-Use `just mutable` to toggle mutable mode for an existing machine config:
-
-```bash
-just mutable myvm      # Interactive prompt to enable/disable
-just recreate myvm     # Apply the change
-```
-
-Or create the `mutable` file manually before creating a new VM:
-
-```bash
-# Libvirt
-mkdir -p machines/myvm
-echo "true" > machines/myvm/mutable
-just create myvm docker,dev
-
-# Proxmox
-mkdir -p machines/myvm
-echo "true" > machines/myvm/mutable
-BACKEND=proxmox just create myvm docker,dev
-```
-
-### Upgrading Mutable VMs
-
-Mutable VMs cannot be upgraded from the host with `just upgrade`. Instead,
-upgrade from inside the VM:
-
-```bash
-# SSH into the VM
-just ssh admin@myvm
-
-# Standard NixOS upgrade
-sudo nixos-rebuild switch --upgrade
-
-# Or with a flake
-sudo nixos-rebuild switch --flake github:owner/repo#config
-```
-
-### Mutable VM Internals
-
-| Feature | Immutable VM | Mutable VM |
-|---------|--------------|------------|
-| Disk layout | Boot disk + var disk | Single disk |
-| Root filesystem | Read-only | Read-write |
-| Identity files | `/var/identity/` | `/etc/` (hostname, machine-id, SSH keys) |
-| Firewall rules | `/var/identity/tcp_ports` | `/etc/firewall-ports/tcp_ports` |
-| Root password | `/var/identity/root_password_hash` | `/etc/root_password_hash` |
-| Upgrade method | `just upgrade` from host | `nixos-rebuild` inside VM |
-| Thin provisioning | Yes (QCOW2 backing files) | No (full disk copy) |
-
 ## Features
 
 - Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
@@ -627,6 +576,57 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 | `just ssh admin@<name>` | SSH into VM (as admin, has sudo) |
 | `just clean`          | Remove built images and VM disks |
 | `just shell`          | Enter Nix development shell      |
+
+### Mutable VMs
+
+Use `just mutable` to toggle mutable mode for an existing machine config:
+
+```bash
+just mutable myvm      # Interactive prompt to enable/disable
+just recreate myvm     # Apply the change
+```
+
+Or create the `mutable` file manually before creating a new VM:
+
+```bash
+# Libvirt
+mkdir -p machines/myvm
+echo "true" > machines/myvm/mutable
+just create myvm docker,dev
+
+# Proxmox
+mkdir -p machines/myvm
+echo "true" > machines/myvm/mutable
+BACKEND=proxmox just create myvm docker,dev
+```
+
+#### Upgrading Mutable VMs
+
+Mutable VMs cannot be upgraded from the host with `just upgrade`. Instead,
+upgrade from inside the VM:
+
+```bash
+# SSH into the VM
+just ssh admin@myvm
+
+# Standard NixOS upgrade
+sudo nixos-rebuild switch --upgrade
+
+# Or with a flake
+sudo nixos-rebuild switch --flake github:owner/repo#config
+```
+
+#### Mutable VM Internals
+
+| Feature | Immutable VM | Mutable VM |
+|---------|--------------|------------|
+| Disk layout | Boot disk + var disk | Single disk |
+| Root filesystem | Read-only | Read-write |
+| Identity files | `/var/identity/` | `/etc/` (hostname, machine-id, SSH keys) |
+| Firewall rules | `/var/identity/tcp_ports` | `/etc/firewall-ports/tcp_ports` |
+| Root password | `/var/identity/root_password_hash` | `/etc/root_password_hash` |
+| Upgrade method | `just upgrade` from host | `nixos-rebuild` inside VM |
+| Thin provisioning | Yes (QCOW2 backing files) | No (full disk copy) |
 
 ## Profiles
 
