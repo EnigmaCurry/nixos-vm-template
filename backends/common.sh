@@ -1098,9 +1098,13 @@ config_vm_interactive() {
             local lb_bridge_name="${network#bridge:}"
             local lb_bridge_ip_cidr=""
             lb_bridge_ip_cidr=$(ip -4 addr show dev "$lb_bridge_name" 2>/dev/null | awk '/inet /{print $2; exit}')
+            # Discover gateway from routing table (default route via this bridge or its slave)
             local lb_bridge_gateway=""
-            if [ -n "$lb_bridge_ip_cidr" ]; then
-                lb_bridge_gateway="${lb_bridge_ip_cidr%%/*}"
+            lb_bridge_gateway=$(ip route show default dev "$lb_bridge_name" 2>/dev/null | awk '/via /{print $3; exit}')
+            if [ -z "$lb_bridge_gateway" ] && [ -n "$lb_bridge_ip_cidr" ]; then
+                # Fallback: .1 on the bridge subnet
+                local lb_subnet="${lb_bridge_ip_cidr%.*}"
+                lb_bridge_gateway="${lb_subnet}.1"
             fi
             local lb_ip_example="10.56.0.5/24"
             if [ -n "$lb_bridge_ip_cidr" ]; then
