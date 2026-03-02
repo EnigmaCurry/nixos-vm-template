@@ -644,12 +644,6 @@ config_vm_interactive() {
 
     if [ -d "$machine_dir" ]; then
         echo "Machine config already exists: $machine_dir"
-        # Check if VM is currently running
-        if backend_is_running "$name"; then
-            echo "Error: VM '$name' is currently running. Destroy it first:"
-            echo "  just destroy $name"
-            exit 1
-        fi
         if ! $SCRIPT_WIZARD confirm "Reconfigure this VM?" no; then
             if [ "$from_create" = "true" ]; then
                 echo "Using existing config."

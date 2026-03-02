@@ -1146,6 +1146,13 @@ backend_cleanup() {
 create_vm() {
     local name="$1"
 
+    # Check if VM is currently running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' is currently running. Destroy it first:"
+        echo "  just destroy $name"
+        exit 1
+    fi
+
     # Configure machine interactively (prompts for all settings)
     config_vm_interactive "$name" "" "true"
 
