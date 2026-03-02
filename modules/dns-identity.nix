@@ -18,24 +18,24 @@
 
     # Create /etc/resolv.conf placeholder pointing to resolved's stub listener.
     # NixOS normally creates this as a symlink during activation, but on read-only
-    # root the symlink can't be created. We use the placeholder + bind mount pattern.
+    # root the symlink can't be created. We bake a placeholder and bind mount
+    # from /run/resolv.conf (written by dns-identity service) over it.
     environment.etc."resolv.conf" = lib.mkForce {
-      text = "nameserver 127.0.0.53\noptions edns0 trust-ad\n";
+      text = "# Placeholder - replaced by bind mount from dns-identity service\nnameserver 127.0.0.53\n";
       mode = "0644";
     };
 
-    # Bind mount resolv.conf from /etc/static (where environment.etc puts it)
-    fileSystems."/etc/resolv.conf" = {
-      device = "/etc/static/resolv.conf";
-      options = [ "bind" ];
-    };
-
-    # Service to configure custom DNS from /var/identity
+    # Service to create /etc/resolv.conf and configure custom DNS
     systemd.services.dns-identity = {
-      description = "Configure DNS from /var/identity";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "var.mount" "systemd-resolved.service" ];
-      requires = [ "systemd-resolved.service" ];
+      description = "Configure DNS and /etc/resolv.conf from /var/identity";
+      wantedBy = [ "sysinit.target" ];
+      before = [ "network-pre.target" "nss-lookup.target" "systemd-resolved.service" ];
+      after = [ "local-fs.target" "var.mount" ];
+      wants = [ "local-fs.target" ];
+
+      unitConfig = {
+        DefaultDependencies = false;
+      };
 
       serviceConfig = {
         Type = "oneshot";
@@ -43,9 +43,16 @@
       };
 
       script = ''
-        # Configure custom DNS from /var/identity if present
+        # Write resolv.conf to /run and bind mount over the placeholder
+        cat > /run/resolv.conf << 'EOF'
+nameserver 127.0.0.53
+options edns0 trust-ad
+EOF
+        chmod 0644 /run/resolv.conf
+        ${pkgs.util-linux}/bin/mount --bind /run/resolv.conf /etc/resolv.conf
+
+        # Configure custom DNS via resolved drop-in if identity file exists
         if [ -f /var/identity/resolv.conf ]; then
-          # Extract nameservers (avoid pipeline to prevent broken pipe errors)
           nameservers=""
           while read -r line; do
             case "$line" in
@@ -59,15 +66,9 @@
 
           if [ -n "$nameservers" ]; then
             echo "Setting DNS: $nameservers"
-            # Write a resolved drop-in config and restart resolved to pick it up
             mkdir -p /run/systemd/resolved.conf.d
             printf '[Resolve]\nDNS=%s\n' "$nameservers" > /run/systemd/resolved.conf.d/identity.conf
-            ${pkgs.systemd}/bin/systemctl restart systemd-resolved
-          else
-            echo "No nameservers found in /var/identity/resolv.conf"
           fi
-        else
-          echo "Using default DNS from DHCP/resolved"
         fi
       '';
     };
