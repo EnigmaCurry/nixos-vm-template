@@ -15,6 +15,7 @@
     ./firewall-identity.nix
     ./dns-identity.nix
     ./hosts-identity.nix
+    ./network-identity.nix
     ./root-password.nix
     ./guest-agent.nix
     ./zram.nix

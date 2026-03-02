@@ -308,6 +308,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
     fi
 
+    # Copy static IP config if present
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/static_ip"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -543,6 +550,16 @@ EOF
         gf_cmds="$gf_cmds : copy-in $machine_dir/udp_ports /etc/firewall-ports/"
         gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/udp_ports"
         gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
+    fi
+
+    # Copy static IP config to /etc/network-config/
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : mkdir-p /etc/network-config"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/network-config"
+        gf_cmds="$gf_cmds : chmod 0755 /etc/network-config"
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /etc/network-config/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/static_ip"
     fi
 
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
@@ -782,7 +799,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
@@ -800,8 +817,14 @@ backend_sync_identity() {
     pve_ssh "chmod 0644 $mount_point/identity/udp_ports 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/resolv.conf 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/hosts 2>/dev/null || true"
+    pve_ssh "chmod 0644 $mount_point/identity/static_ip 2>/dev/null || true"
     pve_ssh "chmod 0600 $mount_point/identity/root_password_hash 2>/dev/null || true"
     pve_ssh "chown -R 0:0 $mount_point/identity/"
+
+    # Remove static_ip if no longer configured (switch back to DHCP)
+    if [ ! -f "$machine_dir/static_ip" ]; then
+        pve_ssh "rm -f $mount_point/identity/static_ip"
+    fi
 
     # Unmount and disconnect nbd
     pve_ssh "umount $mount_point"
@@ -1129,9 +1152,10 @@ create_vm_batch() {
     local var_size
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
+    local static_ip="${7:-}"
 
     # Configure machine non-interactively
-    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network"
+    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network" "$static_ip"
 
     # Read back the configured values from machine config
     local machine_dir="$MACHINES_DIR/$name"

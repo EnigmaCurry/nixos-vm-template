@@ -490,6 +490,7 @@ config_vm() {
     local var_size
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
+    local static_ip="${7:-}"
 
     # Initialize machine config (creates identity files, prompts for SSH keys)
     init_machine "$name" "$profile" "$network"
@@ -528,6 +529,21 @@ config_vm() {
     else
         var_size=$(cat "$machine_dir/var_size")
         echo "Using existing var_size: $var_size"
+    fi
+
+    # Save static IP configuration if provided (format: address,gateway)
+    if [ -n "$static_ip" ]; then
+        local sip_addr sip_gw
+        sip_addr="${static_ip%%,*}"
+        sip_gw="${static_ip#*,}"
+        if [ "$sip_gw" = "$sip_addr" ]; then
+            sip_gw=""
+        fi
+        printf 'address=%s\n' "$sip_addr" > "$machine_dir/static_ip"
+        if [ -n "$sip_gw" ]; then
+            printf 'gateway=%s\n' "$sip_gw" >> "$machine_dir/static_ip"
+        fi
+        echo "Created: $machine_dir/static_ip ($sip_addr)"
     fi
 
     echo ""
@@ -774,6 +790,40 @@ config_vm_interactive() {
     esac
     echo "Network: $network"
 
+    # Static IP configuration (only for bridge networks)
+    local static_ip_address="" static_ip_gateway=""
+    if [[ "$network" == "bridge" ]] || [[ "$network" == bridge:* ]]; then
+        echo ""
+        local current_static_ip=""
+        if [ -f "$machine_dir/static_ip" ]; then
+            current_static_ip=$(cat "$machine_dir/static_ip" 2>/dev/null || true)
+        fi
+
+        local ip_default_idx="0"
+        if [ -n "$current_static_ip" ]; then
+            ip_default_idx="1"
+        fi
+
+        local ip_choice
+        ip_choice=$($SCRIPT_WIZARD choose -d "$ip_default_idx" "IP address configuration:" "DHCP (automatic)" "Static IP")
+        if [[ "$ip_choice" == "Static"* ]]; then
+            local default_addr="" default_gw=""
+            if [ -n "$current_static_ip" ]; then
+                default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
+                default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
+            fi
+            static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (CIDR notation, e.g. 10.56.0.5/24):" "$default_addr")
+            if [ -z "$static_ip_address" ]; then
+                echo "Error: IP address is required for static IP configuration."
+                exit 1
+            fi
+            static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. 10.56.0.1):" "$default_gw")
+            echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
+        else
+            echo "IP: DHCP"
+        fi
+    fi
+
     # SSH keys selection
     echo ""
     local ssh_key_mode=""
@@ -861,6 +911,11 @@ config_vm_interactive() {
     echo "  vCPUs:   $vcpus"
     echo "  Disk:    $var_size"
     echo "  Network: $network"
+    if [ -n "$static_ip_address" ]; then
+        echo "  IP:      $static_ip_address (gateway: ${static_ip_gateway:-none})"
+    else
+        echo "  IP:      DHCP"
+    fi
     echo "  SSH:     $ssh_key_mode"
     echo ""
 
@@ -898,6 +953,17 @@ config_vm_interactive() {
     else
         rm -f "$machine_dir/mutable"
         echo "Removed: $machine_dir/mutable (immutable mode)"
+    fi
+
+    # Save static IP configuration
+    if [ -n "$static_ip_address" ]; then
+        printf 'address=%s\n' "$static_ip_address" > "$machine_dir/static_ip"
+        if [ -n "$static_ip_gateway" ]; then
+            printf 'gateway=%s\n' "$static_ip_gateway" >> "$machine_dir/static_ip"
+        fi
+        echo "Created: $machine_dir/static_ip ($static_ip_address)"
+    else
+        rm -f "$machine_dir/static_ip"
     fi
 
     echo ""
