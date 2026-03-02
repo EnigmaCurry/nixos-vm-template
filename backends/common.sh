@@ -983,10 +983,17 @@ config_vm_interactive() {
                 done < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-|fwbr)' || true)
 
                 if [ ${#lb_bridges[@]} -eq 0 ]; then
-                    echo "Error: No bridge interfaces found."
-                    echo "To use bridged networking, create a bridge interface first."
-                    echo "Example: nmcli connection add type bridge ifname br0 con-name br0"
-                    exit 1
+                    echo "No bridge interfaces found."
+                    if $SCRIPT_WIZARD confirm "Create a bridge (br0) with NetworkManager?" yes; then
+                        local br_name="br0"
+                        sudo nmcli connection add type bridge ifname "$br_name" con-name "$br_name" stp no
+                        echo "Bridge '$br_name' created."
+                        lb_bridges+=("$br_name")
+                        lb_labels+=("$br_name (new)")
+                    else
+                        echo "Aborted. Bridge networking requires a bridge interface."
+                        exit 1
+                    fi
                 fi
 
                 local lb_default_args=()
