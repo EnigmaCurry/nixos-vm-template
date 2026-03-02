@@ -190,7 +190,12 @@ pve_determine_vmid() {
 
 # List bridge interfaces on PVE node (name only, one per line)
 pve_list_bridges() {
-    pve_ssh "for d in /sys/class/net/*/bridge; do [ -d \"\$d\" ] && basename \"\$(dirname \"\$d\")\"; done 2>/dev/null"
+    pve_ssh 'for d in /sys/class/net/*/bridge; do
+        [ -d "$d" ] || continue
+        br=$(basename "$(dirname "$d")")
+        case "$br" in fwbr*) continue ;; esac
+        echo "$br"
+    done 2>/dev/null'
 }
 
 # List bridge interfaces with details: "vmbr0 (10.0.0.1/24, enp3s0) - LAN"
@@ -199,6 +204,7 @@ pve_list_bridges_detailed() {
     pve_ssh 'for d in /sys/class/net/*/bridge; do
         [ -d "$d" ] || continue
         br=$(basename "$(dirname "$d")")
+        case "$br" in fwbr*) continue ;; esac
 
         # Get IP/CIDR
         ip=$(ip -4 addr show dev "$br" 2>/dev/null | awk "/inet /{print \$2; exit}")
