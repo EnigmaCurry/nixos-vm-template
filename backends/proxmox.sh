@@ -190,9 +190,7 @@ pve_determine_vmid() {
 
 # List bridge interfaces on PVE node
 pve_list_bridges() {
-    pve_ssh "ls -1 /sys/class/net/*/bridge 2>/dev/null" | while read -r path; do
-        dirname "$path" | xargs basename
-    done
+    pve_ssh "for d in /sys/class/net/*/bridge; do [ -d \"\$d\" ] && basename \"\$(dirname \"\$d\")\"; done 2>/dev/null"
 }
 
 # --- Firewall Helpers ---
