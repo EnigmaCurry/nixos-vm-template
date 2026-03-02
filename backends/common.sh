@@ -1125,7 +1125,15 @@ config_vm_interactive() {
                     echo "Error: IP address is required for static IP configuration."
                     exit 1
                 fi
-                static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. 10.56.0.1):" "$default_gw")
+                # Auto-append CIDR mask if user entered a bare IP
+                if [[ "$static_ip_address" != */* ]]; then
+                    local lb_auto_mask="${lb_bridge_ip_cidr#*/}"
+                    lb_auto_mask="${lb_auto_mask:-24}"
+                    static_ip_address="${static_ip_address}/${lb_auto_mask}"
+                    echo "  (using /${lb_auto_mask} subnet mask)"
+                fi
+                local lb_gw_example="${lb_bridge_gateway:-10.56.0.1}"
+                static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. $lb_gw_example):" "$default_gw")
                 echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
 
                 # DNS configuration
