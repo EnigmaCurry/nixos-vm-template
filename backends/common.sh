@@ -540,8 +540,8 @@ config_vm() {
     local network="${6:-nat}"
     local static_ip="${7:-}"
 
-    # Initialize machine config (creates identity files, prompts for SSH keys)
-    init_machine "$name" "$profile" "$network"
+    # Initialize machine config (creates identity files, uses SSH agent keys in batch mode)
+    init_machine "$name" "$profile" "$network" "agent"
 
     local machine_dir="$MACHINES_DIR/$name"
 
