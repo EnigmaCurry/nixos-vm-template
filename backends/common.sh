@@ -1070,8 +1070,8 @@ config_vm_interactive() {
                 if [ "$br_state" = "down" ]; then
                     echo "Bridge '$selected_bridge' is currently down."
                     if $SCRIPT_WIZARD confirm "Bring up $selected_bridge?" yes; then
-                        sudo ip link set "$selected_bridge" up
-                        echo "Bridge '$selected_bridge' is now up."
+                        sudo nmcli connection up "$selected_bridge" 2>/dev/null || sudo ip link set "$selected_bridge" up
+                        echo "Bridge '$selected_bridge' activated."
                     fi
                 fi
                 ;;
