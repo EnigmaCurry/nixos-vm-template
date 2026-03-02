@@ -16,12 +16,14 @@
     services.resolved.enable = true;
     services.resolved.settings.Resolve.DNSStubListenerExtra = [ "127.0.0.1" "::1" ];
 
-    # Create /etc/resolv.conf placeholder pointing to resolved's stub listener.
-    # NixOS normally creates this as a symlink during activation, but on read-only
-    # root the symlink can't be created. We bake a placeholder and bind mount
-    # from /run/resolv.conf (written by dns-identity service) over it.
+    # Create /etc/resolv.conf placeholder in the image.
+    # NixOS resolved sets environment.etc."resolv.conf".source to
+    # /run/systemd/resolve/stub-resolv.conf, which doesn't exist at build time
+    # so no file gets baked into /etc/static/. Override with a static file
+    # using pkgs.writeText so the placeholder exists in the image.
+    # The dns-identity service bind mounts /run/resolv.conf over it at boot.
     environment.etc."resolv.conf" = lib.mkForce {
-      text = "# Placeholder - replaced by bind mount from dns-identity service\nnameserver 127.0.0.53\n";
+      source = pkgs.writeText "resolv.conf" "# Placeholder - replaced by dns-identity bind mount\nnameserver 127.0.0.53\noptions edns0 trust-ad\n";
       mode = "0644";
     };
 
