@@ -1055,9 +1055,36 @@ config_vm_interactive() {
         esac
     fi
 
+    # Proxmox VMID selection (before summary so it's included)
+    local pve_vmid=""
+    if [ "${BACKEND:-}" = "proxmox" ]; then
+        if [ -f "$machine_dir/vmid" ]; then
+            pve_vmid=$(cat "$machine_dir/vmid")
+        else
+            echo ""
+            echo "Allocating VMID from Proxmox..."
+            local default_vmid
+            default_vmid=$(pve_next_vmid)
+            pve_vmid=$($SCRIPT_WIZARD ask "Enter Proxmox VMID:" "$default_vmid")
+            pve_vmid="${pve_vmid:-$default_vmid}"
+
+            # Validate VMID is not taken by a different VM
+            local existing_vm_name
+            existing_vm_name=$(pve_ssh "qm config $pve_vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+            if [ -n "$existing_vm_name" ] && [ "$existing_vm_name" != "$name" ]; then
+                echo "Error: VMID $pve_vmid is already in use by VM '$existing_vm_name'."
+                exit 1
+            fi
+            echo "VMID: $pve_vmid"
+        fi
+    fi
+
     echo ""
     echo "Configuration summary:"
     echo "  Name:    $name"
+    if [ -n "$pve_vmid" ]; then
+        echo "  VMID:    $pve_vmid"
+    fi
     echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || echo "immutable")"
     echo "  Profile: $profile"
     echo "  Memory:  ${memory}M"
@@ -1076,6 +1103,12 @@ config_vm_interactive() {
     if ! $SCRIPT_WIZARD confirm "Create this configuration?" yes; then
         echo "Aborted."
         exit 0
+    fi
+
+    # Save VMID if set during interactive prompt
+    if [ -n "$pve_vmid" ]; then
+        mkdir -p "$machine_dir"
+        echo "$pve_vmid" > "$machine_dir/vmid"
     fi
 
     # Initialize machine with collected values
