@@ -52,6 +52,8 @@ predictably, and can be recreated identically at any time.
 - UEFI boot with systemd-boot
 - SSH key-only authentication
 - QEMU guest agent for IP detection and guest commands
+- Static IP or DHCP for bridged VMs (interactive or batch)
+- Interactive bridge management (create, add ports, activate)
 - Optional zram compressed swap for memory overcommit
 
 ## Backends
@@ -212,42 +214,70 @@ gives VMs internet access but they're not directly accessible from
 other machines on your LAN.
 
 For bridged networking, VMs connect directly to your physical network
-and get IP addresses from your network's DHCP server. This requires
-setting up a bridge interface on the host.
+and get IP addresses from your network's DHCP server (or use a static
+IP). This requires a bridge interface on the host.
 
-#### Setting Up a Bridge with NetworkManager
+#### Interactive Bridge Setup
 
-First, identify your physical network interface:
+When you select "Bridge" during `just create`, an interactive picker
+shows available bridges with their state, IP address, and physical
+interfaces:
 
-```bash
-ip link show
-# Look for your ethernet interface (e.g., enp6s0, eth0, eno1)
+```
+Select network bridge:
+  br0 (up, 10.13.14.1/24, enp6s0)
+  br1 (down)
+  Create new bridge
 ```
 
-Create the bridge and attach your physical interface to it:
+The wizard will guide you through:
+- **Creating a bridge** if none exist (or choose "Create new bridge")
+- **Adding a physical interface** if the bridge has no ports
+- **Bringing the bridge up** if it's currently down
+
+All bridge management uses NetworkManager (`nmcli`) so connections
+persist across reboots.
+
+#### Manual Bridge Setup
+
+You can also set up bridges manually:
 
 ```bash
 # Create the bridge
-sudo nmcli connection add type bridge ifname br0 con-name br0
+sudo nmcli connection add type bridge ifname br0 con-name br0 stp no
 
-# Add your physical interface to the bridge (replace enp6s0 with your interface)
-sudo nmcli connection add type bridge-slave ifname enp6s0 master br0 con-name br0-slave
+# Add your physical interface (replace enp6s0)
+sudo nmcli connection add type bridge-slave ifname enp6s0 master br0
 
-# Find your current connection name for the physical interface
-nmcli -t -f NAME,DEVICE connection show --active | grep enp6s0
-
-# Bring down the old connection and bring up the bridge
-# WARNING: This will briefly disconnect your network!
+# Bring up the bridge (WARNING: briefly disconnects network!)
 sudo nmcli connection down "Wired connection 1" && sudo nmcli connection up br0
 ```
 
-#### Creating a Bridged VM
+#### Static IP Configuration
 
-```bash
-just create myvm core 2048 2 20G bridge
+When using bridged networking, you can assign a static IP instead of
+relying on DHCP. The interactive wizard prompts for DHCP vs Static
+after bridge selection:
+
+```
+IP address configuration:
+  DHCP (automatic)
+  Static IP
 ```
 
-You'll be prompted to select from available bridge interfaces.
+If you choose Static IP, you'll be prompted for:
+- **IP address** with CIDR notation (e.g., `10.13.14.5/24`) — the bridge
+  subnet is auto-detected and shown as the example
+- **Gateway** — discovered from the host routing table, or defaults to
+  `.1` on the subnet
+- **DNS servers** — choose from gateway, Cloudflare, Google, or custom
+
+The CIDR mask (`/24`) is automatically appended if you enter a bare IP
+address.
+
+Static IP config is saved in `machines/<name>/static_ip` and applied
+at boot. Remove this file and run `just upgrade` to switch back to
+DHCP.
 
 #### Changing Network Mode
 
@@ -358,7 +388,9 @@ Enter VMID [105]:
 
 Once assigned, the VMID is saved and reused for subsequent operations
 (recreate, upgrade, etc.). The script validates that the VMID is
-either available or already belongs to a VM with the same name.
+either available or already belongs to a VM with the same name. If
+you enter a VMID that's already taken by another VM, you'll be
+re-prompted.
 
 ### Identity Sync
 
@@ -380,22 +412,26 @@ Set `PVE_DISK_FORMAT` based on your storage backend:
 
 ### Proxmox Networking
 
-The `network` parameter maps to Proxmox bridges:
+During `just create`, an interactive bridge picker lists all bridges on
+the Proxmox node with their details (IP, subnet, ports, comment):
 
-| Network parameter | Proxmox net0 bridge |
-|-------------------|---------------------|
-| `nat` | `$PVE_BRIDGE` (default `vmbr0`) |
-| `bridge:<name>` | `<name>` directly |
+```
+Select network bridge:
+  vmbr0 (10.0.0.1/24, enp6s0)
+  vmbr1 (10.56.0.1/24, NAT bridge)
+```
 
-For Proxmox, use `bridge:<name>` to specify a bridge directly (the
-interactive `bridge` menu only lists local bridges, not remote PVE bridges):
+After selecting a bridge, you'll be prompted for DHCP vs static IP
+(see [Static IP Configuration](#static-ip-configuration) above).
+
+For batch/scripted use, specify the bridge directly:
 
 ```bash
 # Use default bridge (vmbr0)
-BACKEND=proxmox just create myvm core 2048 2 30G nat
+BACKEND=proxmox just create-batch myvm core 2048 2 30G bridge:vmbr0
 
-# Use a specific Proxmox bridge
-BACKEND=proxmox just create myvm core 2048 2 30G bridge:vmbr1
+# Use a specific bridge with static IP
+BACKEND=proxmox just create-batch myvm core 2048 2 30G bridge:vmbr1 "10.56.0.5/24,10.56.0.1"
 ```
 
 ### Backups (Proxmox)
@@ -446,7 +482,10 @@ just build docker,python,rust  # Build a combined image with multiple profiles
 | `just purge <name>` | Remove VM, disks, and machine config |
 
 The `config` and `create` commands are interactive and prompt for all settings
-(name, profile, memory, vcpus, disk size, network mode). No arguments are required:
+(name, profile, memory, vcpus, disk size, network mode, static IP). After
+starting a VM, `create` waits for the IP address and prints SSH login
+instructions. If the VM is already running, `create` will abort and tell you
+to destroy it first. No arguments are required:
 
 ```bash
 just config                # Configure a new VM interactively
@@ -460,6 +499,9 @@ just config-batch webserver docker 4096 4 50G nat
 just create-batch webserver docker 4096 4 50G nat
 just create-batch devbox docker,podman,dev 8192 8  # Full dev environment with Docker and Podman
 just create-batch claude-vm claude,dev,docker,podman 8192 4  # Claude Code with full dev stack
+
+# With static IP (address/CIDR,gateway)
+just create-batch webserver docker 4096 4 50G bridge:br0 "10.13.14.5/24,10.13.14.1"
 
 just network-config webserver nat         # Switch to NAT networking
 just network-config webserver bridge      # Interactive bridge selection (local bridges)
@@ -624,6 +666,7 @@ sudo nixos-rebuild switch --flake github:owner/repo#config
 | Root filesystem | Read-only | Read-write |
 | Identity files | `/var/identity/` | `/etc/` (hostname, machine-id, SSH keys) |
 | Firewall rules | `/var/identity/tcp_ports` | `/etc/firewall-ports/tcp_ports` |
+| Static IP | `/var/identity/static_ip` | `/etc/network-config/static_ip` |
 | Root password | `/var/identity/root_password_hash` | `/etc/root_password_hash` |
 | Upgrade method | `just upgrade` from host | `nixos-rebuild` inside VM |
 | Thin provisioning | Yes (QCOW2 backing files) | No (full disk copy) |
@@ -732,6 +775,7 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `udp_ports` - UDP ports to open in firewall (one per line)
 - `root_password_hash` - Root password hash for console login (empty = disabled)
 - `resolv.conf` - DNS configuration (default: Cloudflare 1.1.1.1, 1.0.0.1)
+- `static_ip` - Static IP config (`address=` and `gateway=` lines); absent = DHCP
 - `hosts` - Extra /etc/hosts entries (optional)
 - `vmid` - Proxmox VMID (proxmox backend only)
 
