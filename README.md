@@ -304,7 +304,6 @@ Set these in your `.env` file or as environment variables:
 | `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |
 | `PVE_DISK_FORMAT` | No | `qcow2` | Disk format for import (qcow2 or raw) |
 | `PVE_BACKUP_STORAGE` | No | `local` | Storage for vzdump backups |
-| `PVE_VMID` | No | (auto) | Specify VMID for next create |
 
 Example `.env`:
 
@@ -347,16 +346,19 @@ BACKEND=proxmox just ssh myvm
 
 ### VMID Management
 
-Each VM's Proxmox VMID is stored in `machines/<name>/vmid`. By default,
-VMIDs are auto-allocated from Proxmox via `pvesh get /cluster/nextid`.
-To specify a VMID manually:
+Each VM's Proxmox VMID is stored in `machines/<name>/vmid`. During
+`just create` or `just clone`, you will be prompted to enter a VMID
+with the next available ID from Proxmox as the default — press Enter
+to accept it, or type a different ID:
 
-```bash
-PVE_VMID=200 BACKEND=proxmox just create myvm
+```
+Allocating VMID from Proxmox...
+Enter VMID [105]:
 ```
 
-The script validates that the VMID is either available or already
-belongs to a VM with the same name.
+Once assigned, the VMID is saved and reused for subsequent operations
+(recreate, upgrade, etc.). The script validates that the VMID is
+either available or already belongs to a VM with the same name.
 
 ### Identity Sync
 

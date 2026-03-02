@@ -153,6 +153,39 @@ pve_next_vmid() {
     pve_ssh "pvesh get /cluster/nextid"
 }
 
+# Determine VMID for a VM: prompt interactively with auto-allocated default
+# Usage: pve_determine_vmid <name> <machine_dir>
+# Sets the vmid in machines/<name>/vmid and prints the chosen VMID
+pve_determine_vmid() {
+    local name="$1"
+    local machine_dir="$2"
+    local vmid
+
+    if [ -f "$machine_dir/vmid" ]; then
+        vmid=$(cat "$machine_dir/vmid")
+        echo "Using existing VMID: $vmid" >&2
+    else
+        echo "Allocating VMID from Proxmox..." >&2
+        local default_vmid
+        default_vmid=$(pve_next_vmid)
+        read -p "Enter VMID [$default_vmid]: " vmid
+        vmid="${vmid:-$default_vmid}"
+    fi
+
+    # Validate VMID: must be available or belong to a VM with the same name
+    local existing_name
+    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+    if [ -n "$existing_name" ]; then
+        if [ "$existing_name" != "$name" ]; then
+            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')" >&2
+            exit 1
+        fi
+    fi
+
+    echo "$vmid" > "$machine_dir/vmid"
+    echo "$vmid"
+}
+
 # --- Firewall Helpers ---
 
 # Sync Proxmox VM-level firewall rules from tcp_ports/udp_ports identity files
@@ -324,31 +357,9 @@ backend_create_disks() {
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
 
-    # Determine VMID: user-specified > existing file > auto-allocate
+    # Determine VMID (interactive prompt with auto-allocated default)
     local vmid
-    if [ -n "${PVE_VMID:-}" ]; then
-        vmid="$PVE_VMID"
-        echo "Using user-specified VMID: $vmid"
-    elif [ -f "$machine_dir/vmid" ]; then
-        vmid=$(cat "$machine_dir/vmid")
-        echo "Using existing VMID: $vmid"
-    else
-        echo "Allocating VMID from Proxmox..."
-        vmid=$(pve_next_vmid)
-        echo "Allocated VMID: $vmid"
-    fi
-
-    # Validate VMID: must be available or belong to a VM with the same name
-    local existing_name
-    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
-    if [ -n "$existing_name" ]; then
-        if [ "$existing_name" != "$name" ]; then
-            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')"
-            exit 1
-        fi
-    fi
-
-    echo "$vmid" > "$machine_dir/vmid"
+    vmid=$(pve_determine_vmid "$name" "$machine_dir")
 
     # Parse network configuration
     local network_config bridge
@@ -603,31 +614,9 @@ EOF
 
     rm -rf "$tmp_dir"
 
-    # Determine VMID: user-specified > existing file > auto-allocate
+    # Determine VMID (interactive prompt with auto-allocated default)
     local vmid
-    if [ -n "${PVE_VMID:-}" ]; then
-        vmid="$PVE_VMID"
-        echo "Using user-specified VMID: $vmid"
-    elif [ -f "$machine_dir/vmid" ]; then
-        vmid=$(cat "$machine_dir/vmid")
-        echo "Using existing VMID: $vmid"
-    else
-        echo "Allocating VMID from Proxmox..."
-        vmid=$(pve_next_vmid)
-        echo "Allocated VMID: $vmid"
-    fi
-
-    # Validate VMID: must be available or belong to a VM with the same name
-    local existing_name
-    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
-    if [ -n "$existing_name" ]; then
-        if [ "$existing_name" != "$name" ]; then
-            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')"
-            exit 1
-        fi
-    fi
-
-    echo "$vmid" > "$machine_dir/vmid"
+    vmid=$(pve_determine_vmid "$name" "$machine_dir")
 
     # Parse network configuration
     local network_config bridge
@@ -1244,16 +1233,9 @@ clone_vm() {
     echo "$memory" > "$dest_machine_dir/memory"
     echo "$vcpus" > "$dest_machine_dir/vcpus"
 
-    # Determine VMID: user-specified > auto-allocate
+    # Determine VMID (interactive prompt with auto-allocated default)
     local dest_vmid
-    if [ -n "${PVE_VMID:-}" ]; then
-        dest_vmid="$PVE_VMID"
-        echo "Using user-specified VMID: $dest_vmid"
-    else
-        dest_vmid=$(pve_next_vmid)
-        echo "Allocated VMID for clone: $dest_vmid"
-    fi
-    echo "$dest_vmid" > "$dest_machine_dir/vmid"
+    dest_vmid=$(pve_determine_vmid "$dest" "$dest_machine_dir")
 
     # Use qm clone for full clone
     echo "Cloning VM on Proxmox ($source_vmid -> $dest_vmid)..."
