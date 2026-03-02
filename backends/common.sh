@@ -1082,16 +1082,19 @@ config_vm_interactive() {
             echo "Allocating VMID from Proxmox..."
             local default_vmid
             default_vmid=$(pve_next_vmid)
-            pve_vmid=$($SCRIPT_WIZARD ask "Enter Proxmox VMID:" "$default_vmid")
-            pve_vmid="${pve_vmid:-$default_vmid}"
+            while true; do
+                pve_vmid=$($SCRIPT_WIZARD ask "Enter Proxmox VMID:" "$default_vmid")
+                pve_vmid="${pve_vmid:-$default_vmid}"
 
-            # Validate VMID is not taken by a different VM
-            local existing_vm_name
-            existing_vm_name=$(pve_ssh "qm config $pve_vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
-            if [ -n "$existing_vm_name" ] && [ "$existing_vm_name" != "$name" ]; then
-                echo "Error: VMID $pve_vmid is already in use by VM '$existing_vm_name'."
-                exit 1
-            fi
+                # Validate VMID is not taken by a different VM
+                local existing_vm_name
+                existing_vm_name=$(pve_ssh "qm config $pve_vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+                if [ -n "$existing_vm_name" ] && [ "$existing_vm_name" != "$name" ]; then
+                    echo "VMID $pve_vmid is already in use by VM '$existing_vm_name'. Choose a different ID."
+                    continue
+                fi
+                break
+            done
             echo "VMID: $pve_vmid"
         fi
     fi
