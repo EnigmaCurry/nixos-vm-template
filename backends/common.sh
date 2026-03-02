@@ -771,7 +771,7 @@ config_vm_interactive() {
 
     # Network selection (backend-specific)
     echo ""
-    local static_ip_address="" static_ip_gateway=""
+    local static_ip_address="" static_ip_gateway="" static_ip_dns1="" static_ip_dns2=""
 
     if [ "${BACKEND:-}" = "proxmox" ]; then
         # Proxmox: all networks are bridges — pick which bridge
@@ -868,6 +868,32 @@ config_vm_interactive() {
             fi
             static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP:" "$default_gw")
             echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
+
+            # DNS configuration
+            echo ""
+            local dns_default_gw="Gateway (${static_ip_gateway:-N/A})"
+            local dns_choice
+            dns_choice=$($SCRIPT_WIZARD choose "DNS servers:" "$dns_default_gw" "Cloudflare (1.1.1.1, 1.0.0.1)" "Google (8.8.8.8, 8.8.4.4)" "Custom")
+            case "$dns_choice" in
+                "Gateway"*) static_ip_dns1="${static_ip_gateway:-1.1.1.1}"; static_ip_dns2="1.1.1.1" ;;
+                "Cloudflare"*) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+                "Google"*) static_ip_dns1="8.8.8.8"; static_ip_dns2="8.8.4.4" ;;
+                "Custom")
+                    local current_dns1="" current_dns2=""
+                    if [ -f "$machine_dir/resolv.conf" ]; then
+                        current_dns1=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '1s/nameserver //p' || true)
+                        current_dns2=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '2s/nameserver //p' || true)
+                    fi
+                    static_ip_dns1=$($SCRIPT_WIZARD ask "Primary DNS server:" "$current_dns1")
+                    static_ip_dns2=$($SCRIPT_WIZARD ask "Secondary DNS server:" "$current_dns2")
+                    ;;
+                *) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+            esac
+            # For gateway option, don't show gateway IP twice if it equals 1.1.1.1
+            if [ "$static_ip_dns1" = "$static_ip_dns2" ]; then
+                static_ip_dns2="1.0.0.1"
+            fi
+            echo "DNS: $static_ip_dns1, $static_ip_dns2"
         else
             echo "IP: DHCP"
         fi
@@ -920,6 +946,31 @@ config_vm_interactive() {
                 fi
                 static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. 10.56.0.1):" "$default_gw")
                 echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
+
+                # DNS configuration
+                echo ""
+                local dns_default_gw="Gateway (${static_ip_gateway:-N/A})"
+                local dns_choice
+                dns_choice=$($SCRIPT_WIZARD choose "DNS servers:" "$dns_default_gw" "Cloudflare (1.1.1.1, 1.0.0.1)" "Google (8.8.8.8, 8.8.4.4)" "Custom")
+                case "$dns_choice" in
+                    "Gateway"*) static_ip_dns1="${static_ip_gateway:-1.1.1.1}"; static_ip_dns2="1.1.1.1" ;;
+                    "Cloudflare"*) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+                    "Google"*) static_ip_dns1="8.8.8.8"; static_ip_dns2="8.8.4.4" ;;
+                    "Custom")
+                        local current_dns1="" current_dns2=""
+                        if [ -f "$machine_dir/resolv.conf" ]; then
+                            current_dns1=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '1s/nameserver //p' || true)
+                            current_dns2=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '2s/nameserver //p' || true)
+                        fi
+                        static_ip_dns1=$($SCRIPT_WIZARD ask "Primary DNS server:" "$current_dns1")
+                        static_ip_dns2=$($SCRIPT_WIZARD ask "Secondary DNS server:" "$current_dns2")
+                        ;;
+                    *) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+                esac
+                if [ "$static_ip_dns1" = "$static_ip_dns2" ]; then
+                    static_ip_dns2="1.0.0.1"
+                fi
+                echo "DNS: $static_ip_dns1, $static_ip_dns2"
             else
                 echo "IP: DHCP"
             fi
@@ -1015,6 +1066,7 @@ config_vm_interactive() {
     echo "  Network: $network"
     if [ -n "$static_ip_address" ]; then
         echo "  IP:      $static_ip_address (gateway: ${static_ip_gateway:-none})"
+        echo "  DNS:     ${static_ip_dns1}, ${static_ip_dns2}"
     else
         echo "  IP:      DHCP"
     fi
@@ -1064,6 +1116,14 @@ config_vm_interactive() {
             printf 'gateway=%s\n' "$static_ip_gateway" >> "$machine_dir/static_ip"
         fi
         echo "Created: $machine_dir/static_ip ($static_ip_address)"
+
+        # Save DNS configuration chosen during static IP setup
+        if [ -n "$static_ip_dns1" ]; then
+            printf '%s\n' "# DNS configuration. Run 'just upgrade $name' to apply changes." \
+                "nameserver $static_ip_dns1" \
+                "nameserver ${static_ip_dns2:-1.0.0.1}" > "$machine_dir/resolv.conf"
+            echo "Updated: $machine_dir/resolv.conf ($static_ip_dns1, ${static_ip_dns2:-1.0.0.1})"
+        fi
     else
         rm -f "$machine_dir/static_ip"
     fi
