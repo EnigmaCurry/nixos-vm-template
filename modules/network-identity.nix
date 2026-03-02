@@ -120,6 +120,13 @@
                 ${pkgs.iproute2}/bin/ip route add default via "$gateway" dev "$iface" 2>/dev/null || true
               fi
 
+              # Configure DNS from /etc/network-config/resolv.conf
+              if [ -f /etc/network-config/resolv.conf ]; then
+                cp /etc/network-config/resolv.conf /etc/resolv.conf
+                chmod 0644 /etc/resolv.conf
+                echo "DNS configured from /etc/network-config/resolv.conf"
+              fi
+
               echo "Static IP applied on $iface"
             else
               echo "No address found in /etc/network-config/static_ip"

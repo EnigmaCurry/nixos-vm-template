@@ -613,7 +613,7 @@ EOF
         gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
     fi
 
-    # Copy static IP config to /etc/network-config/
+    # Copy static IP and DNS config to /etc/network-config/
     if [ -s "$machine_dir/static_ip" ]; then
         gf_cmds="$gf_cmds : mkdir-p /etc/network-config"
         gf_cmds="$gf_cmds : chown 0 0 /etc/network-config"
@@ -621,6 +621,11 @@ EOF
         gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /etc/network-config/"
         gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/static_ip"
         gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/static_ip"
+        if [ -s "$machine_dir/resolv.conf" ]; then
+            gf_cmds="$gf_cmds : copy-in $machine_dir/resolv.conf /etc/network-config/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/resolv.conf"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/resolv.conf"
+        fi
     fi
 
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
