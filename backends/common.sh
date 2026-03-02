@@ -245,11 +245,13 @@ init_machine() {
             echo "$admin_keys" >> "$machine_dir/admin_authorized_keys"
             echo "Saved: $machine_dir/admin_authorized_keys"
         elif [ "$ssh_key_mode" = "agent" ]; then
-            # Use keys from SSH agent
+            # Use keys from SSH agent (batch mode — error if no keys available)
             if ssh-add -L 2>/dev/null >> "$machine_dir/admin_authorized_keys"; then
                 echo "Saved: $machine_dir/admin_authorized_keys (from SSH agent)"
             else
-                echo "Warning: No keys in SSH agent, admin SSH login will be disabled"
+                echo "Error: No SSH agent keys found. Start ssh-agent and add a key first:"
+                echo "  eval \$(ssh-agent) && ssh-add"
+                exit 1
             fi
         elif [ "$ssh_key_mode" = "skip" ]; then
             echo "No admin authorized_keys configured (admin SSH login will be disabled)"
