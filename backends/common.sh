@@ -853,13 +853,9 @@ config_vm_interactive() {
                 default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
                 default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
             else
-                # Smart defaults from bridge network
-                if [ -n "$bridge_cidr" ]; then
-                    default_addr="/${bridge_cidr}"
-                fi
                 default_gw="$bridge_gateway"
             fi
-            static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address with CIDR (e.g. ${bridge_ip:-10.0.0.5}/${bridge_cidr:-24}):" "$default_addr")
+            static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (e.g. ${bridge_ip:-10.0.0.5}/${bridge_cidr:-24}):" "$default_addr")
             if [ -z "$static_ip_address" ]; then
                 echo "Error: IP address is required for static IP configuration."
                 exit 1
