@@ -645,7 +645,7 @@ config_vm_interactive() {
     if [ -d "$machine_dir" ]; then
         echo "Machine config already exists: $machine_dir"
         # Check if VM is currently running
-        if backend_is_running "$name" 2>/dev/null; then
+        if backend_is_running "$name"; then
             echo "Error: VM '$name' is currently running. Destroy it first:"
             echo "  just destroy $name"
             exit 1
