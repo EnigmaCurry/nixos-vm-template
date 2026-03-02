@@ -188,6 +188,13 @@ pve_determine_vmid() {
     echo "$vmid"
 }
 
+# List bridge interfaces on PVE node
+pve_list_bridges() {
+    pve_ssh "ls -1 /sys/class/net/*/bridge 2>/dev/null" | while read -r path; do
+        dirname "$path" | xargs basename
+    done
+}
+
 # --- Firewall Helpers ---
 
 # Sync Proxmox VM-level firewall rules from tcp_ports/udp_ports identity files

@@ -769,30 +769,45 @@ config_vm_interactive() {
     esac
     echo "Disk size: $var_size"
 
-    # Network: options are "NAT" "Bridge" (indices 0-1)
+    # Network selection (backend-specific)
     echo ""
-    local network_choice network_default_idx=""
-    if [ -n "$current_network" ]; then
-        case "$current_network" in
-            "nat") network_default_idx="0" ;;
-            bridge*) network_default_idx="1" ;;
-        esac
-    fi
-    if [ -n "$network_default_idx" ]; then
-        network_choice=$($SCRIPT_WIZARD choose -d "$network_default_idx" "Select network mode:" "NAT" "Bridge")
-    else
-        network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT" "Bridge")
-    fi
-    case "$network_choice" in
-        "NAT") network="nat" ;;
-        "Bridge") network="bridge" ;;
-        *) network="nat" ;;
-    esac
-    echo "Network: $network"
-
-    # Static IP configuration (only for bridge networks)
     local static_ip_address="" static_ip_gateway=""
-    if [[ "$network" == "bridge" ]] || [[ "$network" == bridge:* ]]; then
+
+    if [ "${BACKEND:-}" = "proxmox" ]; then
+        # Proxmox: all networks are bridges — pick which bridge
+        local current_bridge=""
+        if [ -n "$current_network" ] && [[ "$current_network" == bridge:* ]]; then
+            current_bridge="${current_network#bridge:}"
+        fi
+
+        # List bridges from PVE node
+        mapfile -t pve_bridges < <(pve_list_bridges 2>/dev/null || true)
+        if [ ${#pve_bridges[@]} -eq 0 ]; then
+            echo "Warning: Could not list bridges from Proxmox node."
+            local bridge_name
+            bridge_name=$($SCRIPT_WIZARD ask "Enter bridge name:" "${current_bridge:-vmbr0}")
+            network="bridge:$bridge_name"
+        else
+            # Build choose args with default selection
+            local bridge_default_args=()
+            if [ -n "$current_bridge" ]; then
+                # Find index of current bridge
+                local idx=0
+                for br in "${pve_bridges[@]}"; do
+                    if [ "$br" = "$current_bridge" ]; then
+                        bridge_default_args=(-d "$idx")
+                        break
+                    fi
+                    ((idx++))
+                done
+            fi
+            local bridge_choice
+            bridge_choice=$($SCRIPT_WIZARD choose ${bridge_default_args[@]+"${bridge_default_args[@]}"} "Select network bridge:" "${pve_bridges[@]}")
+            network="bridge:$bridge_choice"
+        fi
+        echo "Network: $network"
+
+        # Static IP configuration (always prompt on Proxmox — bridges may lack DHCP)
         echo ""
         local current_static_ip=""
         if [ -f "$machine_dir/static_ip" ]; then
@@ -821,6 +836,59 @@ config_vm_interactive() {
             echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
         else
             echo "IP: DHCP"
+        fi
+    else
+        # Libvirt: NAT or Bridge selection
+        local network_choice network_default_idx=""
+        if [ -n "$current_network" ]; then
+            case "$current_network" in
+                "nat") network_default_idx="0" ;;
+                bridge*) network_default_idx="1" ;;
+            esac
+        fi
+        if [ -n "$network_default_idx" ]; then
+            network_choice=$($SCRIPT_WIZARD choose -d "$network_default_idx" "Select network mode:" "NAT" "Bridge")
+        else
+            network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT" "Bridge")
+        fi
+        case "$network_choice" in
+            "NAT") network="nat" ;;
+            "Bridge") network="bridge" ;;
+            *) network="nat" ;;
+        esac
+        echo "Network: $network"
+
+        # Static IP configuration (only for bridge networks on libvirt)
+        if [[ "$network" == "bridge" ]] || [[ "$network" == bridge:* ]]; then
+            echo ""
+            local current_static_ip=""
+            if [ -f "$machine_dir/static_ip" ]; then
+                current_static_ip=$(cat "$machine_dir/static_ip" 2>/dev/null || true)
+            fi
+
+            local ip_default_idx="0"
+            if [ -n "$current_static_ip" ]; then
+                ip_default_idx="1"
+            fi
+
+            local ip_choice
+            ip_choice=$($SCRIPT_WIZARD choose -d "$ip_default_idx" "IP address configuration:" "DHCP (automatic)" "Static IP")
+            if [[ "$ip_choice" == "Static"* ]]; then
+                local default_addr="" default_gw=""
+                if [ -n "$current_static_ip" ]; then
+                    default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
+                    default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
+                fi
+                static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (CIDR notation, e.g. 10.56.0.5/24):" "$default_addr")
+                if [ -z "$static_ip_address" ]; then
+                    echo "Error: IP address is required for static IP configuration."
+                    exit 1
+                fi
+                static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. 10.56.0.1):" "$default_gw")
+                echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
+            else
+                echo "IP: DHCP"
+            fi
         fi
     fi
 
