@@ -983,18 +983,19 @@ config_vm_interactive() {
                 done < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-|fwbr)' || true)
 
                 if [ ${#lb_bridges[@]} -eq 0 ]; then
-                    echo "No bridge interfaces found."
-                    if $SCRIPT_WIZARD confirm "Create a bridge (br0) with NetworkManager?" yes; then
-                        local br_name="br0"
-                        sudo nmcli connection add type bridge ifname "$br_name" con-name "$br_name" stp no
-                        echo "Bridge '$br_name' created."
-                        lb_bridges+=("$br_name")
-                        lb_labels+=("$br_name (new)")
-                    else
-                        echo "Aborted. Bridge networking requires a bridge interface."
-                        exit 1
-                    fi
+                    echo "No bridge interfaces found. Creating one..."
+                    local br_name
+                    br_name=$($SCRIPT_WIZARD ask "Bridge name:" "br0")
+                    br_name="${br_name:-br0}"
+                    sudo nmcli connection add type bridge ifname "$br_name" con-name "$br_name" stp no
+                    echo "Bridge '$br_name' created."
+                    lb_bridges+=("$br_name")
+                    lb_labels+=("$br_name (new)")
                 fi
+
+                # Add "Create new bridge" option
+                lb_bridges+=("__create__")
+                lb_labels+=("Create new bridge")
 
                 local lb_default_args=()
                 local current_bridge=""
@@ -1013,6 +1014,16 @@ config_vm_interactive() {
                 local lb_choice
                 lb_choice=$($SCRIPT_WIZARD choose ${lb_default_args[@]+"${lb_default_args[@]}"} "Select network bridge:" "${lb_labels[@]}")
                 local selected_bridge="${lb_choice%% *}"
+
+                if [ "$selected_bridge" = "Create" ]; then
+                    local new_br_name
+                    new_br_name=$($SCRIPT_WIZARD ask "Bridge name:" "br0")
+                    new_br_name="${new_br_name:-br0}"
+                    sudo nmcli connection add type bridge ifname "$new_br_name" con-name "$new_br_name" stp no
+                    echo "Bridge '$new_br_name' created."
+                    selected_bridge="$new_br_name"
+                fi
+
                 network="bridge:$selected_bridge"
 
                 # Check if bridge has no physical interfaces and offer to add one
