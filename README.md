@@ -697,18 +697,20 @@ To enable zram in your own profile, add to your profile's nix file:
 
 ### Effective Memory
 
-With typical 3:1 compression ratios, a 4GB VM can handle additional memory
-pressure before OOM:
+Zram compresses inactive pages and stores them in RAM as swap. This
+lets the system handle more memory pressure before OOM killing.
+Compression ratios vary by workload (typically 2:1 to 4:1).
 
-| `memoryPercent` | Zram Size | Effective Capacity |
-|-----------------|-----------|-------------------|
-| 50 | 2GB | ~5.5GB (4GB + ~1.5GB compressed) |
-| 75 | 3GB | ~6.25GB (4GB + ~2.25GB compressed) |
-| 100 | 4GB | ~7GB (4GB + ~3GB compressed) |
+With a 4GB VM and an assumed 3:1 compression ratio:
 
-Higher values provide more headroom but consume more RAM for the zram device
-itself. The default of 50% in dev profiles balances memory efficiency with
-safety margin.
+| `memoryPercent` | Zram Swap Size | Effective Capacity |
+|-----------------|----------------|-------------------|
+| 50 | 2GB | ~5.3GB |
+| 75 | 3GB | ~6GB |
+| 100 | 4GB | ~6.7GB |
+
+The zram device itself lives in RAM, so higher values trade active
+memory for more compressed swap capacity.
 
 ## Machine Configuration
 
