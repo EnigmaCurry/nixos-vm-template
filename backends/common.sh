@@ -1058,7 +1058,9 @@ config_vm_interactive() {
                             phys_choice=$($SCRIPT_WIZARD choose "Select interface to add to $selected_bridge:" "${phys_ifaces[@]}")
                             local phys_iface="${phys_choice%% *}"
                             echo "Adding $phys_iface to bridge $selected_bridge (persistent via NetworkManager)..."
-                            sudo nmcli connection add type bridge-slave ifname "$phys_iface" master "$selected_bridge"
+                            local slave_con="bridge-slave-$phys_iface"
+                            sudo nmcli connection add type bridge-slave ifname "$phys_iface" master "$selected_bridge" con-name "$slave_con"
+                            sudo nmcli connection up "$slave_con" 2>/dev/null || true
                             echo "Interface $phys_iface added to $selected_bridge."
                         fi
                     fi
