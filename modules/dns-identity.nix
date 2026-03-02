@@ -16,12 +16,18 @@
     services.resolved.enable = true;
     services.resolved.settings.Resolve.DNSStubListenerExtra = [ "127.0.0.1" "::1" ];
 
-    # Bake /etc/resolv.conf into the image pointing to resolved's stub listener.
-    # NixOS normally manages this as a symlink, but on read-only root the
-    # activation script can't create it, leaving it missing.
+    # Create /etc/resolv.conf placeholder pointing to resolved's stub listener.
+    # NixOS normally creates this as a symlink during activation, but on read-only
+    # root the symlink can't be created. We use the placeholder + bind mount pattern.
     environment.etc."resolv.conf" = lib.mkForce {
       text = "nameserver 127.0.0.53\noptions edns0 trust-ad\n";
       mode = "0644";
+    };
+
+    # Bind mount resolv.conf from /etc/static (where environment.etc puts it)
+    fileSystems."/etc/resolv.conf" = {
+      device = "/etc/static/resolv.conf";
+      options = [ "bind" ];
     };
 
     # Service to configure custom DNS from /var/identity
