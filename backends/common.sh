@@ -54,6 +54,23 @@ is_mutable() {
     fi
 }
 
+# Get the VM's IP address for display (from static_ip config, or "<ip>" if DHCP)
+# Usage: vm_ip <name>
+vm_ip() {
+    local name="$1"
+    local static_ip_file="$MACHINES_DIR/$name/static_ip"
+    if [ -f "$static_ip_file" ]; then
+        local addr
+        addr=$(grep '^address=' "$static_ip_file" 2>/dev/null | cut -d= -f2)
+        if [ -n "$addr" ]; then
+            # Strip CIDR suffix
+            echo "${addr%%/*}"
+            return
+        fi
+    fi
+    echo "<ip>"
+}
+
 # Check if a machine has pipewire audio enabled
 # Returns 0 (true) if "pipewire" is in the machine's profile list
 is_pipewire() {

@@ -1165,16 +1165,16 @@ create_vm() {
     if is_mutable "$name"; then
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
+        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
+        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
     fi
 }
 
@@ -1213,16 +1213,16 @@ create_vm_batch() {
     if is_mutable "$name"; then
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
+        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
+        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
     fi
 }
 
@@ -1479,8 +1479,8 @@ recreate_vm() {
 
     echo ""
     echo "VM '$name' recreated and started."
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
+    echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
 }
 
 # Upgrade a VM to a new image (preserves /var data)
@@ -1595,8 +1595,8 @@ upgrade_vm() {
 
     echo ""
     echo "VM '$name' upgraded and started. /var data preserved."
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
+    echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
 }
 
 # Resize the /var disk for a VM
