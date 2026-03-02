@@ -705,7 +705,9 @@ backend_resume() {
 # Check if a VM is running
 backend_is_running() {
     local name="$1"
-    $VIRSH -c "$LIBVIRT_URI" domstate "$name" 2>/dev/null | grep -q "running"
+    local state
+    state=$($VIRSH -c "$LIBVIRT_URI" domstate "$name" 2>/dev/null) || return 1
+    [[ "$state" == *running* ]]
 }
 
 # Remove backend artifacts (XML) for a VM
