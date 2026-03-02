@@ -814,6 +814,25 @@ config_vm_interactive() {
         fi
         echo "Network: $network"
 
+        # Discover bridge network details for smart defaults
+        local bridge_ip="" bridge_cidr="" bridge_gateway=""
+        local selected_bridge_name="${network#bridge:}"
+        # Query bridge IP from PVE node
+        local bridge_ip_cidr
+        bridge_ip_cidr=$(pve_ssh "ip -4 addr show dev $selected_bridge_name 2>/dev/null | awk '/inet /{print \$2; exit}'" 2>/dev/null || true)
+        bridge_ip_cidr="${bridge_ip_cidr%$'\r'}"
+        if [[ "$bridge_ip_cidr" == */* ]]; then
+            bridge_ip="${bridge_ip_cidr%/*}"
+            bridge_cidr="${bridge_ip_cidr#*/}"
+        fi
+        # Query actual gateway from PVE routing table for this bridge
+        bridge_gateway=$(pve_ssh "ip route show dev $selected_bridge_name 2>/dev/null | awk '/^default/{print \$3}'" 2>/dev/null || true)
+        bridge_gateway="${bridge_gateway%$'\r'}"
+        # Fallback: derive .1 gateway from bridge IP
+        if [ -z "$bridge_gateway" ] && [ -n "$bridge_ip" ]; then
+            bridge_gateway="${bridge_ip%.*}.1"
+        fi
+
         # Static IP configuration (always prompt on Proxmox — bridges may lack DHCP)
         echo ""
         local current_static_ip=""
@@ -833,13 +852,25 @@ config_vm_interactive() {
             if [ -n "$current_static_ip" ]; then
                 default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
                 default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
+            else
+                # Smart defaults from bridge network
+                if [ -n "$bridge_cidr" ]; then
+                    default_addr="/${bridge_cidr}"
+                fi
+                default_gw="$bridge_gateway"
             fi
-            static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (CIDR notation, e.g. 10.56.0.5/24):" "$default_addr")
+            static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address with CIDR (e.g. ${bridge_ip:-10.0.0.5}/${bridge_cidr:-24}):" "$default_addr")
             if [ -z "$static_ip_address" ]; then
                 echo "Error: IP address is required for static IP configuration."
                 exit 1
             fi
-            static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. 10.56.0.1):" "$default_gw")
+            # Auto-append CIDR mask if user entered a bare IP
+            if [[ "$static_ip_address" != */* ]]; then
+                local mask="${bridge_cidr:-24}"
+                static_ip_address="${static_ip_address}/${mask}"
+                echo "  (using /${mask} subnet mask)"
+            fi
+            static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP:" "$default_gw")
             echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
         else
             echo "IP: DHCP"
