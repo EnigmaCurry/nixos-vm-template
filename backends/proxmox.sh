@@ -1167,20 +1167,22 @@ create_vm() {
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     if is_mutable "$name"; then
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
-        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
-        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
     fi
 }
 
@@ -1215,20 +1217,22 @@ create_vm_batch() {
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     if is_mutable "$name"; then
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
-        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
-        echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
     fi
 }
 
@@ -1483,10 +1487,12 @@ recreate_vm() {
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' recreated and started."
-    echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
-    echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
+    echo "SSH as admin (sudo): ssh admin@$detected_ip"
+    echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
 
 # Upgrade a VM to a new image (preserves /var data)
@@ -1599,10 +1605,12 @@ upgrade_vm() {
     # Start VM
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' upgraded and started. /var data preserved."
-    echo "SSH as admin (sudo): ssh admin@$(vm_ip "$name")"
-    echo "SSH as user (no sudo): ssh user@$(vm_ip "$name")"
+    echo "SSH as admin (sudo): ssh admin@$detected_ip"
+    echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
 
 # Resize the /var disk for a VM

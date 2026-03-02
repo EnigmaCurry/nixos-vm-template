@@ -71,6 +71,37 @@ vm_ip() {
     echo "<ip>"
 }
 
+# Wait for a VM to obtain an IP address (via DHCP or static config)
+# Usage: wait_for_vm_ip <name> [timeout_seconds]
+# Prints the IP address, or "<ip>" if timeout expires
+wait_for_vm_ip() {
+    local name="$1"
+    local timeout="${2:-60}"
+    local ip
+
+    # Static IP is known immediately
+    ip=$(vm_ip "$name")
+    if [ "$ip" != "<ip>" ]; then
+        echo "$ip"
+        return
+    fi
+
+    # Poll backend_get_ip for DHCP-assigned address
+    echo "Waiting for VM to obtain IP address..." >&2
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        ip=$(backend_get_ip "$name" 2>/dev/null || true)
+        if [ -n "$ip" ]; then
+            echo "$ip"
+            return
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    echo "<ip>"
+}
+
 # Check if a machine has pipewire audio enabled
 # Returns 0 (true) if "pipewire" is in the machine's profile list
 is_pipewire() {
