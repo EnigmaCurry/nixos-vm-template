@@ -153,6 +153,89 @@ pve_next_vmid() {
     pve_ssh "pvesh get /cluster/nextid"
 }
 
+# Determine VMID for a VM: prompt interactively with auto-allocated default
+# Usage: pve_determine_vmid <name> <machine_dir>
+# Sets the vmid in machines/<name>/vmid and prints the chosen VMID
+pve_determine_vmid() {
+    local name="$1"
+    local machine_dir="$2"
+    local vmid
+
+    if [ -f "$machine_dir/vmid" ]; then
+        vmid=$(cat "$machine_dir/vmid")
+        echo "Using existing VMID: $vmid" >&2
+    else
+        echo "Allocating VMID from Proxmox..." >&2
+        local default_vmid
+        default_vmid=$(pve_next_vmid)
+
+        while true; do
+            read -p "Enter VMID [$default_vmid]: " vmid
+            vmid="${vmid:-$default_vmid}"
+
+            # Check if VMID is already in use by a different VM
+            local existing_name
+            existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+            if [ -n "$existing_name" ] && [ "$existing_name" != "$name" ]; then
+                echo "VMID $vmid is already in use by VM '$existing_name'. Choose a different ID." >&2
+                continue
+            fi
+            break
+        done
+    fi
+
+    echo "$vmid" > "$machine_dir/vmid"
+    echo "$vmid"
+}
+
+# List bridge interfaces on PVE node (name only, one per line)
+pve_list_bridges() {
+    pve_ssh 'for d in /sys/class/net/*/bridge; do
+        [ -d "$d" ] || continue
+        br=$(basename "$(dirname "$d")")
+        case "$br" in fwbr*) continue ;; esac
+        echo "$br"
+    done 2>/dev/null'
+}
+
+# List bridge interfaces with details: "vmbr0 (10.0.0.1/24, enp3s0) - LAN"
+# Outputs one line per bridge in format: name<TAB>description
+pve_list_bridges_detailed() {
+    pve_ssh 'for d in /sys/class/net/*/bridge; do
+        [ -d "$d" ] || continue
+        br=$(basename "$(dirname "$d")")
+        case "$br" in fwbr*) continue ;; esac
+
+        # Get IP/CIDR
+        ip=$(ip -4 addr show dev "$br" 2>/dev/null | awk "/inet /{print \$2; exit}")
+
+        # Get bridge ports (physical interfaces attached)
+        ports=""
+        if [ -d "/sys/class/net/$br/brif" ]; then
+            ports=$(ls /sys/class/net/$br/brif 2>/dev/null | tr "\n" "," | sed "s/,$//" )
+        fi
+
+        # Get comment from Proxmox API
+        comment=$(pvesh get /nodes/$(hostname)/network/$br --output-format json 2>/dev/null | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\"comments\",\"\").split(chr(10))[0])" 2>/dev/null || true)
+
+        # Build detail string
+        detail=""
+        if [ -n "$ip" ]; then
+            detail="$ip"
+        fi
+        if [ -n "$ports" ]; then
+            detail="${detail:+$detail, }$ports"
+        fi
+
+        line="$br ($detail)"
+        if [ -n "$comment" ]; then
+            line="$line - $comment"
+        fi
+        printf "%s\t%s\n" "$br" "$line"
+    done 2>/dev/null'
+}
+
 # --- Firewall Helpers ---
 
 # Sync Proxmox VM-level firewall rules from tcp_ports/udp_ports identity files
@@ -308,6 +391,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
     fi
 
+    # Copy static IP config if present
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/static_ip"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -317,31 +407,9 @@ backend_create_disks() {
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
 
-    # Determine VMID: user-specified > existing file > auto-allocate
+    # Determine VMID (interactive prompt with auto-allocated default)
     local vmid
-    if [ -n "${PVE_VMID:-}" ]; then
-        vmid="$PVE_VMID"
-        echo "Using user-specified VMID: $vmid"
-    elif [ -f "$machine_dir/vmid" ]; then
-        vmid=$(cat "$machine_dir/vmid")
-        echo "Using existing VMID: $vmid"
-    else
-        echo "Allocating VMID from Proxmox..."
-        vmid=$(pve_next_vmid)
-        echo "Allocated VMID: $vmid"
-    fi
-
-    # Validate VMID: must be available or belong to a VM with the same name
-    local existing_name
-    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
-    if [ -n "$existing_name" ]; then
-        if [ "$existing_name" != "$name" ]; then
-            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')"
-            exit 1
-        fi
-    fi
-
-    echo "$vmid" > "$machine_dir/vmid"
+    vmid=$(pve_determine_vmid "$name" "$machine_dir")
 
     # Parse network configuration
     local network_config bridge
@@ -545,6 +613,21 @@ EOF
         gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
     fi
 
+    # Copy static IP and DNS config to /etc/network-config/
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : mkdir-p /etc/network-config"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/network-config"
+        gf_cmds="$gf_cmds : chmod 0755 /etc/network-config"
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /etc/network-config/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/static_ip"
+        if [ -s "$machine_dir/resolv.conf" ]; then
+            gf_cmds="$gf_cmds : copy-in $machine_dir/resolv.conf /etc/network-config/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/resolv.conf"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/resolv.conf"
+        fi
+    fi
+
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
 
     # Copy root password hash to /etc/ (applied by systemd service at boot)
@@ -586,31 +669,9 @@ EOF
 
     rm -rf "$tmp_dir"
 
-    # Determine VMID: user-specified > existing file > auto-allocate
+    # Determine VMID (interactive prompt with auto-allocated default)
     local vmid
-    if [ -n "${PVE_VMID:-}" ]; then
-        vmid="$PVE_VMID"
-        echo "Using user-specified VMID: $vmid"
-    elif [ -f "$machine_dir/vmid" ]; then
-        vmid=$(cat "$machine_dir/vmid")
-        echo "Using existing VMID: $vmid"
-    else
-        echo "Allocating VMID from Proxmox..."
-        vmid=$(pve_next_vmid)
-        echo "Allocated VMID: $vmid"
-    fi
-
-    # Validate VMID: must be available or belong to a VM with the same name
-    local existing_name
-    existing_name=$(pve_ssh "qm config $vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
-    if [ -n "$existing_name" ]; then
-        if [ "$existing_name" != "$name" ]; then
-            echo "Error: VMID $vmid is already in use by VM '$existing_name' (expected '$name')"
-            exit 1
-        fi
-    fi
-
-    echo "$vmid" > "$machine_dir/vmid"
+    vmid=$(pve_determine_vmid "$name" "$machine_dir")
 
     # Parse network configuration
     local network_config bridge
@@ -782,7 +843,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
@@ -800,8 +861,14 @@ backend_sync_identity() {
     pve_ssh "chmod 0644 $mount_point/identity/udp_ports 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/resolv.conf 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/hosts 2>/dev/null || true"
+    pve_ssh "chmod 0644 $mount_point/identity/static_ip 2>/dev/null || true"
     pve_ssh "chmod 0600 $mount_point/identity/root_password_hash 2>/dev/null || true"
     pve_ssh "chown -R 0:0 $mount_point/identity/"
+
+    # Remove static_ip if no longer configured (switch back to DHCP)
+    if [ ! -f "$machine_dir/static_ip" ]; then
+        pve_ssh "rm -f $mount_point/identity/static_ip"
+    fi
 
     # Unmount and disconnect nbd
     pve_ssh "umount $mount_point"
@@ -1082,6 +1149,13 @@ backend_cleanup() {
 create_vm() {
     local name="$1"
 
+    # Check if VM is currently running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' is currently running. Destroy it first:"
+        echo "  just destroy $name"
+        exit 1
+    fi
+
     # Configure machine interactively (prompts for all settings)
     config_vm_interactive "$name" "" "true"
 
@@ -1103,20 +1177,22 @@ create_vm() {
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     if is_mutable "$name"; then
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
     fi
 }
 
@@ -1129,9 +1205,10 @@ create_vm_batch() {
     local var_size
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
+    local static_ip="${7:-}"
 
     # Configure machine non-interactively
-    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network"
+    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network" "$static_ip"
 
     # Read back the configured values from machine config
     local machine_dir="$MACHINES_DIR/$name"
@@ -1150,20 +1227,22 @@ create_vm_batch() {
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     if is_mutable "$name"; then
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started on Proxmox (VMID: $(pve_get_vmid "$name"), profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
     fi
 }
 
@@ -1220,16 +1299,9 @@ clone_vm() {
     echo "$memory" > "$dest_machine_dir/memory"
     echo "$vcpus" > "$dest_machine_dir/vcpus"
 
-    # Determine VMID: user-specified > auto-allocate
+    # Determine VMID (interactive prompt with auto-allocated default)
     local dest_vmid
-    if [ -n "${PVE_VMID:-}" ]; then
-        dest_vmid="$PVE_VMID"
-        echo "Using user-specified VMID: $dest_vmid"
-    else
-        dest_vmid=$(pve_next_vmid)
-        echo "Allocated VMID for clone: $dest_vmid"
-    fi
-    echo "$dest_vmid" > "$dest_machine_dir/vmid"
+    dest_vmid=$(pve_determine_vmid "$dest" "$dest_machine_dir")
 
     # Use qm clone for full clone
     echo "Cloning VM on Proxmox ($source_vmid -> $dest_vmid)..."
@@ -1425,10 +1497,12 @@ recreate_vm() {
     backend_create_disks "$name" "$var_size"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' recreated and started."
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    echo "SSH as admin (sudo): ssh admin@$detected_ip"
+    echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
 
 # Upgrade a VM to a new image (preserves /var data)
@@ -1541,10 +1615,12 @@ upgrade_vm() {
     # Start VM
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' upgraded and started. /var data preserved."
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    echo "SSH as admin (sudo): ssh admin@$detected_ip"
+    echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
 
 # Resize the /var disk for a VM

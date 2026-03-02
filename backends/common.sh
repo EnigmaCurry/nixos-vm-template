@@ -54,6 +54,54 @@ is_mutable() {
     fi
 }
 
+# Get the VM's IP address for display (from static_ip config, or "<ip>" if DHCP)
+# Usage: vm_ip <name>
+vm_ip() {
+    local name="$1"
+    local static_ip_file="$MACHINES_DIR/$name/static_ip"
+    if [ -f "$static_ip_file" ]; then
+        local addr
+        addr=$(grep '^address=' "$static_ip_file" 2>/dev/null | cut -d= -f2)
+        if [ -n "$addr" ]; then
+            # Strip CIDR suffix
+            echo "${addr%%/*}"
+            return
+        fi
+    fi
+    echo "<ip>"
+}
+
+# Wait for a VM to obtain an IP address (via DHCP or static config)
+# Usage: wait_for_vm_ip <name> [timeout_seconds]
+# Prints the IP address, or "<ip>" if timeout expires
+wait_for_vm_ip() {
+    local name="$1"
+    local timeout="${2:-60}"
+    local ip
+
+    # Static IP is known immediately
+    ip=$(vm_ip "$name")
+    if [ "$ip" != "<ip>" ]; then
+        echo "$ip"
+        return
+    fi
+
+    # Poll backend_get_ip for DHCP-assigned address
+    echo "Waiting for VM to obtain IP address..." >&2
+    local elapsed=0
+    while [ $elapsed -lt $timeout ]; do
+        ip=$(backend_get_ip "$name" 2>/dev/null || true)
+        if [ -n "$ip" ]; then
+            echo "$ip"
+            return
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+
+    echo "<ip>"
+}
+
 # Check if a machine has pipewire audio enabled
 # Returns 0 (true) if "pipewire" is in the machine's profile list
 is_pipewire() {
@@ -189,7 +237,14 @@ init_machine() {
     fi
 
     # Handle admin authorized_keys
+    # Check if file is missing or has no actual keys (only comments/blanks)
+    local admin_keys_needed=false
     if [ ! -f "$machine_dir/admin_authorized_keys" ]; then
+        admin_keys_needed=true
+    elif [ "$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys" 2>/dev/null)" -eq 0 ]; then
+        admin_keys_needed=true
+    fi
+    if [ "$admin_keys_needed" = true ]; then
         printf '%s\n' "# SSH authorized_keys for 'admin' user (has sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/admin_authorized_keys"
 
         if [ -n "$admin_keys" ]; then
@@ -197,11 +252,13 @@ init_machine() {
             echo "$admin_keys" >> "$machine_dir/admin_authorized_keys"
             echo "Saved: $machine_dir/admin_authorized_keys"
         elif [ "$ssh_key_mode" = "agent" ]; then
-            # Use keys from SSH agent
+            # Use keys from SSH agent (batch mode — error if no keys available)
             if ssh-add -L 2>/dev/null >> "$machine_dir/admin_authorized_keys"; then
                 echo "Saved: $machine_dir/admin_authorized_keys (from SSH agent)"
             else
-                echo "Warning: No keys in SSH agent, admin SSH login will be disabled"
+                echo "Error: No SSH agent keys found. Start ssh-agent and add a key first:"
+                echo "  eval \$(ssh-agent) && ssh-add"
+                exit 1
             fi
         elif [ "$ssh_key_mode" = "skip" ]; then
             echo "No admin authorized_keys configured (admin SSH login will be disabled)"
@@ -220,7 +277,13 @@ init_machine() {
     fi
 
     # Handle user authorized_keys
+    local user_keys_needed=false
     if [ ! -f "$machine_dir/user_authorized_keys" ]; then
+        user_keys_needed=true
+    elif [ "$(grep -cv '^#\|^$' "$machine_dir/user_authorized_keys" 2>/dev/null)" -eq 0 ]; then
+        user_keys_needed=true
+    fi
+    if [ "$user_keys_needed" = true ]; then
         printf '%s\n' "# SSH authorized_keys for 'user' account (no sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/user_authorized_keys"
 
         if [ -n "$user_keys" ]; then
@@ -490,9 +553,10 @@ config_vm() {
     local var_size
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
+    local static_ip="${7:-}"
 
-    # Initialize machine config (creates identity files, prompts for SSH keys)
-    init_machine "$name" "$profile" "$network"
+    # Initialize machine config (creates identity files, uses SSH agent keys in batch mode)
+    init_machine "$name" "$profile" "$network" "agent"
 
     local machine_dir="$MACHINES_DIR/$name"
 
@@ -528,6 +592,21 @@ config_vm() {
     else
         var_size=$(cat "$machine_dir/var_size")
         echo "Using existing var_size: $var_size"
+    fi
+
+    # Save static IP configuration if provided (format: address,gateway)
+    if [ -n "$static_ip" ]; then
+        local sip_addr sip_gw
+        sip_addr="${static_ip%%,*}"
+        sip_gw="${static_ip#*,}"
+        if [ "$sip_gw" = "$sip_addr" ]; then
+            sip_gw=""
+        fi
+        printf 'address=%s\n' "$sip_addr" > "$machine_dir/static_ip"
+        if [ -n "$sip_gw" ]; then
+            printf 'gateway=%s\n' "$sip_gw" >> "$machine_dir/static_ip"
+        fi
+        echo "Created: $machine_dir/static_ip ($sip_addr)"
     fi
 
     echo ""
@@ -753,26 +832,358 @@ config_vm_interactive() {
     esac
     echo "Disk size: $var_size"
 
-    # Network: options are "NAT" "Bridge" (indices 0-1)
+    # Network selection (backend-specific)
     echo ""
-    local network_choice network_default_idx=""
-    if [ -n "$current_network" ]; then
-        case "$current_network" in
-            "nat") network_default_idx="0" ;;
-            bridge*) network_default_idx="1" ;;
-        esac
-    fi
-    if [ -n "$network_default_idx" ]; then
-        network_choice=$($SCRIPT_WIZARD choose -d "$network_default_idx" "Select network mode:" "NAT" "Bridge")
+    local static_ip_address="" static_ip_gateway="" static_ip_dns1="" static_ip_dns2=""
+
+    if [ "${BACKEND:-}" = "proxmox" ]; then
+        # Proxmox: all networks are bridges — pick which bridge
+        local current_bridge=""
+        if [ -n "$current_network" ] && [[ "$current_network" == bridge:* ]]; then
+            current_bridge="${current_network#bridge:}"
+        fi
+
+        # List bridges with details from PVE node
+        local bridge_names=() bridge_labels=()
+        while IFS=$'\t' read -r bname blabel; do
+            [ -n "$bname" ] || continue
+            bridge_names+=("$bname")
+            bridge_labels+=("$blabel")
+        done < <(pve_list_bridges_detailed 2>/dev/null || true)
+
+        if [ ${#bridge_names[@]} -eq 0 ]; then
+            echo "Warning: Could not list bridges from Proxmox node."
+            local bridge_name
+            bridge_name=$($SCRIPT_WIZARD ask "Enter bridge name:" "${current_bridge:-vmbr0}")
+            network="bridge:$bridge_name"
+        else
+            # Build choose args with default selection
+            local bridge_default_args=()
+            if [ -n "$current_bridge" ]; then
+                local idx=0
+                for br in "${bridge_names[@]}"; do
+                    if [ "$br" = "$current_bridge" ]; then
+                        bridge_default_args=(-d "$idx")
+                        break
+                    fi
+                    ((idx++))
+                done
+            fi
+            local bridge_choice
+            bridge_choice=$($SCRIPT_WIZARD choose ${bridge_default_args[@]+"${bridge_default_args[@]}"} "Select network bridge:" "${bridge_labels[@]}")
+            # Extract bridge name from the label (first word before space/paren)
+            local selected_bridge="${bridge_choice%% *}"
+            network="bridge:$selected_bridge"
+        fi
+        echo "Network: $network"
+
+        # Discover bridge network details for smart defaults
+        local bridge_ip="" bridge_cidr="" bridge_gateway=""
+        local selected_bridge_name="${network#bridge:}"
+        # Query bridge IP from PVE node
+        local bridge_ip_cidr
+        bridge_ip_cidr=$(pve_ssh "ip -4 addr show dev $selected_bridge_name 2>/dev/null | awk '/inet /{print \$2; exit}'" 2>/dev/null || true)
+        bridge_ip_cidr="${bridge_ip_cidr%$'\r'}"
+        if [[ "$bridge_ip_cidr" == */* ]]; then
+            bridge_ip="${bridge_ip_cidr%/*}"
+            bridge_cidr="${bridge_ip_cidr#*/}"
+        fi
+        # Query actual gateway from PVE routing table for this bridge
+        bridge_gateway=$(pve_ssh "ip route show dev $selected_bridge_name 2>/dev/null | awk '/^default/{print \$3}'" 2>/dev/null || true)
+        bridge_gateway="${bridge_gateway%$'\r'}"
+        # Fallback: derive .1 gateway from bridge IP
+        if [ -z "$bridge_gateway" ] && [ -n "$bridge_ip" ]; then
+            bridge_gateway="${bridge_ip%.*}.1"
+        fi
+
+        # Static IP configuration (always prompt on Proxmox — bridges may lack DHCP)
+        echo ""
+        local current_static_ip=""
+        if [ -f "$machine_dir/static_ip" ]; then
+            current_static_ip=$(cat "$machine_dir/static_ip" 2>/dev/null || true)
+        fi
+
+        local ip_default_idx="0"
+        if [ -n "$current_static_ip" ]; then
+            ip_default_idx="1"
+        fi
+
+        local ip_choice
+        ip_choice=$($SCRIPT_WIZARD choose -d "$ip_default_idx" "IP address configuration:" "DHCP (automatic)" "Static IP")
+        if [[ "$ip_choice" == "Static"* ]]; then
+            local default_addr="" default_gw=""
+            if [ -n "$current_static_ip" ]; then
+                default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
+                default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
+            else
+                default_gw="$bridge_gateway"
+            fi
+            static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (e.g. ${bridge_ip:-10.0.0.5}/${bridge_cidr:-24}):" "$default_addr")
+            if [ -z "$static_ip_address" ]; then
+                echo "Error: IP address is required for static IP configuration."
+                exit 1
+            fi
+            # Auto-append CIDR mask if user entered a bare IP
+            if [[ "$static_ip_address" != */* ]]; then
+                local mask="${bridge_cidr:-24}"
+                static_ip_address="${static_ip_address}/${mask}"
+                echo "  (using /${mask} subnet mask)"
+            fi
+            static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP:" "$default_gw")
+            echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
+
+            # DNS configuration
+            echo ""
+            local dns_default_gw="Gateway (${static_ip_gateway:-N/A})"
+            local dns_choice
+            dns_choice=$($SCRIPT_WIZARD choose "DNS servers:" "$dns_default_gw" "Cloudflare (1.1.1.1, 1.0.0.1)" "Google (8.8.8.8, 8.8.4.4)" "Custom")
+            case "$dns_choice" in
+                "Gateway"*) static_ip_dns1="${static_ip_gateway:-1.1.1.1}"; static_ip_dns2="1.1.1.1" ;;
+                "Cloudflare"*) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+                "Google"*) static_ip_dns1="8.8.8.8"; static_ip_dns2="8.8.4.4" ;;
+                "Custom")
+                    local current_dns1="" current_dns2=""
+                    if [ -f "$machine_dir/resolv.conf" ]; then
+                        current_dns1=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '1s/nameserver //p' || true)
+                        current_dns2=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '2s/nameserver //p' || true)
+                    fi
+                    static_ip_dns1=$($SCRIPT_WIZARD ask "Primary DNS server:" "$current_dns1")
+                    static_ip_dns2=$($SCRIPT_WIZARD ask "Secondary DNS server:" "$current_dns2")
+                    ;;
+                *) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+            esac
+            # For gateway option, don't show gateway IP twice if it equals 1.1.1.1
+            if [ "$static_ip_dns1" = "$static_ip_dns2" ]; then
+                static_ip_dns2="1.0.0.1"
+            fi
+            echo "DNS: $static_ip_dns1, $static_ip_dns2"
+        else
+            echo "IP: DHCP"
+        fi
     else
-        network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT" "Bridge")
+        # Libvirt: NAT or Bridge selection
+        local network_choice network_default_idx=""
+        if [ -n "$current_network" ]; then
+            case "$current_network" in
+                "nat") network_default_idx="0" ;;
+                bridge*) network_default_idx="1" ;;
+            esac
+        fi
+        if [ -n "$network_default_idx" ]; then
+            network_choice=$($SCRIPT_WIZARD choose -d "$network_default_idx" "Select network mode:" "NAT" "Bridge")
+        else
+            network_choice=$($SCRIPT_WIZARD choose "Select network mode:" "NAT" "Bridge")
+        fi
+        case "$network_choice" in
+            "NAT") network="nat" ;;
+            "Bridge")
+                # List local bridges (exclude libvirt's virbr and docker bridges)
+                local lb_bridges=()
+                local lb_labels=()
+                while IFS= read -r br; do
+                    [ -z "$br" ] && continue
+                    local lb_state
+                    lb_state=$(cat "/sys/class/net/$br/operstate" 2>/dev/null || echo "unknown")
+                    local lb_ip
+                    lb_ip=$(ip -4 addr show dev "$br" 2>/dev/null | awk '/inet /{print $2; exit}')
+                    local lb_ports=""
+                    if [ -d "/sys/class/net/$br/brif" ]; then
+                        lb_ports=$(ls "/sys/class/net/$br/brif" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+                    fi
+                    local lb_detail="$lb_state"
+                    [ -n "$lb_ip" ] && lb_detail="$lb_detail, $lb_ip"
+                    [ -n "$lb_ports" ] && lb_detail="$lb_detail, $lb_ports"
+                    lb_bridges+=("$br")
+                    lb_labels+=("$br ($lb_detail)")
+                done < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-|fwbr)' || true)
+
+                if [ ${#lb_bridges[@]} -eq 0 ]; then
+                    echo "No bridge interfaces found. Creating one..."
+                    local br_name
+                    br_name=$($SCRIPT_WIZARD ask "Bridge name:" "br0")
+                    br_name="${br_name:-br0}"
+                    sudo nmcli connection add type bridge ifname "$br_name" con-name "$br_name" stp no
+                    echo "Bridge '$br_name' created."
+                    lb_bridges+=("$br_name")
+                    lb_labels+=("$br_name (new)")
+                fi
+
+                # Add "Create new bridge" option
+                lb_bridges+=("__create__")
+                lb_labels+=("Create new bridge")
+
+                local lb_default_args=()
+                local current_bridge=""
+                if [[ "$current_network" == bridge:* ]]; then
+                    current_bridge="${current_network#bridge:}"
+                    local lb_idx=0
+                    for br in "${lb_bridges[@]}"; do
+                        if [ "$br" = "$current_bridge" ]; then
+                            lb_default_args=(-d "$lb_idx")
+                            break
+                        fi
+                        ((lb_idx++))
+                    done
+                fi
+
+                local lb_choice
+                lb_choice=$($SCRIPT_WIZARD choose ${lb_default_args[@]+"${lb_default_args[@]}"} "Select network bridge:" "${lb_labels[@]}")
+                local selected_bridge="${lb_choice%% *}"
+
+                if [ "$selected_bridge" = "Create" ]; then
+                    local new_br_name
+                    new_br_name=$($SCRIPT_WIZARD ask "Bridge name:" "br0")
+                    new_br_name="${new_br_name:-br0}"
+                    sudo nmcli connection add type bridge ifname "$new_br_name" con-name "$new_br_name" stp no
+                    echo "Bridge '$new_br_name' created."
+                    selected_bridge="$new_br_name"
+                fi
+
+                network="bridge:$selected_bridge"
+
+                # Check if bridge has no physical interfaces and offer to add one
+                local br_ports
+                br_ports=$(ls "/sys/class/net/$selected_bridge/brif" 2>/dev/null || true)
+                if [ -z "$br_ports" ]; then
+                    echo "Bridge '$selected_bridge' has no physical interfaces attached."
+                    if $SCRIPT_WIZARD confirm "Add a physical interface to $selected_bridge?" yes; then
+                        # List available physical interfaces (not bridges, not loopback, not virtual)
+                        local phys_ifaces=()
+                        while IFS= read -r iface; do
+                            [ -z "$iface" ] && continue
+                            # Skip loopback, bridges, veth, and virtual interfaces
+                            [ -d "/sys/class/net/$iface/bridge" ] && continue
+                            local iface_type
+                            iface_type=$(cat "/sys/class/net/$iface/type" 2>/dev/null || echo "0")
+                            [ "$iface_type" != "1" ] && continue  # only Ethernet (type 1)
+                            [ -e "/sys/class/net/$iface/device" ] || continue  # must be a real device
+                            local iface_state
+                            iface_state=$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown")
+                            local iface_ip
+                            iface_ip=$(ip -4 addr show dev "$iface" 2>/dev/null | awk '/inet /{print $2; exit}')
+                            local iface_detail="$iface_state"
+                            [ -n "$iface_ip" ] && iface_detail="$iface_detail, $iface_ip"
+                            phys_ifaces+=("$iface ($iface_detail)")
+                        done < <(ls /sys/class/net/ 2>/dev/null | grep -vE '^(lo|veth|fwbr|fwln|fwpr|tap|virbr|docker|br-)' || true)
+
+                        if [ ${#phys_ifaces[@]} -eq 0 ]; then
+                            echo "No physical interfaces found to bridge."
+                        else
+                            local phys_choice
+                            phys_choice=$($SCRIPT_WIZARD choose "Select interface to add to $selected_bridge:" "${phys_ifaces[@]}")
+                            local phys_iface="${phys_choice%% *}"
+                            echo "Adding $phys_iface to bridge $selected_bridge (persistent via NetworkManager)..."
+                            local slave_con="bridge-slave-$phys_iface"
+                            sudo nmcli connection add type bridge-slave ifname "$phys_iface" master "$selected_bridge" con-name "$slave_con"
+                            sudo nmcli connection up "$slave_con" 2>/dev/null || true
+                            echo "Interface $phys_iface added to $selected_bridge."
+                        fi
+                    fi
+                fi
+
+                # Check if bridge is down and offer to bring it up
+                local br_state
+                br_state=$(cat "/sys/class/net/$selected_bridge/operstate" 2>/dev/null || echo "unknown")
+                if [ "$br_state" = "down" ]; then
+                    echo "Bridge '$selected_bridge' is currently down."
+                    if $SCRIPT_WIZARD confirm "Bring up $selected_bridge?" yes; then
+                        sudo nmcli connection up "$selected_bridge" 2>/dev/null || sudo ip link set "$selected_bridge" up
+                        echo "Bridge '$selected_bridge' activated."
+                    fi
+                fi
+                ;;
+            *) network="nat" ;;
+        esac
+        echo "Network: $network"
+
+        # Static IP configuration (only for bridge networks on libvirt)
+        if [[ "$network" == "bridge" ]] || [[ "$network" == bridge:* ]]; then
+            echo ""
+            local current_static_ip=""
+            if [ -f "$machine_dir/static_ip" ]; then
+                current_static_ip=$(cat "$machine_dir/static_ip" 2>/dev/null || true)
+            fi
+
+            local ip_default_idx="0"
+            if [ -n "$current_static_ip" ]; then
+                ip_default_idx="1"
+            fi
+
+            # Discover bridge subnet for smart prompt defaults
+            local lb_bridge_name="${network#bridge:}"
+            local lb_bridge_ip_cidr=""
+            lb_bridge_ip_cidr=$(ip -4 addr show dev "$lb_bridge_name" 2>/dev/null | awk '/inet /{print $2; exit}')
+            # Discover gateway from routing table (default route via this bridge or its slave)
+            local lb_bridge_gateway=""
+            lb_bridge_gateway=$(ip route show default dev "$lb_bridge_name" 2>/dev/null | awk '/via /{print $3; exit}')
+            if [ -z "$lb_bridge_gateway" ] && [ -n "$lb_bridge_ip_cidr" ]; then
+                # Fallback: .1 on the bridge subnet
+                local lb_subnet="${lb_bridge_ip_cidr%.*}"
+                lb_bridge_gateway="${lb_subnet}.1"
+            fi
+            local lb_ip_example="10.56.0.5/24"
+            if [ -n "$lb_bridge_ip_cidr" ]; then
+                # Use bridge subnet with .X for example (e.g. 10.13.14.X/24)
+                local lb_subnet="${lb_bridge_ip_cidr%.*}"
+                local lb_mask="${lb_bridge_ip_cidr#*/}"
+                lb_ip_example="${lb_subnet}.X/${lb_mask}"
+            fi
+
+            local ip_choice
+            ip_choice=$($SCRIPT_WIZARD choose -d "$ip_default_idx" "IP address configuration:" "DHCP (automatic)" "Static IP")
+            if [[ "$ip_choice" == "Static"* ]]; then
+                local default_addr="" default_gw=""
+                if [ -n "$current_static_ip" ]; then
+                    default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
+                    default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
+                elif [ -n "$lb_bridge_gateway" ]; then
+                    default_gw="$lb_bridge_gateway"
+                fi
+                static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (CIDR notation, e.g. $lb_ip_example):" "$default_addr")
+                if [ -z "$static_ip_address" ]; then
+                    echo "Error: IP address is required for static IP configuration."
+                    exit 1
+                fi
+                # Auto-append CIDR mask if user entered a bare IP
+                if [[ "$static_ip_address" != */* ]]; then
+                    local lb_auto_mask="${lb_bridge_ip_cidr#*/}"
+                    lb_auto_mask="${lb_auto_mask:-24}"
+                    static_ip_address="${static_ip_address}/${lb_auto_mask}"
+                    echo "  (using /${lb_auto_mask} subnet mask)"
+                fi
+                local lb_gw_example="${lb_bridge_gateway:-10.56.0.1}"
+                static_ip_gateway=$($SCRIPT_WIZARD ask "Enter gateway IP (e.g. $lb_gw_example):" "$default_gw")
+                echo "Static IP: $static_ip_address (gateway: ${static_ip_gateway:-none})"
+
+                # DNS configuration
+                echo ""
+                local dns_default_gw="Gateway (${static_ip_gateway:-N/A})"
+                local dns_choice
+                dns_choice=$($SCRIPT_WIZARD choose "DNS servers:" "$dns_default_gw" "Cloudflare (1.1.1.1, 1.0.0.1)" "Google (8.8.8.8, 8.8.4.4)" "Custom")
+                case "$dns_choice" in
+                    "Gateway"*) static_ip_dns1="${static_ip_gateway:-1.1.1.1}"; static_ip_dns2="1.1.1.1" ;;
+                    "Cloudflare"*) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+                    "Google"*) static_ip_dns1="8.8.8.8"; static_ip_dns2="8.8.4.4" ;;
+                    "Custom")
+                        local current_dns1="" current_dns2=""
+                        if [ -f "$machine_dir/resolv.conf" ]; then
+                            current_dns1=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '1s/nameserver //p' || true)
+                            current_dns2=$(grep '^nameserver ' "$machine_dir/resolv.conf" 2>/dev/null | sed -n '2s/nameserver //p' || true)
+                        fi
+                        static_ip_dns1=$($SCRIPT_WIZARD ask "Primary DNS server:" "$current_dns1")
+                        static_ip_dns2=$($SCRIPT_WIZARD ask "Secondary DNS server:" "$current_dns2")
+                        ;;
+                    *) static_ip_dns1="1.1.1.1"; static_ip_dns2="1.0.0.1" ;;
+                esac
+                if [ "$static_ip_dns1" = "$static_ip_dns2" ]; then
+                    static_ip_dns2="1.0.0.1"
+                fi
+                echo "DNS: $static_ip_dns1, $static_ip_dns2"
+            else
+                echo "IP: DHCP"
+            fi
+        fi
     fi
-    case "$network_choice" in
-        "NAT") network="nat" ;;
-        "Bridge") network="bridge" ;;
-        *) network="nat" ;;
-    esac
-    echo "Network: $network"
 
     # SSH keys selection
     echo ""
@@ -852,21 +1263,68 @@ config_vm_interactive() {
         esac
     fi
 
+    # Proxmox VMID selection (before summary so it's included)
+    local pve_vmid=""
+    if [ "${BACKEND:-}" = "proxmox" ]; then
+        if [ -f "$machine_dir/vmid" ]; then
+            pve_vmid=$(cat "$machine_dir/vmid")
+        else
+            echo ""
+            echo "Allocating VMID from Proxmox..."
+            local default_vmid
+            default_vmid=$(pve_next_vmid)
+            while true; do
+                pve_vmid=$($SCRIPT_WIZARD ask "Enter Proxmox VMID:" "$default_vmid")
+                pve_vmid="${pve_vmid:-$default_vmid}"
+
+                # Validate VMID is not taken by a different VM
+                local existing_vm_name
+                existing_vm_name=$(pve_ssh "qm config $pve_vmid --current 2>/dev/null | grep '^name:'" 2>/dev/null | sed 's/^name: //' || true)
+                if [ -n "$existing_vm_name" ] && [ "$existing_vm_name" != "$name" ]; then
+                    echo "VMID $pve_vmid is already in use by VM '$existing_vm_name'. Choose a different ID."
+                    continue
+                fi
+                break
+            done
+            echo "VMID: $pve_vmid"
+        fi
+    fi
+
     echo ""
     echo "Configuration summary:"
+    if [ "${BACKEND:-}" = "proxmox" ]; then
+        echo "  Backend: proxmox (${PVE_HOST:-unknown})"
+    else
+        echo "  Backend: libvirt (${LIBVIRT_URI:-qemu:///system})"
+    fi
     echo "  Name:    $name"
+    if [ -n "$pve_vmid" ]; then
+        echo "  VMID:    $pve_vmid"
+    fi
     echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || echo "immutable")"
     echo "  Profile: $profile"
     echo "  Memory:  ${memory}M"
     echo "  vCPUs:   $vcpus"
     echo "  Disk:    $var_size"
     echo "  Network: $network"
+    if [ -n "$static_ip_address" ]; then
+        echo "  IP:      $static_ip_address (gateway: ${static_ip_gateway:-none})"
+        echo "  DNS:     ${static_ip_dns1}, ${static_ip_dns2}"
+    else
+        echo "  IP:      DHCP"
+    fi
     echo "  SSH:     $ssh_key_mode"
     echo ""
 
     if ! $SCRIPT_WIZARD confirm "Create this configuration?" yes; then
         echo "Aborted."
         exit 0
+    fi
+
+    # Save VMID if set during interactive prompt
+    if [ -n "$pve_vmid" ]; then
+        mkdir -p "$machine_dir"
+        echo "$pve_vmid" > "$machine_dir/vmid"
     fi
 
     # Initialize machine with collected values
@@ -898,6 +1356,25 @@ config_vm_interactive() {
     else
         rm -f "$machine_dir/mutable"
         echo "Removed: $machine_dir/mutable (immutable mode)"
+    fi
+
+    # Save static IP configuration
+    if [ -n "$static_ip_address" ]; then
+        printf 'address=%s\n' "$static_ip_address" > "$machine_dir/static_ip"
+        if [ -n "$static_ip_gateway" ]; then
+            printf 'gateway=%s\n' "$static_ip_gateway" >> "$machine_dir/static_ip"
+        fi
+        echo "Created: $machine_dir/static_ip ($static_ip_address)"
+
+        # Save DNS configuration chosen during static IP setup
+        if [ -n "$static_ip_dns1" ]; then
+            printf '%s\n' "# DNS configuration. Run 'just upgrade $name' to apply changes." \
+                "nameserver $static_ip_dns1" \
+                "nameserver ${static_ip_dns2:-1.0.0.1}" > "$machine_dir/resolv.conf"
+            echo "Updated: $machine_dir/resolv.conf ($static_ip_dns1, ${static_ip_dns2:-1.0.0.1})"
+        fi
+    else
+        rm -f "$machine_dir/static_ip"
     fi
 
     echo ""

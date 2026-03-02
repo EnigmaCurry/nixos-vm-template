@@ -2,6 +2,7 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set dotenv-load
+set export
 
 BACKEND := env_var_or_default("BACKEND", "libvirt")
 backend_script := if BACKEND == "common" { error("BACKEND cannot be 'common'") } else { "backends/" + BACKEND + ".sh" }
@@ -28,16 +29,16 @@ config name="" profile="":
     @source {{backend_script}} && config_vm_interactive "{{name}}" "{{profile}}"
 
 # Configure a VM non-interactively with explicit values
-config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat":
-    @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
+config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
+    @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
 # Create a new VM interactively (prompts for all settings)
 create name:
     @source {{backend_script}} && create_vm "{{name}}"
 
 # Create a new VM non-interactively with explicit values
-create-batch name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat":
-    @source {{backend_script}} && create_vm_batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}"
+create-batch name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
+    @source {{backend_script}} && create_vm_batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
 # Memory/vcpus default to source VM's values if not specified

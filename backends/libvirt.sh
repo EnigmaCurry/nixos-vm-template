@@ -181,6 +181,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
     fi
 
+    # Copy static IP config if present
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/static_ip"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -306,6 +313,21 @@ EOF
         gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
     fi
 
+    # Copy static IP and DNS config to /etc/network-config/
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : mkdir-p /etc/network-config"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/network-config"
+        gf_cmds="$gf_cmds : chmod 0755 /etc/network-config"
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /etc/network-config/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/static_ip"
+        if [ -s "$machine_dir/resolv.conf" ]; then
+            gf_cmds="$gf_cmds : copy-in $machine_dir/resolv.conf /etc/network-config/"
+            gf_cmds="$gf_cmds : chmod 0644 /etc/network-config/resolv.conf"
+            gf_cmds="$gf_cmds : chown 0 0 /etc/network-config/resolv.conf"
+        fi
+    fi
+
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/disk.qcow2 $gf_cmds"
 
     # Copy root password hash to /etc/ (applied by systemd service at boot)
@@ -415,6 +437,15 @@ backend_sync_identity() {
         gf_cmds="$gf_cmds : copy-in $machine_dir/hosts /identity/"
         gf_cmds="$gf_cmds : chmod 0644 /identity/hosts"
         gf_cmds="$gf_cmds : chown 0 0 /identity/hosts"
+    fi
+
+    # Update static IP config (or remove if switching back to DHCP)
+    if [ -s "$machine_dir/static_ip" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/static_ip /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/static_ip"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/static_ip"
+    else
+        gf_cmds="$gf_cmds : rm-f /identity/static_ip"
     fi
 
     # Update root password hash
@@ -679,7 +710,9 @@ backend_resume() {
 # Check if a VM is running
 backend_is_running() {
     local name="$1"
-    $VIRSH -c "$LIBVIRT_URI" domstate "$name" 2>/dev/null | grep -q "running"
+    local state
+    state=$($VIRSH -c "$LIBVIRT_URI" domstate "$name" 2>/dev/null) || return 1
+    [[ "$state" == *running* ]]
 }
 
 # Remove backend artifacts (XML) for a VM
@@ -693,6 +726,13 @@ backend_cleanup() {
 # Create a new VM: build profile, create machine config, create disks, generate XML, define
 create_vm() {
     local name="$1"
+
+    # Check if VM is currently running
+    if backend_is_running "$name"; then
+        echo "Error: VM '$name' is currently running. Destroy it first:"
+        echo "  just destroy $name"
+        exit 1
+    fi
 
     # Configure machine interactively (prompts for all settings)
     config_vm_interactive "$name" "" "true"
@@ -717,20 +757,22 @@ create_vm() {
     backend_define "$name"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     if is_mutable "$name"; then
         echo "VM '$name' created and started (profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started (profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
     fi
 }
 
@@ -743,9 +785,10 @@ create_vm_batch() {
     local var_size
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
+    local static_ip="${7:-}"
 
     # Configure machine non-interactively
-    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network"
+    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network" "$static_ip"
 
     # Read back the configured values from machine config
     local machine_dir="$MACHINES_DIR/$name"
@@ -766,20 +809,22 @@ create_vm_batch() {
     backend_define "$name"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     if is_mutable "$name"; then
         echo "VM '$name' created and started (profile: $profile, mutable)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
     else
         echo "VM '$name' created and started (profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
-        echo "SSH as admin (sudo): ssh admin@<ip>"
-        echo "SSH as user (no sudo): ssh user@<ip>"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
     fi
 }
 
@@ -1030,10 +1075,12 @@ recreate_vm() {
     $VIRSH -c "$LIBVIRT_URI" define "$LIBVIRT_DIR/$name.xml"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' recreated and started."
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    echo "SSH as admin (sudo): ssh admin@$detected_ip"
+    echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
 
 # Upgrade a VM to a new image (preserves /var data)
@@ -1105,10 +1152,12 @@ upgrade_vm() {
     $VIRSH -c "$LIBVIRT_URI" define "$LIBVIRT_DIR/$name.xml"
     backend_start "$name"
 
+    local detected_ip
+    detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' upgraded and started. /var data preserved."
-    echo "SSH as admin (sudo): ssh admin@<ip>"
-    echo "SSH as user (no sudo): ssh user@<ip>"
+    echo "SSH as admin (sudo): ssh admin@$detected_ip"
+    echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
 
 # Resize the /var disk for a VM (or main disk for mutable VMs)

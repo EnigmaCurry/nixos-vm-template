@@ -42,6 +42,9 @@
       unzip
       wireguard-tools
       file
+      lsof
+      wget
+      netcat
     ];
 
     # Enable firewall - blocks all incoming by default
