@@ -780,9 +780,15 @@ config_vm_interactive() {
             current_bridge="${current_network#bridge:}"
         fi
 
-        # List bridges from PVE node
-        mapfile -t pve_bridges < <(pve_list_bridges 2>/dev/null || true)
-        if [ ${#pve_bridges[@]} -eq 0 ]; then
+        # List bridges with details from PVE node
+        local bridge_names=() bridge_labels=()
+        while IFS=$'\t' read -r bname blabel; do
+            [ -n "$bname" ] || continue
+            bridge_names+=("$bname")
+            bridge_labels+=("$blabel")
+        done < <(pve_list_bridges_detailed 2>/dev/null || true)
+
+        if [ ${#bridge_names[@]} -eq 0 ]; then
             echo "Warning: Could not list bridges from Proxmox node."
             local bridge_name
             bridge_name=$($SCRIPT_WIZARD ask "Enter bridge name:" "${current_bridge:-vmbr0}")
@@ -791,9 +797,8 @@ config_vm_interactive() {
             # Build choose args with default selection
             local bridge_default_args=()
             if [ -n "$current_bridge" ]; then
-                # Find index of current bridge
                 local idx=0
-                for br in "${pve_bridges[@]}"; do
+                for br in "${bridge_names[@]}"; do
                     if [ "$br" = "$current_bridge" ]; then
                         bridge_default_args=(-d "$idx")
                         break
@@ -802,8 +807,10 @@ config_vm_interactive() {
                 done
             fi
             local bridge_choice
-            bridge_choice=$($SCRIPT_WIZARD choose ${bridge_default_args[@]+"${bridge_default_args[@]}"} "Select network bridge:" "${pve_bridges[@]}")
-            network="bridge:$bridge_choice"
+            bridge_choice=$($SCRIPT_WIZARD choose ${bridge_default_args[@]+"${bridge_default_args[@]}"} "Select network bridge:" "${bridge_labels[@]}")
+            # Extract bridge name from the label (first word before space/paren)
+            local selected_bridge="${bridge_choice%% *}"
+            network="bridge:$selected_bridge"
         fi
         echo "Network: $network"
 

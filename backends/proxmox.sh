@@ -188,9 +188,48 @@ pve_determine_vmid() {
     echo "$vmid"
 }
 
-# List bridge interfaces on PVE node
+# List bridge interfaces on PVE node (name only, one per line)
 pve_list_bridges() {
     pve_ssh "for d in /sys/class/net/*/bridge; do [ -d \"\$d\" ] && basename \"\$(dirname \"\$d\")\"; done 2>/dev/null"
+}
+
+# List bridge interfaces with details: "vmbr0 (10.0.0.1/24, enp3s0) - LAN"
+# Outputs one line per bridge in format: name<TAB>description
+pve_list_bridges_detailed() {
+    pve_ssh 'for d in /sys/class/net/*/bridge; do
+        [ -d "$d" ] || continue
+        br=$(basename "$(dirname "$d")")
+
+        # Get IP/CIDR
+        ip=$(ip -4 addr show dev "$br" 2>/dev/null | awk "/inet /{print \$2; exit}")
+
+        # Get bridge ports (physical interfaces attached)
+        ports=""
+        if [ -d "/sys/class/net/$br/brif" ]; then
+            ports=$(ls /sys/class/net/$br/brif 2>/dev/null | tr "\n" "," | sed "s/,$//" )
+        fi
+
+        # Get comment from Proxmox API
+        comment=$(pvesh get /nodes/$(hostname)/network/$br --output-format json 2>/dev/null | \
+            python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get(\"comments\",\"\").split(chr(10))[0])" 2>/dev/null || true)
+
+        # Build detail string
+        detail=""
+        if [ -n "$ip" ]; then
+            detail="$ip"
+        else
+            detail="no IP"
+        fi
+        if [ -n "$ports" ]; then
+            detail="$detail, $ports"
+        fi
+
+        line="$br ($detail)"
+        if [ -n "$comment" ]; then
+            line="$line - $comment"
+        fi
+        printf "%s\t%s\n" "$br" "$line"
+    done 2>/dev/null'
 }
 
 # --- Firewall Helpers ---
