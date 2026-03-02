@@ -237,7 +237,14 @@ init_machine() {
     fi
 
     # Handle admin authorized_keys
+    # Check if file is missing or has no actual keys (only comments/blanks)
+    local admin_keys_needed=false
     if [ ! -f "$machine_dir/admin_authorized_keys" ]; then
+        admin_keys_needed=true
+    elif [ "$(grep -cv '^#\|^$' "$machine_dir/admin_authorized_keys" 2>/dev/null)" -eq 0 ]; then
+        admin_keys_needed=true
+    fi
+    if [ "$admin_keys_needed" = true ]; then
         printf '%s\n' "# SSH authorized_keys for 'admin' user (has sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/admin_authorized_keys"
 
         if [ -n "$admin_keys" ]; then
@@ -270,7 +277,13 @@ init_machine() {
     fi
 
     # Handle user authorized_keys
+    local user_keys_needed=false
     if [ ! -f "$machine_dir/user_authorized_keys" ]; then
+        user_keys_needed=true
+    elif [ "$(grep -cv '^#\|^$' "$machine_dir/user_authorized_keys" 2>/dev/null)" -eq 0 ]; then
+        user_keys_needed=true
+    fi
+    if [ "$user_keys_needed" = true ]; then
         printf '%s\n' "# SSH authorized_keys for 'user' account (no sudo access)" "# Add one public key per line. Run 'just upgrade $name' to apply changes." "" > "$machine_dir/user_authorized_keys"
 
         if [ -n "$user_keys" ]; then
