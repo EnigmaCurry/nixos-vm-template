@@ -961,7 +961,50 @@ config_vm_interactive() {
         fi
         case "$network_choice" in
             "NAT") network="nat" ;;
-            "Bridge") network="bridge" ;;
+            "Bridge")
+                # List local bridges (exclude libvirt's virbr and docker bridges)
+                local lb_bridges=()
+                local lb_labels=()
+                while IFS= read -r br; do
+                    [ -z "$br" ] && continue
+                    local lb_ip
+                    lb_ip=$(ip -4 addr show dev "$br" 2>/dev/null | awk '/inet /{print $2; exit}')
+                    local lb_ports=""
+                    if [ -d "/sys/class/net/$br/brif" ]; then
+                        lb_ports=$(ls "/sys/class/net/$br/brif" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+                    fi
+                    local lb_detail="${lb_ip:-no IP}"
+                    [ -n "$lb_ports" ] && lb_detail="$lb_detail, $lb_ports"
+                    lb_bridges+=("$br")
+                    lb_labels+=("$br ($lb_detail)")
+                done < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-|fwbr)' || true)
+
+                if [ ${#lb_bridges[@]} -eq 0 ]; then
+                    echo "Error: No bridge interfaces found."
+                    echo "To use bridged networking, create a bridge interface first."
+                    echo "Example: nmcli connection add type bridge ifname br0 con-name br0"
+                    exit 1
+                fi
+
+                local lb_default_args=()
+                local current_bridge=""
+                if [[ "$current_network" == bridge:* ]]; then
+                    current_bridge="${current_network#bridge:}"
+                    local lb_idx=0
+                    for br in "${lb_bridges[@]}"; do
+                        if [ "$br" = "$current_bridge" ]; then
+                            lb_default_args=(-d "$lb_idx")
+                            break
+                        fi
+                        ((lb_idx++))
+                    done
+                fi
+
+                local lb_choice
+                lb_choice=$($SCRIPT_WIZARD choose ${lb_default_args[@]+"${lb_default_args[@]}"} "Select network bridge:" "${lb_labels[@]}")
+                local selected_bridge="${lb_choice%% *}"
+                network="bridge:$selected_bridge"
+                ;;
             *) network="nat" ;;
         esac
         echo "Network: $network"
@@ -1132,6 +1175,11 @@ config_vm_interactive() {
 
     echo ""
     echo "Configuration summary:"
+    if [ "${BACKEND:-}" = "proxmox" ]; then
+        echo "  Backend: proxmox (${PVE_HOST:-unknown})"
+    else
+        echo "  Backend: libvirt (${LIBVIRT_URI:-qemu:///system})"
+    fi
     echo "  Name:    $name"
     if [ -n "$pve_vmid" ]; then
         echo "  VMID:    $pve_vmid"
