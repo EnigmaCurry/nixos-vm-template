@@ -37,28 +37,6 @@ ideal for this because the entire system configuration is declared in
 code and built offline. The result is a VM that boots fast, runs
 predictably, and can be recreated identically at any time.
 
-## Mutable VMs
-
-While immutable VMs are the default, sometimes you need a traditional
-read-write NixOS system. Mutable VMs provide:
-
-- **Single disk** instead of boot + var disks
-- **Full nix toolchain** - run `nix-env`, `nixos-rebuild`, etc.
-- **Standard NixOS experience** - install packages, modify configs at runtime
-- **Same profiles** - all composable profiles work with mutable VMs
-- **Works with both backends** - libvirt and Proxmox
-
-**When to use mutable VMs:**
-- You need to run `nixos-rebuild switch` inside the VM
-- You want to experiment with NixOS configuration interactively
-- You need full `nix` command access
-- You're doing NixOS development or testing
-
-**Tradeoffs:**
-- No thin provisioning (each VM gets a full disk copy)
-- Cannot use `just upgrade` from the host (must upgrade inside VM)
-- Loses the corruption-resistance of a read-only root
-
 ## Features
 
 - Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
@@ -578,6 +556,26 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 | `just shell`          | Enter Nix development shell      |
 
 ### Mutable VMs
+
+While immutable VMs are the default, sometimes you need a traditional
+read-write NixOS system. Mutable VMs provide:
+
+- **Single disk** instead of boot + var disks
+- **Full nix toolchain** - run `nix-env`, `nixos-rebuild`, etc.
+- **Standard NixOS experience** - install packages, modify configs at runtime
+- **Same profiles** - all composable profiles work with mutable VMs
+- **Works with both backends** - libvirt and Proxmox
+
+**When to use mutable VMs:**
+- You need to run `nixos-rebuild switch` inside the VM
+- You want to experiment with NixOS configuration interactively
+- You need full `nix` command access
+- You're doing NixOS development or testing
+
+**Tradeoffs:**
+- No thin provisioning (each VM gets a full disk copy)
+- Cannot use `just upgrade` from the host (must upgrade inside VM)
+- Loses the corruption-resistance of a read-only root
 
 Use `just mutable` to toggle mutable mode for an existing machine config:
 
