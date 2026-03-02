@@ -16,28 +16,31 @@
     services.resolved.enable = true;
     services.resolved.settings.Resolve.DNSStubListenerExtra = [ "127.0.0.1" "::1" ];
 
-    # Create /etc/resolv.conf placeholder in the image.
-    # NixOS resolved sets environment.etc."resolv.conf".source to
-    # /run/systemd/resolve/stub-resolv.conf, which doesn't exist at build time
-    # so no file gets baked into /etc/static/. Override with a static file
-    # using pkgs.writeText so the placeholder exists in the image.
-    # The dns-identity service bind mounts /run/resolv.conf over it at boot.
+    # Bake /etc/resolv.conf into the image during build.
+    # NixOS resolved sets environment.etc."resolv.conf".source to a runtime path
+    # (/run/systemd/resolve/stub-resolv.conf) which doesn't exist at build time,
+    # so the activation script can't create the /etc/resolv.conf symlink.
+    # On read-only root this means /etc/resolv.conf is missing entirely.
+    # Fix: use an activation script to write the file directly into /etc/ during
+    # image build (same pattern as /bin/bash in core.nix).
     environment.etc."resolv.conf" = lib.mkForce {
-      source = pkgs.writeText "resolv.conf" "# Placeholder - replaced by dns-identity bind mount\nnameserver 127.0.0.53\noptions edns0 trust-ad\n";
+      source = pkgs.writeText "resolv.conf" "nameserver 127.0.0.53\noptions edns0 trust-ad\n";
       mode = "0644";
     };
 
-    # Service to create /etc/resolv.conf and configure custom DNS
-    systemd.services.dns-identity = {
-      description = "Configure DNS and /etc/resolv.conf from /var/identity";
-      wantedBy = [ "sysinit.target" ];
-      before = [ "network-pre.target" "nss-lookup.target" "systemd-resolved.service" ];
-      after = [ "local-fs.target" "var.mount" ];
-      wants = [ "local-fs.target" ];
+    system.activationScripts.resolvConf = lib.stringAfter [ "etc" ] ''
+      if [ ! -e /etc/resolv.conf ]; then
+        cp ${pkgs.writeText "resolv.conf" "nameserver 127.0.0.53\noptions edns0 trust-ad\n"} /etc/resolv.conf
+        chmod 0644 /etc/resolv.conf
+      fi
+    '';
 
-      unitConfig = {
-        DefaultDependencies = false;
-      };
+    # Service to configure custom DNS from /var/identity
+    systemd.services.dns-identity = {
+      description = "Configure custom DNS from /var/identity";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "var.mount" "systemd-resolved.service" ];
+      requires = [ "systemd-resolved.service" ];
 
       serviceConfig = {
         Type = "oneshot";
@@ -45,14 +48,6 @@
       };
 
       script = ''
-        # Write resolv.conf to /run and bind mount over the placeholder
-        cat > /run/resolv.conf << 'EOF'
-nameserver 127.0.0.53
-options edns0 trust-ad
-EOF
-        chmod 0644 /run/resolv.conf
-        ${pkgs.util-linux}/bin/mount --bind /run/resolv.conf /etc/resolv.conf
-
         # Configure custom DNS via resolved drop-in if identity file exists
         if [ -f /var/identity/resolv.conf ]; then
           nameservers=""
@@ -70,7 +65,10 @@ EOF
             echo "Setting DNS: $nameservers"
             mkdir -p /run/systemd/resolved.conf.d
             printf '[Resolve]\nDNS=%s\n' "$nameservers" > /run/systemd/resolved.conf.d/identity.conf
+            ${pkgs.systemd}/bin/systemctl restart systemd-resolved
           fi
+        else
+          echo "Using default DNS from DHCP/resolved"
         fi
       '';
     };
