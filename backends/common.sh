@@ -1011,6 +1011,17 @@ config_vm_interactive() {
                 lb_choice=$($SCRIPT_WIZARD choose ${lb_default_args[@]+"${lb_default_args[@]}"} "Select network bridge:" "${lb_labels[@]}")
                 local selected_bridge="${lb_choice%% *}"
                 network="bridge:$selected_bridge"
+
+                # Check if bridge is down and offer to bring it up
+                local br_state
+                br_state=$(cat "/sys/class/net/$selected_bridge/operstate" 2>/dev/null || echo "unknown")
+                if [ "$br_state" = "down" ]; then
+                    echo "Bridge '$selected_bridge' is currently down."
+                    if $SCRIPT_WIZARD confirm "Bring up $selected_bridge?" yes; then
+                        sudo ip link set "$selected_bridge" up
+                        echo "Bridge '$selected_bridge' is now up."
+                    fi
+                fi
                 ;;
             *) network="nat" ;;
         esac
