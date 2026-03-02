@@ -8,6 +8,15 @@
 #    a resolved drop-in config in /run/systemd/resolved.conf.d/
 { config, lib, pkgs, ... }:
 
+let
+  resolvConf = pkgs.writeText "resolv.conf" ''
+# This VM uses systemd-resolved for DNS.
+# 127.0.0.53 is the local stub listener, not the actual upstream DNS.
+# To see the real upstream DNS servers: resolvectl status
+nameserver 127.0.0.53
+options edns0 trust-ad
+'';
+in
 {
   # Immutable-mode DNS identity configuration
   config = lib.mkIf (!config.vm.mutable) {
@@ -24,13 +33,13 @@
     # Fix: use an activation script to write the file directly into /etc/ during
     # image build (same pattern as /bin/bash in core.nix).
     environment.etc."resolv.conf" = lib.mkForce {
-      source = pkgs.writeText "resolv.conf" "nameserver 127.0.0.53\noptions edns0 trust-ad\n";
+      source = resolvConf;
       mode = "0644";
     };
 
     system.activationScripts.resolvConf = lib.stringAfter [ "etc" ] ''
       if [ ! -e /etc/resolv.conf ]; then
-        cp ${pkgs.writeText "resolv.conf" "nameserver 127.0.0.53\noptions edns0 trust-ad\n"} /etc/resolv.conf
+        cp ${resolvConf} /etc/resolv.conf
         chmod 0644 /etc/resolv.conf
       fi
     '';
