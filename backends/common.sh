@@ -1094,6 +1094,22 @@ config_vm_interactive() {
                 ip_default_idx="1"
             fi
 
+            # Discover bridge subnet for smart prompt defaults
+            local lb_bridge_name="${network#bridge:}"
+            local lb_bridge_ip_cidr=""
+            lb_bridge_ip_cidr=$(ip -4 addr show dev "$lb_bridge_name" 2>/dev/null | awk '/inet /{print $2; exit}')
+            local lb_bridge_gateway=""
+            if [ -n "$lb_bridge_ip_cidr" ]; then
+                lb_bridge_gateway="${lb_bridge_ip_cidr%%/*}"
+            fi
+            local lb_ip_example="10.56.0.5/24"
+            if [ -n "$lb_bridge_ip_cidr" ]; then
+                # Use bridge subnet with .X for example (e.g. 10.13.14.X/24)
+                local lb_subnet="${lb_bridge_ip_cidr%.*}"
+                local lb_mask="${lb_bridge_ip_cidr#*/}"
+                lb_ip_example="${lb_subnet}.X/${lb_mask}"
+            fi
+
             local ip_choice
             ip_choice=$($SCRIPT_WIZARD choose -d "$ip_default_idx" "IP address configuration:" "DHCP (automatic)" "Static IP")
             if [[ "$ip_choice" == "Static"* ]]; then
@@ -1101,8 +1117,10 @@ config_vm_interactive() {
                 if [ -n "$current_static_ip" ]; then
                     default_addr=$(echo "$current_static_ip" | grep '^address=' | cut -d= -f2)
                     default_gw=$(echo "$current_static_ip" | grep '^gateway=' | cut -d= -f2)
+                elif [ -n "$lb_bridge_gateway" ]; then
+                    default_gw="$lb_bridge_gateway"
                 fi
-                static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (CIDR notation, e.g. 10.56.0.5/24):" "$default_addr")
+                static_ip_address=$($SCRIPT_WIZARD ask "Enter IP address (CIDR notation, e.g. $lb_ip_example):" "$default_addr")
                 if [ -z "$static_ip_address" ]; then
                     echo "Error: IP address is required for static IP configuration."
                     exit 1
