@@ -973,10 +973,17 @@ config_vm_interactive() {
                     if [ -d "/sys/class/net/$br/brif" ]; then
                         lb_ports=$(ls "/sys/class/net/$br/brif" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
                     fi
-                    local lb_detail="${lb_ip:-no IP}"
-                    [ -n "$lb_ports" ] && lb_detail="$lb_detail, $lb_ports"
+                    local lb_detail=""
+                    [ -n "$lb_ip" ] && lb_detail="$lb_ip"
+                    if [ -n "$lb_ports" ]; then
+                        lb_detail="${lb_detail:+$lb_detail, }$lb_ports"
+                    fi
                     lb_bridges+=("$br")
-                    lb_labels+=("$br ($lb_detail)")
+                    if [ -n "$lb_detail" ]; then
+                        lb_labels+=("$br ($lb_detail)")
+                    else
+                        lb_labels+=("$br")
+                    fi
                 done < <(for d in /sys/class/net/*/bridge; do basename "$(dirname "$d")"; done 2>/dev/null | grep -vE '^(virbr[0-9]+|docker[0-9]*|br-|fwbr)' || true)
 
                 if [ ${#lb_bridges[@]} -eq 0 ]; then

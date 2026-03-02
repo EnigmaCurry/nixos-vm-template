@@ -223,11 +223,9 @@ pve_list_bridges_detailed() {
         detail=""
         if [ -n "$ip" ]; then
             detail="$ip"
-        else
-            detail="no IP"
         fi
         if [ -n "$ports" ]; then
-            detail="$detail, $ports"
+            detail="${detail:+$detail, }$ports"
         fi
 
         line="$br ($detail)"
