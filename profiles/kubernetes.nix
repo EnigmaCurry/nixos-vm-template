@@ -10,6 +10,7 @@
       kustomize
       kubectx
       talosctl
+      cmctl
     ];
   };
 }
