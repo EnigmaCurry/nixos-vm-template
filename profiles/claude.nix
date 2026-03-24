@@ -46,6 +46,16 @@ in
 
       # Install claude-code on first login (skip for root)
       if [ "$(id -u)" != "0" ] && [ ! -x "$HOME/.npm-global/bin/claude" ]; then
+        # Wait up to 60s for DNS to be ready (resolved may not be up yet on first boot)
+        for i in $(seq 1 60); do
+          if getent hosts registry.npmjs.org >/dev/null 2>&1; then
+            break
+          fi
+          if [ "$i" -eq 1 ]; then
+            echo "Waiting for DNS..."
+          fi
+          sleep 1
+        done
         echo "Installing Claude Code..."
         mkdir -p "$HOME/.npm-global"
         npm install -g @anthropic-ai/claude-code
