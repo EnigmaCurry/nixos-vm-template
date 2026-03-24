@@ -9,6 +9,7 @@
       k9s
       kustomize
       kubectx
+      talosctl
     ];
   };
 }
