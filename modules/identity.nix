@@ -36,23 +36,17 @@
       depends = [ "/var" ];
     };
 
-    # Service to set hostname from /var at boot
-    systemd.services.vm-identity = {
-      description = "Set VM identity from /var";
-      wantedBy = [ "multi-user.target" ];
-      before = [ "network.target" ];
-      after = [ "local-fs.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-      };
-      script = ''
-        # Set hostname from /var/identity
-        if [ -f /var/identity/hostname ]; then
-          hostname=$(cat /var/identity/hostname)
-          ${pkgs.hostname}/bin/hostname "$hostname"
-        fi
-      '';
+    # Create placeholder for hostname bind mount
+    environment.etc."hostname" = lib.mkForce {
+      text = "nixos\n";
+      mode = "0644";
+    };
+
+    # Bind mount /etc/hostname from /var (mounts over the placeholder)
+    fileSystems."/etc/hostname" = {
+      device = "/var/identity/hostname";
+      options = [ "bind" "nofail" ];
+      depends = [ "/var" ];
     };
   };
 }
