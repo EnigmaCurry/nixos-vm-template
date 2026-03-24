@@ -612,6 +612,11 @@ EOF
         gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/udp_ports"
         gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
     fi
+    if [ -s "$machine_dir/allowed_cidrs" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/allowed_cidrs /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/allowed_cidrs"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/allowed_cidrs"
+    fi
 
     # Copy static IP and DNS config to /etc/network-config/
     if [ -s "$machine_dir/static_ip" ]; then
@@ -843,7 +848,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi

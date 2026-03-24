@@ -312,6 +312,11 @@ EOF
         gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/udp_ports"
         gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/udp_ports"
     fi
+    if [ -s "$machine_dir/allowed_cidrs" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/allowed_cidrs /etc/firewall-ports/"
+        gf_cmds="$gf_cmds : chmod 0644 /etc/firewall-ports/allowed_cidrs"
+        gf_cmds="$gf_cmds : chown 0 0 /etc/firewall-ports/allowed_cidrs"
+    fi
 
     # Copy static IP and DNS config to /etc/network-config/
     if [ -s "$machine_dir/static_ip" ]; then
@@ -453,6 +458,13 @@ backend_sync_identity() {
         gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
         gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
         gf_cmds="$gf_cmds : chown 0 0 /identity/root_password_hash"
+    fi
+
+    # Update allowed CIDRs
+    if [ -s "$machine_dir/allowed_cidrs" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/allowed_cidrs /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/allowed_cidrs"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/allowed_cidrs"
     fi
 
     eval "$GUESTFISH -a $var_disk $gf_cmds"
