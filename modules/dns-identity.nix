@@ -49,7 +49,7 @@ in
       description = "Configure custom DNS from /var/identity";
       wantedBy = [ "multi-user.target" ];
       after = [ "var.mount" "systemd-resolved.service" ];
-      requires = [ "systemd-resolved.service" ];
+      wants = [ "systemd-resolved.service" ];
 
       serviceConfig = {
         Type = "oneshot";
