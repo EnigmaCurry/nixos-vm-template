@@ -11,10 +11,8 @@
     programs.nix-ld.enable = true;
 
     environment.systemPackages = with pkgs; [
+      python3
       uv
-      # Wrapper scripts that use uv's managed Python
-      (writeShellScriptBin "python" ''exec uv run --no-project python "$@"'')
-      (writeShellScriptBin "python3" ''exec uv run --no-project python3 "$@"'')
       # Build tools for compiling Python packages with C extensions
       gcc
       gnumake
