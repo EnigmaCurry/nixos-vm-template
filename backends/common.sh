@@ -205,6 +205,12 @@ init_machine() {
         echo "Using existing network config: $(cat "$machine_dir/network")"
     fi
 
+    # Create hosts file if not present (extra /etc/hosts entries)
+    if [ ! -f "$machine_dir/hosts" ]; then
+        printf '%s\n' "# Extra /etc/hosts entries (one per line)" "# Example:" "# 10.0.0.1 myserver.local myserver" > "$machine_dir/hosts"
+        echo "Created: $machine_dir/hosts"
+    fi
+
     # Create root password hash file if not present (empty = no password)
     if [ ! -f "$machine_dir/root_password_hash" ]; then
         touch "$machine_dir/root_password_hash"
