@@ -368,12 +368,27 @@ init_machine_clone() {
         echo "nat" > "$dest_dir/network"
     fi
 
+    # Copy additional network configs (network.1, network.2, etc.)
+    local idx=1
+    while [ -f "$source_dir/network.$idx" ]; do
+        cp "$source_dir/network.$idx" "$dest_dir/network.$idx"
+        ((idx++))
+    done
+
     # Generate fresh identity
     cat /proc/sys/kernel/random/uuid | tr -d '-' > "$dest_dir/machine-id"
     echo "Generated: $dest_dir/machine-id"
 
     printf '52:54:00:%02x:%02x:%02x\n' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) > "$dest_dir/mac-address"
     echo "Generated: $dest_dir/mac-address ($(cat "$dest_dir/mac-address"))"
+
+    # Generate fresh MACs for additional NICs
+    idx=1
+    while [ -f "$dest_dir/network.$idx" ]; do
+        printf '52:54:00:%02x:%02x:%02x\n' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) > "$dest_dir/mac-address.$idx"
+        echo "Generated: $dest_dir/mac-address.$idx ($(cat "$dest_dir/mac-address.$idx"))"
+        ((idx++))
+    done
 
     cat /proc/sys/kernel/random/uuid > "$dest_dir/uuid"
     echo "Generated: $dest_dir/uuid"
@@ -399,6 +414,10 @@ network_config() {
     if [[ "$network" == "nat" ]]; then
         echo "nat" > "$machine_dir/network"
         echo "Network configured: nat"
+    elif [[ "$network" == isolated:* ]]; then
+        # Isolated network (no DHCP, no NAT - pure virtual switch)
+        echo "$network" > "$machine_dir/network"
+        echo "Network configured: $network"
     elif [[ "$network" == bridge:* ]]; then
         # Direct bridge specification (e.g., bridge:vmbr0, bridge:br0)
         echo "$network" > "$machine_dir/network"
@@ -439,7 +458,7 @@ network_config() {
         echo "bridge:$selected_bridge" > "$machine_dir/network"
         echo "Network configured: bridge:$selected_bridge"
     else
-        echo "Error: Invalid network config '$network'. Use 'nat', 'bridge', or 'bridge:<name>'"
+        echo "Error: Invalid network config '$network'. Use 'nat', 'bridge', 'bridge:<name>', or 'isolated:<name>'"
         exit 1
     fi
 }
@@ -554,6 +573,7 @@ config_vm() {
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
     local static_ip="${7:-}"
+    local extra_networks="${8:-}"
 
     # Initialize machine config (creates identity files, uses SSH agent keys in batch mode)
     init_machine "$name" "$profile" "$network" "agent"
@@ -607,6 +627,22 @@ config_vm() {
             printf 'gateway=%s\n' "$sip_gw" >> "$machine_dir/static_ip"
         fi
         echo "Created: $machine_dir/static_ip ($sip_addr)"
+    fi
+
+    # Configure additional network interfaces (comma-separated, e.g., "isolated:mynet,nat")
+    if [ -n "$extra_networks" ]; then
+        local idx=1
+        IFS=',' read -ra extra_nets <<< "$extra_networks"
+        for extra_net in "${extra_nets[@]}"; do
+            extra_net=$(echo "$extra_net" | xargs)  # trim whitespace
+            echo "$extra_net" > "$machine_dir/network.$idx"
+            echo "Created: $machine_dir/network.$idx ($extra_net)"
+            if [ ! -f "$machine_dir/mac-address.$idx" ]; then
+                printf '52:54:00:%02x:%02x:%02x\n' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)) > "$machine_dir/mac-address.$idx"
+                echo "Generated: $machine_dir/mac-address.$idx ($(cat "$machine_dir/mac-address.$idx"))"
+            fi
+            ((idx++))
+        done
     fi
 
     echo ""

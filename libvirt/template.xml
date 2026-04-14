@@ -46,12 +46,8 @@
       <target dev='vdb' bus='virtio'/>
     </disk>
 
-    <!-- Network interface -->
-    <interface type='@@NETWORK_TYPE@@'>
-      <mac address='@@MAC_ADDRESS@@'/>
-      <source @@NETWORK_SOURCE@@/>
-      <model type='virtio'/>
-    </interface>
+    <!-- Network interface(s) -->
+@@NETWORK_INTERFACES@@
 
     <!-- Serial console -->
     <serial type='pty'>

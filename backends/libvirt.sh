@@ -493,9 +493,8 @@ backend_generate_config() {
     echo "Generating libvirt XML for: $name"
     mkdir -p "$LIBVIRT_DIR"
 
-    local ovmf_vars_dest mac_address vm_uuid
+    local ovmf_vars_dest vm_uuid
     ovmf_vars_dest=$($READLINK -f "$OUTPUT_DIR/vms/$name")/OVMF_VARS.qcow2
-    mac_address=$(cat "$MACHINES_DIR/$name/mac-address")
 
     # Generate UUID if not present
     if [ ! -f "$MACHINES_DIR/$name/uuid" ]; then
@@ -504,20 +503,47 @@ backend_generate_config() {
     fi
     vm_uuid=$(cat "$MACHINES_DIR/$name/uuid")
 
-    # Parse network configuration
-    local network_config network_type network_source
-    network_config=$(cat "$MACHINES_DIR/$name/network" 2>/dev/null || echo "nat")
-    if [[ "$network_config" == "nat" ]]; then
-        network_type="network"
-        network_source="network='default'"
-    elif [[ "$network_config" == bridge:* ]]; then
-        local bridge_name="${network_config#bridge:}"
-        network_type="bridge"
-        network_source="bridge='$bridge_name'"
-    else
-        echo "Error: Invalid network config '$network_config'"
-        exit 1
-    fi
+    # Build network interface XML blocks for all NICs
+    local network_interfaces=""
+    local nic_idx=0
+    while true; do
+        local net_file mac_file
+        if [ "$nic_idx" -eq 0 ]; then
+            net_file="$MACHINES_DIR/$name/network"
+            mac_file="$MACHINES_DIR/$name/mac-address"
+        else
+            net_file="$MACHINES_DIR/$name/network.$nic_idx"
+            mac_file="$MACHINES_DIR/$name/mac-address.$nic_idx"
+        fi
+        [ -f "$net_file" ] || { [ "$nic_idx" -eq 0 ] && echo "nat" > "$net_file" || break; }
+        [ -f "$mac_file" ] || break
+
+        local nc mac_addr iface_type iface_source
+        nc=$(cat "$net_file")
+        mac_addr=$(cat "$mac_file")
+
+        if [[ "$nc" == "nat" ]]; then
+            iface_type="network"
+            iface_source="network='default'"
+        elif [[ "$nc" == bridge:* ]]; then
+            iface_type="bridge"
+            iface_source="bridge='${nc#bridge:}'"
+        elif [[ "$nc" == isolated:* ]]; then
+            iface_type="network"
+            iface_source="network='${nc#isolated:}'"
+        else
+            echo "Error: Invalid network config '$nc' in $net_file"
+            exit 1
+        fi
+
+        network_interfaces+="    <interface type='${iface_type}'>
+      <mac address='${mac_addr}'/>
+      <source ${iface_source}/>
+      <model type='virtio'/>
+    </interface>
+"
+        ((nic_idx++))
+    done
 
     # Convert NVRAM template to QCOW2 (required for snapshots with UEFI)
     $QEMU_IMG convert -f raw -O qcow2 "$OVMF_VARS" "$ovmf_vars_dest" 2>/dev/null || \
@@ -535,6 +561,7 @@ backend_generate_config() {
     fi
 
     # Choose template based on mutable mode
+    local tmpxml="$LIBVIRT_DIR/$name.xml"
     if is_mutable "$name"; then
         local disk
         disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/disk.qcow2")
@@ -546,13 +573,10 @@ backend_generate_config() {
             -e "s|@@DISK@@|$disk|g" \
             -e "s|@@OVMF_CODE@@|$OVMF_CODE|g" \
             -e "s|@@OVMF_VARS@@|$ovmf_vars_dest|g" \
-            -e "s|@@MAC_ADDRESS@@|$mac_address|g" \
-            -e "s|@@NETWORK_TYPE@@|$network_type|g" \
-            -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
             -e "s|@@OWNER_UID@@|$owner_uid|g" \
             -e "s|@@OWNER_GID@@|$owner_gid|g" \
             -e "s|@@SOUND_DEVICES@@|$sound_devices|g" \
-            "$LIBVIRT_DIR/template-mutable.xml" > "$LIBVIRT_DIR/$name.xml"
+            "$LIBVIRT_DIR/template-mutable.xml" > "$tmpxml"
     else
         local boot_disk var_disk
         boot_disk=$($READLINK -f "$OUTPUT_DIR/vms/$name/boot.qcow2")
@@ -566,14 +590,22 @@ backend_generate_config() {
             -e "s|@@VAR_DISK@@|$var_disk|g" \
             -e "s|@@OVMF_CODE@@|$OVMF_CODE|g" \
             -e "s|@@OVMF_VARS@@|$ovmf_vars_dest|g" \
-            -e "s|@@MAC_ADDRESS@@|$mac_address|g" \
-            -e "s|@@NETWORK_TYPE@@|$network_type|g" \
-            -e "s|@@NETWORK_SOURCE@@|$network_source|g" \
             -e "s|@@OWNER_UID@@|$owner_uid|g" \
             -e "s|@@OWNER_GID@@|$owner_gid|g" \
             -e "s|@@SOUND_DEVICES@@|$sound_devices|g" \
-            "$LIBVIRT_DIR/template.xml" > "$LIBVIRT_DIR/$name.xml"
+            "$LIBVIRT_DIR/template.xml" > "$tmpxml"
     fi
+
+    # Replace @@NETWORK_INTERFACES@@ placeholder with generated interface XML
+    local escaped_ifaces
+    escaped_ifaces=$(printf '%s' "$network_interfaces" | sed 's/[&/\]/\\&/g')
+    awk -v ifaces="$network_interfaces" '{
+        if ($0 ~ /@@NETWORK_INTERFACES@@/) {
+            printf "%s", ifaces
+        } else {
+            print $0
+        }
+    }' "$tmpxml" > "$tmpxml.tmp" && mv "$tmpxml.tmp" "$tmpxml"
 
     echo "Generated: $LIBVIRT_DIR/$name.xml"
 }
@@ -595,18 +627,11 @@ backend_undefine() {
         $VIRSH -c "$LIBVIRT_URI" undefine "$name"
 }
 
-# Start a VM
-backend_start() {
-    local name="$1"
-
-    # Read the VM's network config
-    local network_config
-    network_config=$(cat "$MACHINES_DIR/$name/network" 2>/dev/null || echo "nat")
-    if [[ "$network_config" == "nat" ]]; then
-        # Ensure the default NAT network is defined and active
-        if ! $VIRSH -c "$LIBVIRT_URI" net-info default &>/dev/null; then
-            echo "Defining default NAT network..."
-            cat > /tmp/libvirt-default-net.xml <<'NETXML'
+# Ensure the default NAT network is defined and active
+ensure_nat_network() {
+    if ! $VIRSH -c "$LIBVIRT_URI" net-info default &>/dev/null; then
+        echo "Defining default NAT network..."
+        cat > /tmp/libvirt-default-net.xml <<'NETXML'
 <network>
   <name>default</name>
   <forward mode='nat'/>
@@ -618,12 +643,56 @@ backend_start() {
   </ip>
 </network>
 NETXML
-            $VIRSH -c "$LIBVIRT_URI" net-define /tmp/libvirt-default-net.xml
-            rm -f /tmp/libvirt-default-net.xml
-        fi
-        $VIRSH -c "$LIBVIRT_URI" net-start default 2>/dev/null || true
-        $VIRSH -c "$LIBVIRT_URI" net-autostart default 2>/dev/null || true
+        $VIRSH -c "$LIBVIRT_URI" net-define /tmp/libvirt-default-net.xml
+        rm -f /tmp/libvirt-default-net.xml
     fi
+    $VIRSH -c "$LIBVIRT_URI" net-start default 2>/dev/null || true
+    $VIRSH -c "$LIBVIRT_URI" net-autostart default 2>/dev/null || true
+}
+
+# Ensure an isolated libvirt network exists and is active (no DHCP, no NAT)
+ensure_isolated_network() {
+    local net_name="$1"
+    if ! $VIRSH -c "$LIBVIRT_URI" net-info "$net_name" &>/dev/null; then
+        echo "Defining isolated network: $net_name"
+        cat > "/tmp/libvirt-isolated-${net_name}.xml" <<NETXML
+<network>
+  <name>${net_name}</name>
+  <bridge name='virbr-${net_name}' stp='on' delay='0'/>
+</network>
+NETXML
+        $VIRSH -c "$LIBVIRT_URI" net-define "/tmp/libvirt-isolated-${net_name}.xml"
+        rm -f "/tmp/libvirt-isolated-${net_name}.xml"
+    fi
+    $VIRSH -c "$LIBVIRT_URI" net-start "$net_name" 2>/dev/null || true
+    $VIRSH -c "$LIBVIRT_URI" net-autostart "$net_name" 2>/dev/null || true
+}
+
+# Start a VM
+backend_start() {
+    local name="$1"
+
+    # Ensure all required networks are active (primary + additional NICs)
+    local nic_idx=0
+    while true; do
+        local net_file
+        if [ "$nic_idx" -eq 0 ]; then
+            net_file="$MACHINES_DIR/$name/network"
+        else
+            net_file="$MACHINES_DIR/$name/network.$nic_idx"
+        fi
+        [ -f "$net_file" ] || break
+
+        local nc
+        nc=$(cat "$net_file")
+        if [[ "$nc" == "nat" ]]; then
+            ensure_nat_network
+        elif [[ "$nc" == isolated:* ]]; then
+            ensure_isolated_network "${nc#isolated:}"
+        fi
+        ((nic_idx++))
+    done
+
     echo "Starting VM: $name"
     $VIRSH -c "$LIBVIRT_URI" start "$name"
 }
@@ -798,9 +867,10 @@ create_vm_batch() {
     var_size=$(normalize_size "${5:-30G}")
     local network="${6:-nat}"
     local static_ip="${7:-}"
+    local extra_networks="${8:-}"
 
     # Configure machine non-interactively
-    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network" "$static_ip"
+    config_vm "$name" "$profile" "$memory" "$vcpus" "$var_size" "$network" "$static_ip" "$extra_networks"
 
     # Read back the configured values from machine config
     local machine_dir="$MACHINES_DIR/$name"

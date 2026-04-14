@@ -696,6 +696,7 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
 | **open-code** | Open Code CLI (open-source AI coding assistant) |
+| **router** | IP forwarding, NAT masquerade, DHCP server (for multi-NIC router VMs) |
 
 ### Common Combinations
 
@@ -767,7 +768,9 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `machine-id` - Unique machine identifier
 - `uuid` - VM UUID (preserves DHCP lease across upgrades)
 - `mac-address` - Network MAC address
-- `network` - Network mode (`nat` or `bridge:<name>`)
+- `network` - Primary network mode (`nat`, `bridge:<name>`, or `isolated:<name>`)
+- `network.1`, `network.2`, ... - Additional network interfaces
+- `mac-address.1`, `mac-address.2`, ... - MACs for additional interfaces
 - `ssh_host_ed25519_key` - SSH host key
 - `admin_authorized_keys` - SSH public keys for admin user
 - `user_authorized_keys` - SSH public keys for regular user
@@ -825,6 +828,94 @@ just upgrade myvm             # Apply the change
 
 The password hash is stored in `machines/<name>/root_password_hash`.
 When this file is empty, root password login is disabled.
+
+## Router and Client VMs
+
+You can create a pair of VMs to test router configurations: a **router**
+VM with two network interfaces (external NAT + internal isolated) and a
+**client** VM on the isolated network that routes all traffic through
+the router.
+
+### How It Works
+
+The router VM gets two NICs:
+- **ens3** (external) - NAT to the host, gets an IP via DHCP from libvirt
+- **ens4** (internal) - Connected to an isolated virtual switch with static IP `10.44.0.1`
+
+The client VM gets one NIC on the same isolated network and receives its
+IP, gateway, and DNS from the router's DHCP server (dnsmasq).
+
+```
+                    ┌─────────────┐
+    Internet ◄────► │   libvirt   │
+                    │  NAT bridge │
+                    └──────┬──────┘
+                           │ ens3 (DHCP)
+                    ┌──────┴──────┐
+                    │   router    │
+                    │  IP forward │
+                    │  NAT + DHCP │
+                    └──────┬──────┘
+                           │ ens4 (10.44.0.1)
+                    ┌──────┴──────┐
+                    │  isolated   │
+                    │   switch    │
+                    └──────┬──────┘
+                           │ ens3 (DHCP from router)
+                    ┌──────┴──────┐
+                    │   client    │
+                    └─────────────┘
+```
+
+### Creating the VMs
+
+```bash
+# Create the router (NAT + isolated network, uses the "router" profile)
+just create-batch router core,router 2048 2 30G nat "" "isolated:isolated"
+
+# Create the client (isolated network only)
+just create-batch client core 2048 2 30G "isolated:isolated"
+
+# Start the router first (it provides DHCP), then the client
+just start router
+just start client
+```
+
+The `isolated:isolated` network type creates a libvirt virtual switch
+with no built-in DHCP or NAT - the router VM handles both.
+
+### The Router Profile
+
+The `router` profile (`profiles/router.nix`) provides:
+- IP forwarding between interfaces
+- NAT masquerade (internal traffic exits via the external interface)
+- dnsmasq DHCP server on the internal interface (range `10.44.0.100-200`)
+- DNS forwarding to upstream resolvers (`1.1.1.1`, `1.0.0.1`)
+
+### Multi-NIC Support
+
+VMs can have additional network interfaces beyond the primary one.
+Extra networks are specified as a comma-separated list in the
+`extra_networks` parameter of `create-batch` / `config-batch`:
+
+```bash
+# Primary NIC is NAT, secondary NIC is on an isolated network
+just create-batch myvm core 2048 2 30G nat "" "isolated:mynet"
+
+# Primary NIC on isolated network (no external access)
+just create-batch myvm core 2048 2 30G "isolated:mynet"
+```
+
+Additional NIC configs are stored as `machines/<name>/network.1`,
+`machines/<name>/mac-address.1`, etc.
+
+### Network Types
+
+| Type | Example | Description |
+|------|---------|-------------|
+| `nat` | `nat` | NAT via libvirt default network (default) |
+| `bridge:<name>` | `bridge:br0` | Bridged to a host bridge interface |
+| `isolated:<name>` | `isolated:mynet` | Isolated virtual switch (no DHCP, no NAT) |
 
 ## Architecture
 
