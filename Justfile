@@ -83,7 +83,6 @@ update:
 
 # Upgrade a VM to a new image (preserves /var data)
 upgrade name:
-    nix flake update
     @source {{backend_script}} && upgrade_vm "{{name}}"
 
 # Resize VM resources interactively (memory, vcpus, /var disk)

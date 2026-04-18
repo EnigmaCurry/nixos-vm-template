@@ -1570,7 +1570,7 @@ upgrade_vm() {
     stop_graceful "$name"
 
     # Build new profile image
-    build_profile "$profile"
+    FLAKE_UPDATE=true build_profile "$profile"
 
     # Sync identity files
     backend_sync_identity "$name"

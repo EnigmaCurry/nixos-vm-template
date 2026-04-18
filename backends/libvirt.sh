@@ -1146,7 +1146,7 @@ upgrade_vm() {
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" 2>/dev/null || true
 
-    build_profile "$profile"
+    FLAKE_UPDATE=true build_profile "$profile"
     backend_sync_identity "$name"
 
     # Replace only the boot disk (keep /var disk intact)

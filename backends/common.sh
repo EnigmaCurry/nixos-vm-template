@@ -119,6 +119,7 @@ is_pipewire() {
 # Build a profile's base image (supports comma-separated profile combinations)
 # Usage: build_profile <profiles> [mutable]
 # If mutable=true, builds a mutable (read-write) image
+# Set FLAKE_UPDATE=true to update flake inputs before building (used by upgrade)
 build_profile() {
     local profiles="${1:-core}"
     local mutable="${2:-false}"
@@ -141,10 +142,27 @@ build_profile() {
     local nix_list
     nix_list=$(echo "$profile_key" | sed 's/,/" "/g' | sed 's/^/["/;s/$/"]/')
 
+    # Determine flake directory (writable copy if updating inputs)
+    local flake_dir="$SCRIPT_DIR"
+    local tmp_flake_dir=""
+    if [ "${FLAKE_UPDATE:-false}" = "true" ]; then
+        tmp_flake_dir=$(mktemp -d)
+        cp -a "$SCRIPT_DIR/." "$tmp_flake_dir/"
+        chmod -R u+w "$tmp_flake_dir"
+        echo "Updating flake inputs..."
+        $NIX flake update --flake "$tmp_flake_dir"
+        flake_dir="$tmp_flake_dir"
+    fi
+
     $NIX build --impure --expr "
-      let flake = builtins.getFlake \"$SCRIPT_DIR\";
+      let flake = builtins.getFlake \"$flake_dir\";
       in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; }
     " --out-link "$OUTPUT_DIR/profiles/$output_key"
+
+    # Clean up temp directory
+    if [ -n "$tmp_flake_dir" ]; then
+        rm -rf "$tmp_flake_dir"
+    fi
 
     echo "Built: $OUTPUT_DIR/profiles/$output_key"
 }
