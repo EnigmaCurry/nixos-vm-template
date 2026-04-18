@@ -13,7 +13,8 @@
     };
     nix-flatpak.url = "github:gmodena/nix-flatpak";
     opencode = {
-      url = "github:AnomalyCo/opencode";
+      # Pinned to a stable release tag. Bump manually after verifying upstream builds.
+      url = "github:AnomalyCo/opencode/v1.4.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
