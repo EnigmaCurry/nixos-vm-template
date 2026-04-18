@@ -75,6 +75,7 @@ in
       # Bind mount authorized_keys from /var/identity for admin
       fileSystems."/etc/ssh/authorized_keys.d/${adminUser}" = {
         device = "/var/identity/${adminUser}_authorized_keys";
+        fsType = "none";
         options = [ "bind" ];
         depends = [ "/var" ];
       };
@@ -82,6 +83,7 @@ in
       # Bind mount authorized_keys from /var/identity for regular user
       fileSystems."/etc/ssh/authorized_keys.d/${regularUser}" = {
         device = "/var/identity/${regularUser}_authorized_keys";
+        fsType = "none";
         options = [ "bind" ];
         depends = [ "/var" ];
       };

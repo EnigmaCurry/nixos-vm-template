@@ -32,6 +32,7 @@
     # Bind mount /etc/machine-id from /var (mounts over the placeholder)
     fileSystems."/etc/machine-id" = {
       device = "/var/identity/machine-id";
+      fsType = "none";
       options = [ "bind" ];
       depends = [ "/var" ];
     };
@@ -45,6 +46,7 @@
     # Bind mount /etc/hostname from /var (mounts over the placeholder)
     fileSystems."/etc/hostname" = {
       device = "/var/identity/hostname";
+      fsType = "none";
       options = [ "bind" "nofail" ];
       depends = [ "/var" ];
     };
