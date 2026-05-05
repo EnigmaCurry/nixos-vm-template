@@ -691,7 +691,7 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **podman** | Podman + distrobox, buildah, skopeo (rootless containers) |
 | **nvidia** | NVIDIA drivers + container toolkit (requires docker) |
 | **python** | Python with uv package manager and build tools |
-| **rust** | Rust with rustup |
+| **rust** | Rust toolchain from Nix packages |
 | **dev** | Development tools (neovim, tmux, etc.) |
 | **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
