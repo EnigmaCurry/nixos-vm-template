@@ -1,9 +1,11 @@
-# Rust development profile - rustup with rust-analyzer
+# Rust development profile.
+#
+# Use Nix-provided Rust tools instead of rustup-managed toolchains. In immutable
+# VMs, /home persists across image upgrades but /nix/store is replaced with the
+# new boot image; rustup-installed toolchains in $HOME can retain linker wrapper
+# scripts that point at old rustup store paths.
 { config, lib, pkgs, ... }:
 
-let
-  regularUser = config.core.regularUser;
-in
 {
   imports = [
     ../modules/sqlite.nix
@@ -11,19 +13,13 @@ in
 
   config = {
     environment.systemPackages = with pkgs; [
-      rustup
+      cargo
+      rustc
+      rust-analyzer
+      clippy
+      rustfmt
       gcc  # Needed for linking
       pkg-config
     ];
-
-    # Initialize rustup on first interactive shell login (only for regular user)
-    environment.interactiveShellInit = ''
-      if [ "$(whoami)" = "${regularUser}" ] && [ ! -d "$HOME/.rustup" ]; then
-        echo "Initializing rustup with stable toolchain..."
-        rustup default stable
-        rustup component add rust-analyzer
-        echo "Rustup ready! Run 'rustup show' to see installed toolchains."
-      fi
-    '';
   };
 }
