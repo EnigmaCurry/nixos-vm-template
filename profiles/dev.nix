@@ -32,6 +32,12 @@
     pkg-config
     udev.dev
 
+    # Archive / analysis tools
+    binwalk
+    entropy
+    p7zip
+    unzip
+
     # Network tools
     wget
     netcat
