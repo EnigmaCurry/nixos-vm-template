@@ -12,26 +12,29 @@
   };
 
   config = lib.mkIf (!config.vm.mutable && config.vm.nixOverlay) {
-    # Overlay /nix: lower is the read-only /nix from the base image,
-    # upper and work directories live on the writable /var disk.
-    fileSystems."/nix" = {
-      device = "overlay";
-      fsType = "overlay";
-      options = [
-        "lowerdir=/nix"
-        "upperdir=/var/nix-overlay/upper"
-        "workdir=/var/nix-overlay/work"
-      ];
-      depends = [ "/var" ];
-      neededForBoot = true;
+    # Mount /nix overlay via a systemd service that creates the dirs first.
+    # We cannot use fileSystems because the overlay dirs on /var may not
+    # exist yet when systemd processes local-fs.target mounts.
+    systemd.services.nix-overlay = {
+      description = "Mount writable /nix overlay";
+      wantedBy = [ "local-fs.target" ];
+      after = [ "var.mount" ];
+      before = [ "nix-daemon.service" "local-fs.target" ];
+      unitConfig = {
+        DefaultDependencies = false;
+        RequiresMountsFor = "/var";
+      };
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        mkdir -p /var/nix-overlay/upper /var/nix-overlay/work
+        ${pkgs.util-linux}/bin/mount -t overlay overlay \
+          -o lowerdir=/nix,upperdir=/var/nix-overlay/upper,workdir=/var/nix-overlay/work \
+          /nix
+      '';
     };
-
-    # Ensure overlay directories exist on /var
-    systemd.tmpfiles.rules = [
-      "d /var/nix-overlay 0755 root root -"
-      "d /var/nix-overlay/upper 0755 root root -"
-      "d /var/nix-overlay/work 0755 root root -"
-    ];
 
     # Enable nix garbage collection (writable /nix supports GC)
     nix.gc.automatic = lib.mkForce true;
