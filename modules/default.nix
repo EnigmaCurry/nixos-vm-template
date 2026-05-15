@@ -11,6 +11,7 @@
     ./journald.nix
     ./immutable.nix
     ./mutable.nix
+    ./nix-overlay.nix
     ./identity.nix
     ./firewall-identity.nix
     ./dns-identity.nix

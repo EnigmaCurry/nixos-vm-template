@@ -49,7 +49,7 @@
       # Build a combined VM image for a given system and list of profiles
       # mutable: if true, builds a standard read-write NixOS system
       # Uses native nixpkgs image building (qemu-efi format)
-      mkCombinedImage = system: profileList: { mutable ? false }:
+      mkCombinedImage = system: profileList: { mutable ? false, nixOverlay ? false }:
         let
           # Always include core, sort for canonical naming, dedupe
           allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
@@ -66,7 +66,7 @@
               home-manager.nixosModules.home-manager
             ] ++ profileModules ++ [
               { nixpkgs.hostPlatform = system; }
-              { vm.mutable = mutable; }
+              { vm.mutable = mutable; vm.nixOverlay = nixOverlay; }
               # Configure image format (qcow2 with EFI/systemd-boot)
               {
                 image.baseName = "nixos";
@@ -84,7 +84,7 @@
 
       # Build a NixOS configuration for testing/debugging/rebuilding
       # mutable: if true, configures as a mutable system (for nixos-rebuild on mutable VMs)
-      mkNixosConfig = system: profile: { mutable ? false }:
+      mkNixosConfig = system: profile: { mutable ? false, nixOverlay ? false }:
         nixpkgs.lib.nixosSystem {
           specialArgs = {
             inherit sway-home nix-flatpak opencode;
@@ -94,7 +94,7 @@
             home-manager.nixosModules.home-manager
             ./profiles/${profile}.nix
             { nixpkgs.hostPlatform = system; }
-            { vm.mutable = mutable; }
+            { vm.mutable = mutable; vm.nixOverlay = nixOverlay; }
           ];
         };
 
@@ -122,6 +122,12 @@
           (map (profile: {
             name = "${profile}-${system}";
             value = mkNixosConfig system profile { mutable = false; };
+          }) availableProfiles)
+          ++
+          # Semi-mutable configurations (read-only root + writable /nix overlay)
+          (map (profile: {
+            name = "${profile}-semi-mutable-${system}";
+            value = mkNixosConfig system profile { nixOverlay = true; };
           }) availableProfiles)
           ++
           # Mutable configurations (for nixos-rebuild on mutable VMs)

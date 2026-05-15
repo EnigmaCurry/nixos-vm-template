@@ -671,6 +671,69 @@ sudo nixos-rebuild switch --flake github:owner/repo#config
 | Upgrade method | `just upgrade` from host | `nixos-rebuild` inside VM |
 | Thin provisioning | Yes (QCOW2 backing files) | No (full disk copy) |
 
+### Semi-Mutable VMs
+
+Semi-mutable VMs offer a middle ground: the root filesystem remains
+read-only (like immutable VMs), but `/nix` is writable via an overlayfs
+overlay. This lets you install packages at runtime with `nix profile
+install` while keeping the base system immutable and upgradeable from
+the host.
+
+**Important caveat:** The /nix overlay is wiped on every `just upgrade`.
+User-installed packages must be reinstalled after each upgrade. This is
+by design — the overlay becomes inconsistent when the base image changes,
+so a clean wipe is the only safe upgrade path.
+
+- **Read-only root** - same corruption resistance as immutable VMs
+- **Writable /nix** - install packages at runtime via overlay
+- **Two-disk layout** - same as immutable (boot disk + var disk, thin provisioned)
+- **Host-upgradeable** - `just upgrade` works (overlay is wiped on each upgrade)
+- **Survives reboots** - installed packages persist across reboots
+
+**When to use semi-mutable VMs:**
+- You want an immutable base but need to install a few extra packages at runtime
+- You want `nix profile install` without committing to a fully mutable system
+- You want the upgrade simplicity of immutable VMs
+
+Use `just mutable` to select semi-mutable mode for an existing machine config:
+
+```bash
+just mutable myvm      # Select "Semi-mutable" from the interactive prompt
+just recreate myvm     # Apply the change
+```
+
+Or set the `mutable` file manually before creating a new VM:
+
+```bash
+mkdir -p machines/myvm
+echo "semi" > machines/myvm/mutable
+just create myvm docker,dev
+```
+
+#### Upgrading Semi-Mutable VMs
+
+Semi-mutable VMs are upgraded the same way as immutable VMs:
+
+```bash
+just upgrade myvm
+```
+
+The upgrade rebuilds the base image, replaces the boot disk, and **wipes
+the /nix overlay**. Any packages installed via `nix profile install`
+will need to be reinstalled after upgrade.
+
+#### Semi-Mutable VM Internals
+
+| Feature | Immutable VM | Semi-Mutable VM | Mutable VM |
+|---------|--------------|-----------------|------------|
+| Root filesystem | Read-only | Read-only | Read-write |
+| /nix | Read-only | Writable (overlay) | Read-write |
+| Disk layout | Boot + var | Boot + var | Single disk |
+| Thin provisioning | Yes | Yes | No |
+| `nix profile install` | No | Yes | Yes |
+| Upgrade method | `just upgrade` | `just upgrade` (wipes overlay) | `nixos-rebuild` inside VM |
+| Nix GC | Disabled | Enabled (weekly) | Enabled (weekly) |
+
 ## Profiles
 
 Profiles are composable mixins that you combine as needed. The `core` profile
@@ -762,7 +825,7 @@ memory for more compressed swap capacity.
 Each VM has a machine config directory at `machines/<name>/` containing:
 
 - `profile` - Which profile to use
-- `mutable` - If contains "true", creates a mutable VM (single read-write disk)
+- `mutable` - VM mode: "true" for mutable (single read-write disk), "semi" for semi-mutable (read-only root + writable /nix overlay), absent for immutable
 - `hostname` - VM hostname
 - `machine-id` - Unique machine identifier
 - `uuid` - VM UUID (preserves DHCP lease across upgrades)
@@ -805,7 +868,7 @@ Lines starting with `#` are treated as comments.
 
 | VM Type | Rule Location | Applied By | Update Method |
 |---------|---------------|------------|---------------|
-| Immutable | `/var/identity/tcp_ports`, `/var/identity/udp_ports` | `firewall-identity.service` at boot | `just upgrade` syncs from machine config |
+| Immutable / Semi-mutable | `/var/identity/tcp_ports`, `/var/identity/udp_ports` | `firewall-identity.service` at boot | `just upgrade` syncs from machine config |
 | Mutable | `/etc/firewall-ports/tcp_ports`, `/etc/firewall-ports/udp_ports` | `firewall-ports.service` at boot | `just recreate` (or edit files in VM) |
 
 Both services use iptables to insert rules into the `nixos-fw` chain at boot.

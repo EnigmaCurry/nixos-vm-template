@@ -54,6 +54,20 @@ is_mutable() {
     fi
 }
 
+# Check if a machine is configured for semi-mutable mode
+# Returns 0 (true) if machines/{name}/mutable contains "semi"
+is_semi_mutable() {
+    local name="$1"
+    local mutable_file="$MACHINES_DIR/$name/mutable"
+    if [ -f "$mutable_file" ]; then
+        local content
+        content=$(cat "$mutable_file" 2>/dev/null | tr -d '[:space:]')
+        [ "$content" = "semi" ]
+    else
+        return 1
+    fi
+}
+
 # Get the VM's IP address for display (from static_ip config, or "<ip>" if DHCP)
 # Usage: vm_ip <name>
 vm_ip() {
@@ -117,22 +131,27 @@ is_pipewire() {
 }
 
 # Build a profile's base image (supports comma-separated profile combinations)
-# Usage: build_profile <profiles> [mutable]
+# Usage: build_profile <profiles> [mutable] [nix_overlay]
 # If mutable=true, builds a mutable (read-write) image
+# If nix_overlay=true, builds a semi-mutable (read-only root + writable /nix) image
 # Set FLAKE_UPDATE=true to update flake inputs before building (used by upgrade)
 build_profile() {
     local profiles="${1:-core}"
     local mutable="${2:-false}"
+    local nix_overlay="${3:-false}"
 
     # Normalize to canonical profile key
     local profile_key
     profile_key=$(normalize_profiles "$profiles")
 
-    # Add mutable suffix for mutable images
+    # Add suffix for mutable/semi-mutable images
     local output_key="$profile_key"
     if [ "$mutable" = "true" ]; then
         output_key="${profile_key}-mutable"
         echo "Building mutable profile: $profile_key"
+    elif [ "$nix_overlay" = "true" ]; then
+        output_key="${profile_key}-semi-mutable"
+        echo "Building semi-mutable profile: $profile_key"
     else
         echo "Building immutable profile: $profile_key"
     fi
@@ -156,7 +175,7 @@ build_profile() {
 
     $NIX build --impure --expr "
       let flake = builtins.getFlake \"$flake_dir\";
-      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; }
+      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; nixOverlay = $nix_overlay; }
     " --out-link "$OUTPUT_DIR/profiles/$output_key"
 
     # Clean up temp directory
@@ -543,25 +562,34 @@ set_mutable() {
         exit 1
     fi
 
-    local current_status="disabled"
+    local current_mode="immutable"
     if is_mutable "$name"; then
-        current_status="enabled"
+        current_mode="mutable"
+    elif is_semi_mutable "$name"; then
+        current_mode="semi-mutable"
     fi
 
-    echo "Configure mutable mode for VM '$name'"
+    echo "Configure VM mode for '$name'"
     echo ""
-    echo "Current status: $current_status"
+    echo "Current mode: $current_mode"
     echo ""
-    echo "Mutable VMs have a single read-write disk with full nix toolchain."
-    echo "They cannot be upgraded with 'just upgrade' - use nixos-rebuild inside the VM."
-    echo ""
-    read -p "Enable mutable mode? [y/N] " confirm
-    if [[ "$confirm" == [yY] || "$confirm" == [yY][eE][sS] ]]; then
+    local mutable_default_idx="0"
+    if [ "$current_mode" = "semi-mutable" ]; then
+        mutable_default_idx="1"
+    elif [ "$current_mode" = "mutable" ]; then
+        mutable_default_idx="2"
+    fi
+    local mutable_choice
+    mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Semi-mutable (read-only root + writable /nix overlay)" "Mutable (read-write pet VM, use nixos-rebuild)")
+    if [[ "$mutable_choice" == "Mutable"* ]]; then
         echo "true" > "$machine_dir/mutable"
         echo "Mutable mode enabled."
+    elif [[ "$mutable_choice" == "Semi-mutable"* ]]; then
+        echo "semi" > "$machine_dir/mutable"
+        echo "Semi-mutable mode enabled."
     else
         rm -f "$machine_dir/mutable"
-        echo "Mutable mode disabled."
+        echo "Immutable mode set."
     fi
     echo ""
     echo "Run 'just recreate $name' to apply the change."
@@ -705,16 +733,21 @@ config_vm_interactive() {
         current_mutable=$(cat "$machine_dir/mutable" 2>/dev/null | tr -d '[:space:]' || true)
     fi
 
-    # Mutable mode selection: options are "Immutable" "Mutable" (indices 0-1)
+    # Mutable mode selection: options are "Immutable" "Semi-mutable" "Mutable" (indices 0-2)
     echo ""
     local mutable_choice mutable_default_idx="0"
-    if [ "$current_mutable" = "true" ]; then
+    if [ "$current_mutable" = "semi" ]; then
         mutable_default_idx="1"
+    elif [ "$current_mutable" = "true" ]; then
+        mutable_default_idx="2"
     fi
-    mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Mutable (read-write pet VM, use nixos-rebuild)")
+    mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Semi-mutable (read-only root + writable /nix overlay)" "Mutable (read-write pet VM, use nixos-rebuild)")
     local is_mutable_vm=false
+    local is_semi_mutable_vm=false
     if [[ "$mutable_choice" == "Mutable"* ]]; then
         is_mutable_vm=true
+    elif [[ "$mutable_choice" == "Semi-mutable"* ]]; then
+        is_semi_mutable_vm=true
     fi
     echo "Mode: $mutable_choice"
 
@@ -1325,7 +1358,7 @@ config_vm_interactive() {
     if [ -n "$pve_vmid" ]; then
         echo "  VMID:    $pve_vmid"
     fi
-    echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || echo "immutable")"
+    echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || { [ "$is_semi_mutable_vm" = true ] && echo "semi-mutable" || echo "immutable"; })"
     echo "  Profile: $profile"
     echo "  Memory:  ${memory}M"
     echo "  vCPUs:   $vcpus"
@@ -1377,6 +1410,9 @@ config_vm_interactive() {
     if [ "$is_mutable_vm" = true ]; then
         echo "true" > "$machine_dir/mutable"
         echo "Created: $machine_dir/mutable (true)"
+    elif [ "$is_semi_mutable_vm" = true ]; then
+        echo "semi" > "$machine_dir/mutable"
+        echo "Created: $machine_dir/mutable (semi)"
     else
         rm -f "$machine_dir/mutable"
         echo "Removed: $machine_dir/mutable (immutable mode)"
@@ -1405,6 +1441,8 @@ config_vm_interactive() {
     local mode_str="immutable"
     if [ "$is_mutable_vm" = true ]; then
         mode_str="mutable"
+    elif [ "$is_semi_mutable_vm" = true ]; then
+        mode_str="semi-mutable"
     fi
     echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), mode: $mode_str, memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
     if [ "$from_create" != "true" ]; then
@@ -1426,6 +1464,8 @@ list_machines() {
             local mode="immutable"
             if is_mutable "$name"; then
                 mode="mutable"
+            elif is_semi_mutable "$name"; then
+                mode="semi-mutable"
             fi
             echo "  $name (profile: $profile, $mode)"
             found=1

@@ -103,11 +103,19 @@ backend_create_disks() {
         return
     fi
 
-    echo "Creating VM disks: $name (profile: $profile, immutable)"
+    # Immutable or semi-mutable - two disk layout
+    local profile_suffix=""
+    local mode_label="immutable"
+    if is_semi_mutable "$name"; then
+        profile_suffix="-semi-mutable"
+        mode_label="semi-mutable"
+    fi
+
+    echo "Creating VM disks: $name (profile: $profile, $mode_label)"
     mkdir -p "$OUTPUT_DIR/vms/$name"
 
     local profile_image
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile")/nixos.qcow2
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}${profile_suffix}")/nixos.qcow2
 
     if [ ! -f "$profile_image" ]; then
         echo "Error: Profile image not found: $profile_image"
@@ -759,9 +767,11 @@ create_vm() {
 
     # Build appropriate image variant
     if is_mutable "$name"; then
-        build_profile "$profile" "true"
+        build_profile "$profile" "true" "false"
+    elif is_semi_mutable "$name"; then
+        build_profile "$profile" "false" "true"
     else
-        build_profile "$profile" "false"
+        build_profile "$profile" "false" "false"
     fi
 
     backend_create_disks "$name" "$var_size"
@@ -780,6 +790,15 @@ create_vm() {
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
+    elif is_semi_mutable "$name"; then
+        echo "VM '$name' created and started (profile: $profile, semi-mutable)."
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
+        echo ""
+        echo "NOTE: Root is read-only. /nix is writable via overlay."
+        echo "Install packages: nix profile install nixpkgs#<package>"
+        echo "Overlay is wiped on upgrade (packages must be reinstalled)."
     else
         echo "VM '$name' created and started (profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
@@ -811,9 +830,11 @@ create_vm_batch() {
 
     # Build appropriate image variant
     if is_mutable "$name"; then
-        build_profile "$profile" "true"
+        build_profile "$profile" "true" "false"
+    elif is_semi_mutable "$name"; then
+        build_profile "$profile" "false" "true"
     else
-        build_profile "$profile" "false"
+        build_profile "$profile" "false" "false"
     fi
 
     backend_create_disks "$name" "$var_size"
@@ -832,6 +853,15 @@ create_vm_batch() {
         echo ""
         echo "NOTE: This is a mutable VM with full nix toolchain."
         echo "To rebuild/upgrade from inside the VM: sudo nixos-rebuild switch"
+    elif is_semi_mutable "$name"; then
+        echo "VM '$name' created and started (profile: $profile, semi-mutable)."
+        echo "Machine config: $MACHINES_DIR/$name/"
+        echo "SSH as admin (sudo): ssh admin@$detected_ip"
+        echo "SSH as user (no sudo): ssh user@$detected_ip"
+        echo ""
+        echo "NOTE: Root is read-only. /nix is writable via overlay."
+        echo "Install packages: nix profile install nixpkgs#<package>"
+        echo "Overlay is wiped on upgrade (packages must be reinstalled)."
     else
         echo "VM '$name' created and started (profile: $profile)."
         echo "Machine config: $MACHINES_DIR/$name/"
@@ -1076,9 +1106,11 @@ recreate_vm() {
 
     # Build appropriate image variant
     if is_mutable "$name"; then
-        build_profile "$profile" "true"
+        build_profile "$profile" "true" "false"
+    elif is_semi_mutable "$name"; then
+        build_profile "$profile" "false" "true"
     else
-        build_profile "$profile" "false"
+        build_profile "$profile" "false" "false"
     fi
 
     rm -rf "$OUTPUT_DIR/vms/$name"
@@ -1146,13 +1178,27 @@ upgrade_vm() {
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" 2>/dev/null || true
 
-    FLAKE_UPDATE=true build_profile "$profile"
+    # Build appropriate image variant
+    if is_semi_mutable "$name"; then
+        FLAKE_UPDATE=true build_profile "$profile" "false" "true"
+    else
+        FLAKE_UPDATE=true build_profile "$profile"
+    fi
     backend_sync_identity "$name"
 
+    # Wipe /nix overlay for semi-mutable VMs (clean slate with new base image)
+    if is_semi_mutable "$name"; then
+        echo "Wiping /nix overlay (user-installed packages will need reinstalling)..."
+        eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 run : mount /dev/sda1 / : rm-rf /nix-overlay/upper : rm-rf /nix-overlay/work : mkdir-p /nix-overlay/upper : mkdir-p /nix-overlay/work"
+    fi
+
     # Replace only the boot disk (keep /var disk intact)
-    local profile_key profile_image
+    local profile_key profile_image profile_suffix=""
     profile_key=$(normalize_profiles "$profile")
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/$profile_key")/nixos.qcow2
+    if is_semi_mutable "$name"; then
+        profile_suffix="-semi-mutable"
+    fi
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile_key}${profile_suffix}")/nixos.qcow2
     rm -f "$OUTPUT_DIR/vms/$name/boot.qcow2"
     rm -f "$OUTPUT_DIR/vms/$name/OVMF_VARS.qcow2"
     $QEMU_IMG create -f qcow2 \
@@ -1168,6 +1214,9 @@ upgrade_vm() {
     detected_ip=$(wait_for_vm_ip "$name")
     echo ""
     echo "VM '$name' upgraded and started. /var data preserved."
+    if is_semi_mutable "$name"; then
+        echo "NOTE: /nix overlay was wiped. Reinstall any user-added packages."
+    fi
     echo "SSH as admin (sudo): ssh admin@$detected_ip"
     echo "SSH as user (no sudo): ssh user@$detected_ip"
 }
