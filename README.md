@@ -760,6 +760,14 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
 | **open-code** | Open Code CLI (open-source AI coding assistant) |
 
+> **Tip for agentic use:** Consider enabling
+> [semi-mutable mode](#semi-mutable-vms) for `claude` or `open-code` VMs
+> (`echo "semi" > machines/<name>/mutable`). This gives a writable `/nix`
+> overlay so that software can be installed on the fly with
+> `nix profile install`, and nix-based projects can build and evaluate
+> flakes — all while keeping the root filesystem immutable and
+> host-upgradeable.
+
 ### Common Combinations
 
 | Use Case | Profiles |
