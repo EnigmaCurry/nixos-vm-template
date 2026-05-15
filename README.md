@@ -699,7 +699,7 @@ Use `just mutable` to select semi-mutable mode for an existing machine config:
 
 ```bash
 just mutable myvm      # Select "Semi-mutable" from the interactive prompt
-just recreate myvm     # Apply the change
+just upgrade myvm      # Apply the change (preserves /var data)
 ```
 
 Or set the `mutable` file manually before creating a new VM:
