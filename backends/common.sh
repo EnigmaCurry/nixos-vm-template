@@ -569,6 +569,21 @@ set_mutable() {
         current_mode="semi-mutable"
     fi
 
+    # Determine how to run script-wizard
+    local SCRIPT_WIZARD=""
+    if command -v script-wizard &>/dev/null; then
+        SCRIPT_WIZARD="script-wizard"
+    elif command -v nix &>/dev/null && nix --version 2>&1 | grep -q "nix"; then
+        if nix flake --help &>/dev/null; then
+            SCRIPT_WIZARD="nix run github:enigmacurry/script-wizard --"
+        fi
+    fi
+    if [ -z "$SCRIPT_WIZARD" ]; then
+        echo "Error: script-wizard is not installed."
+        echo "Install it from: https://github.com/enigmacurry/script-wizard"
+        exit 1
+    fi
+
     echo "Configure VM mode for '$name'"
     echo ""
     echo "Current mode: $current_mode"
