@@ -38,6 +38,10 @@
       '';
     };
 
+    # Tell systemd-hostnamed to read hostname from /var/identity instead of /etc/static
+    systemd.services.systemd-hostnamed.environment.SYSTEMD_ETC_HOSTNAME =
+      lib.mkForce "/var/identity/hostname";
+
     # Ensure identity directory exists on /var
     systemd.tmpfiles.rules = [
       "d /var/identity 0755 root root -"
