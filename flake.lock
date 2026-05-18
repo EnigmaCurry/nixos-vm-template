@@ -127,6 +127,27 @@
         "type": "github"
       }
     },
+    "nifty-filter": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1779071644,
+        "narHash": "sha256-wmJcL5dogd/wDNk6OLyvHCu+1Te/kvoOdDXwEu8S/4A=",
+        "owner": "EnigmaCurry",
+        "repo": "nifty-filter",
+        "rev": "d0248fe64d6c430cd0352b840b296b15945f5d8c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "EnigmaCurry",
+        "ref": "dev",
+        "repo": "nifty-filter",
+        "type": "github"
+      }
+    },
     "nix-flatpak": {
       "locked": {
         "lastModified": 1777402031,
@@ -245,6 +266,7 @@
     "root": {
       "inputs": {
         "home-manager": "home-manager",
+        "nifty-filter": "nifty-filter",
         "nix-flatpak": "nix-flatpak",
         "nixpkgs": "nixpkgs",
         "opencode": "opencode",
