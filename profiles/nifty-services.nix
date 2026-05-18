@@ -15,5 +15,6 @@
 
     services.nifty-services.enable = true;
     services.nifty-services.chrony.enable = true;
+    services.nifty-services.technitium.enable = true;
   };
 }
