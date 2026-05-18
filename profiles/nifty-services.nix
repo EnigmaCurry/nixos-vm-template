@@ -19,6 +19,7 @@
     services.nifty-services.traefik.enable = true;
     services.nifty-services.traefik.dashboard.enable = true;
     services.nifty-services.traefik.cert.san = [ "DNS:infra.lan" "IP:10.99.2.10" ];
+    # VLAN subnets must match your nifty-filter HCL config
     services.nifty-services.traefik.vlans = {
       trusted = "10.99.10.0/24";
       iot     = "10.99.20.0/24";
