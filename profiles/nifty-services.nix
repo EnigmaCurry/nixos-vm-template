@@ -11,6 +11,8 @@
   imports = [ nifty-filter.nixosModules.services ];
 
   config = {
+    boot.kernelParams = [ "console=ttyS0,115200" "console=tty0" ];
+
     services.nifty-services.enable = true;
     services.nifty-services.chrony.enable = true;
 
