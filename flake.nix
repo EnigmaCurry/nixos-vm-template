@@ -17,9 +17,13 @@
       url = "github:AnomalyCo/opencode/v1.4.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nifty-filter = {
+      url = "github:EnigmaCurry/nifty-filter";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, ... }@inputs:
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, nifty-filter, ... }@inputs:
     let
       lib = nixpkgs.lib;
 
@@ -32,7 +36,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "nifty-services" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
@@ -57,7 +61,7 @@
 
           nixosConfig = nixpkgs.lib.nixosSystem {
             specialArgs = {
-              inherit sway-home nix-flatpak opencode;
+              inherit sway-home nix-flatpak opencode nifty-filter;
               swayHomeInputs = sway-home.inputs;
             };
             modules = coreModules ++ [
@@ -87,7 +91,7 @@
       mkNixosConfig = system: profile: { mutable ? false, nixOverlay ? false }:
         nixpkgs.lib.nixosSystem {
           specialArgs = {
-            inherit sway-home nix-flatpak opencode;
+            inherit sway-home nix-flatpak opencode nifty-filter;
             swayHomeInputs = sway-home.inputs;
           };
           modules = coreModules ++ [
