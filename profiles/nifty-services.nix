@@ -15,14 +15,5 @@
 
     services.nifty-services.enable = true;
     services.nifty-services.chrony.enable = true;
-
-    # PVE: /var disk is a raw LVM thin volume (no partition table).
-    # Override the default /dev/vdb1 mount to use /dev/vdb directly.
-    fileSystems."/var" = lib.mkForce {
-      device = "/dev/vdb";
-      fsType = "ext4";
-      options = [ "rw" "noatime" ];
-      neededForBoot = true;
-    };
   };
 }
