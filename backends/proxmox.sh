@@ -15,6 +15,7 @@ PVE_NODE="${PVE_NODE:-$PVE_HOST}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr0}"
 PVE_DISK_FORMAT="${PVE_DISK_FORMAT:-qcow2}"
+PVE_FIREWALL="${PVE_FIREWALL:-1}"
 PVE_BACKUP_STORAGE="${PVE_BACKUP_STORAGE:-local}"
 PVE_STAGING_DIR="${PVE_STAGING_DIR:-/tmp/nixos-vm-staging}"
 
@@ -450,7 +451,7 @@ backend_create_disks() {
         --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0,format=${PVE_DISK_FORMAT} \
         --serial0 socket \
         --vga serial0 \
-        --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+        --net0 virtio=$mac_address,bridge=$bridge,firewall=$PVE_FIREWALL"
 
     # Flatten boot disk (remove backing file reference)
     echo "Flattening boot disk for transfer..."
@@ -717,7 +718,7 @@ EOF
         --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0,format=${PVE_DISK_FORMAT} \
         --serial0 socket \
         --vga serial0 \
-        --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+        --net0 virtio=$mac_address,bridge=$bridge,firewall=$PVE_FIREWALL"
 
     # Create staging directory on PVE node
     pve_ssh "mkdir -p $PVE_STAGING_DIR/$name"
@@ -1408,7 +1409,7 @@ clone_vm() {
         bridge="$PVE_BRIDGE"
     fi
     mac_address=$(cat "$dest_machine_dir/mac-address")
-    pve_ssh "qm set $dest_vmid --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+    pve_ssh "qm set $dest_vmid --net0 virtio=$mac_address,bridge=$bridge,firewall=$PVE_FIREWALL"
 
     # Update memory/vcpus
     pve_ssh "qm set $dest_vmid --memory $memory --cores $vcpus"
