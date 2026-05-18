@@ -25,6 +25,6 @@
     };
 
     # Disable NixOS firewall — the router's nftables handles isolation
-    networking.firewall.enable = false;
+    networking.firewall.enable = lib.mkForce false;
   };
 }
