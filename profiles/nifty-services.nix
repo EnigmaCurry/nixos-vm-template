@@ -13,6 +13,12 @@
   config = {
     boot.kernelParams = [ "console=ttyS0,115200" "console=tty0" ];
 
+    environment.systemPackages = with pkgs; [
+      tcpdump
+      nftables
+      dig
+    ];
+
     services.nifty-services.enable = true;
     services.nifty-services.chrony.enable = true;
     services.nifty-services.technitium.enable = true;
