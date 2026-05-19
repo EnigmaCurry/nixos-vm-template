@@ -26,6 +26,9 @@
     services.nifty-services.chrony.enable = true;
     services.nifty-services.technitium.enable = true;
     services.nifty-services.traefik.enable = true;
+    services.nifty-services.service-monitor.enable = true;
+    services.nifty-services.service-monitor.routerUrl = "https://10.99.2.1:3000";
+    services.nifty-services.service-monitor.package = nifty-filter.packages.${pkgs.stdenv.hostPlatform.system}.nifty-service-monitor;
     services.nifty-services.traefik.dashboard.enable = true;
     services.nifty-services.traefik.cert.san = [ "DNS:infra.lan" "IP:10.99.2.10" ];
     # VLAN subnets must match your nifty-filter HCL config
