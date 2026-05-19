@@ -19,6 +19,9 @@
       dig
     ];
 
+    # Technitium manages DNS — disable the default systemd-resolved setup
+    vm.dnsIdentity = false;
+
     services.nifty-services.enable = true;
     services.nifty-services.chrony.enable = true;
     services.nifty-services.technitium.enable = true;
