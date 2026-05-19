@@ -31,6 +31,8 @@
     services.nifty-services.service-monitor.package = nifty-filter.packages.${pkgs.stdenv.hostPlatform.system}.nifty-service-monitor;
     services.nifty-services.traefik.dashboard.enable = true;
     services.nifty-services.traefik.cert.san = [ "DNS:infra.lan" "IP:10.99.2.10" ];
+    # Restrict Technitium web UI to infra + trusted VLANs
+    services.nifty-services.traefik.routers.technitium.allowVlans = [ "infra" "trusted" ];
     # VLAN subnets must match your nifty-filter HCL config
     services.nifty-services.traefik.vlans = {
       infra   = "10.99.2.0/24";
@@ -38,11 +40,6 @@
       iot     = "10.99.20.0/24";
       guest   = "10.99.30.0/24";
       lab     = "10.99.40.0/24";
-    };
-    services.nifty-services.traefik.routers.technitium = {
-      rule = "PathPrefix(`/`)";
-      backend = "http://127.0.0.1:5380";
-      allowVlans = [ "infra" "trusted" ];
     };
 
     # Disable NixOS firewall — the router's nftables handles isolation
