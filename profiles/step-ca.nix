@@ -15,7 +15,7 @@
     boot.kernelParams = [ "console=ttyS0,115200" "console=tty0" ];
 
     services.nifty-step-ca.enable = true;
-    services.nifty-step-ca.dnsNames = [ "localhost" "10.99.2.3" ];
+    services.nifty-step-ca.dnsNames = [ "localhost" "127.0.0.1" "10.99.2.3" ];
 
     # Disable NixOS firewall — the router's nftables handles isolation.
     # Step-CA port (9443) is opened by the module when the host firewall is active.
