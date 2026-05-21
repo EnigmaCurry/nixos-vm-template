@@ -36,7 +36,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "nifty-services" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "nifty-services" "step-ca" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
