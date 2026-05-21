@@ -26,6 +26,7 @@
     services.nifty-services.chrony.enable = true;
     services.nifty-services.technitium.enable = true;
     services.nifty-services.traefik.enable = true;
+    services.nifty-services.ddns.enable = true;
     services.nifty-services.service-monitor.enable = true;
     services.nifty-services.service-monitor.routerUrl = "https://10.99.2.1";
     services.nifty-services.service-monitor.package = nifty-filter.packages.${pkgs.stdenv.hostPlatform.system}.nifty-service-monitor;
