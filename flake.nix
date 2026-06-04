@@ -18,7 +18,7 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nifty-filter = {
-      url = "github:EnigmaCurry/nifty-filter/dev";
+      url = "github:EnigmaCurry/nifty-filter/step-ca";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
