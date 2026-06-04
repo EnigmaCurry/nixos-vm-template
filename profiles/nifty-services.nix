@@ -23,6 +23,7 @@
     vm.dnsIdentity = false;
 
     services.nifty-services.enable = true;
+    services.nifty-services.routerIp = "10.99.2.1";
     services.nifty-services.chrony.enable = true;
     services.nifty-services.technitium.enable = true;
     services.nifty-services.traefik.enable = true;
