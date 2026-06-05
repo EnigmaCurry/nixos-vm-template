@@ -26,7 +26,6 @@ in
     services.nifty-step-ca.enable = true;
     services.nifty-step-ca.dnsNames = [ "localhost" "127.0.0.1" stepCaIp ];
     services.nifty-step-ca.domain = domain;
-    services.nifty-step-ca.routerIp = routerIp;
 
     # Disable NixOS firewall — the router's nftables handles isolation.
     # Step-CA port (9443) is opened by the module when the host firewall is active.

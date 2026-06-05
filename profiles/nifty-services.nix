@@ -33,7 +33,6 @@ in
 
     services.nifty-services.enable = true;
     services.nifty-services.domain = domain;
-    services.nifty-services.routerIp = routerIp;
     services.nifty-services.chrony.enable = true;
     services.nifty-services.technitium.enable = true;
     services.nifty-services.traefik.enable = true;
