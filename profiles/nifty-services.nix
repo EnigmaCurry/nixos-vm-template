@@ -14,6 +14,7 @@ let
   #   NIFTY_DOMAIN          — base domain (default: nifty.internal)
   routerIp   = let v = builtins.getEnv "NIFTY_ROUTER_IP"; in if v != "" then v else "10.99.2.1";
   servicesIp = let v = builtins.getEnv "NIFTY_SERVICES_IP"; in if v != "" then v else "10.99.2.2";
+  stepCaIp   = let v = builtins.getEnv "NIFTY_STEP_CA_IP"; in if v != "" then v else "10.99.2.3";
   domain     = let v = builtins.getEnv "NIFTY_DOMAIN"; in if v != "" then v else "nifty.internal";
 in
 {
@@ -43,7 +44,8 @@ in
     services.nifty-services.service-monitor.clientKeyPath = "/var/lib/service-monitor-certs/key.pem";
     services.nifty-services.service-monitor.package = nifty-filter.packages.${pkgs.stdenv.hostPlatform.system}.nifty-service-monitor;
     services.nifty-services.traefik.dashboard.enable = true;
-    services.nifty-services.traefik.cert.san = [ "DNS:${domain}" "IP:${servicesIp}" ];
+    services.nifty-services.traefik.tls.acmeUrl = "https://${stepCaIp}:9443/acme/acme/directory";
+    services.nifty-services.traefik.tls.caCertPath = "/var/identity/ca-cert.pem";
     # Service routing and access control is managed dynamically by the
     # service-monitor from the HCL config's services.traefik block.
 
