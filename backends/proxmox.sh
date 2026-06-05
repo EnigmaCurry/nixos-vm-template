@@ -407,6 +407,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/static_ip"
     fi
 
+    # Copy CA certificate if present (for trusting private CAs)
+    if [ -s "$machine_dir/ca-cert.pem" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/ca-cert.pem /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/ca-cert.pem"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/ca-cert.pem"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -857,7 +864,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs ca-cert.pem; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
