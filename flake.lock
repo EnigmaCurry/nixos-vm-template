@@ -92,11 +92,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780593650,
-        "narHash": "sha256-CHo7k65YTL3HY+WQVedDTupji+LMgNlKCdrtRHZFAK4=",
+        "lastModified": 1780679734,
+        "narHash": "sha256-KmRNvpNOb7QEORa06bVgjW9kITcx0VhsI7w0vhmZyD8=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "447fd9ff62501dae7206dfe180ee89f8de27b7d5",
+        "rev": "b2b7db486e06e098711dc291bb25db82850e1d16",
         "type": "github"
       },
       "original": {
@@ -134,27 +134,27 @@
         ]
       },
       "locked": {
-        "lastModified": 1780639063,
-        "narHash": "sha256-S+FwjoP83589BROx7MvtDNqwl79L6/NW/JQqGFS8/p8=",
+        "lastModified": 1780679900,
+        "narHash": "sha256-HX5IlrP5ldz8rWXJxx1dSe32bjtdBb4zrD3firXqMsA=",
         "owner": "EnigmaCurry",
         "repo": "nifty-filter",
-        "rev": "c408b1640c75ed0e471630da470c2db55c532abf",
+        "rev": "b281d6ce44e97d524ff17212d0f1685a56a4feed",
         "type": "github"
       },
       "original": {
         "owner": "EnigmaCurry",
-        "ref": "step-ca",
+        "ref": "dev",
         "repo": "nifty-filter",
         "type": "github"
       }
     },
     "nix-flatpak": {
       "locked": {
-        "lastModified": 1779998907,
-        "narHash": "sha256-8CSkdFNkAF49pmhFneEFNAO4UX9/0FnoMwXMY3yyvi0=",
+        "lastModified": 1780670980,
+        "narHash": "sha256-wB9Bq2phLI85eYUVinIqY+cAcok/1b3xYY2L0dy7n1I=",
         "owner": "gmodena",
         "repo": "nix-flatpak",
-        "rev": "744221c2aef17f1f2a13278abfeabd9bd5e40180",
+        "rev": "770055e3a6a484f88e36302da5b2a910f6a4528b",
         "type": "github"
       },
       "original": {
