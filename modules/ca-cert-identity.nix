@@ -24,15 +24,20 @@ in
 
       script = ''
         if [ -f "${caCertPath}" ] && [ -s "${caCertPath}" ]; then
-          mkdir -p /etc/ssl/certs
-          # Append the CA cert to the system bundle
-          if ! grep -qf "${caCertPath}" /etc/ssl/certs/ca-certificates.crt 2>/dev/null; then
-            cat "${caCertPath}" >> /etc/ssl/certs/ca-certificates.crt
-            cat "${caCertPath}" >> /etc/ssl/certs/ca-bundle.crt
-            echo "ca-cert-identity: added CA cert to system trust store"
-          else
-            echo "ca-cert-identity: CA cert already in trust store"
-          fi
+          # NixOS /etc/ssl/certs files are symlinks to the read-only nix store.
+          # Replace symlinks with writable copies, then append the CA cert.
+          for f in /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt; do
+            if [ -L "$f" ]; then
+              target="$(readlink -f "$f")"
+              rm "$f"
+              cp "$target" "$f"
+              chmod 0644 "$f"
+            fi
+            if ! grep -q "$(head -2 "${caCertPath}" | tail -1)" "$f" 2>/dev/null; then
+              cat "${caCertPath}" >> "$f"
+            fi
+          done
+          echo "ca-cert-identity: added CA cert to system trust store"
         else
           echo "ca-cert-identity: no CA cert at ${caCertPath}, skipping"
         fi
