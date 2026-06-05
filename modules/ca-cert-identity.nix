@@ -24,20 +24,17 @@ in
 
       script = ''
         if [ -f "${caCertPath}" ] && [ -s "${caCertPath}" ]; then
-          # NixOS /etc/ssl/certs files are symlinks to the read-only nix store.
-          # Replace symlinks with writable copies, then append the CA cert.
+          # /etc/ssl/certs is read-only (nix store). Build a merged bundle
+          # in /run and bind-mount over the originals.
           for f in /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt; do
-            if [ -L "$f" ]; then
-              target="$(readlink -f "$f")"
-              rm "$f"
-              cp "$target" "$f"
-              chmod 0644 "$f"
-            fi
-            if ! grep -q "$(head -2 "${caCertPath}" | tail -1)" "$f" 2>/dev/null; then
-              cat "${caCertPath}" >> "$f"
-            fi
+            target="$(readlink -f "$f")"
+            runfile="/run/ssl-$(basename "$f")"
+            cp "$target" "$runfile"
+            cat "${caCertPath}" >> "$runfile"
+            chmod 0644 "$runfile"
+            ${pkgs.util-linux}/bin/mount --bind "$runfile" "$f"
           done
-          echo "ca-cert-identity: added CA cert to system trust store"
+          echo "ca-cert-identity: added CA cert to system trust store (bind-mounted)"
         else
           echo "ca-cert-identity: no CA cert at ${caCertPath}, skipping"
         fi
