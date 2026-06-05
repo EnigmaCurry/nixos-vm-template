@@ -38,7 +38,7 @@ in
     services.nifty-services.traefik.enable = true;
     services.nifty-services.ddns.enable = true;
     services.nifty-services.service-monitor.enable = true;
-    services.nifty-services.service-monitor.routerUrl = "https://${routerIp}";
+    services.nifty-services.service-monitor.routerUrl = "https://router.${domain}";
     services.nifty-services.service-monitor.package = nifty-filter.packages.${pkgs.stdenv.hostPlatform.system}.nifty-service-monitor;
     services.nifty-services.traefik.dashboard.enable = true;
     services.nifty-services.traefik.cert.san = [ "DNS:${domain}" "IP:${servicesIp}" ];
