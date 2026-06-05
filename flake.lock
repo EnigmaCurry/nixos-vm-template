@@ -134,11 +134,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1780620418,
-        "narHash": "sha256-oEdOGaIKlDOropGHleA01E6AWdVnNVwnEEwbfDH3aLs=",
+        "lastModified": 1780633065,
+        "narHash": "sha256-IPqtVlReoVVOsuhFcnx/2jmw1UbYxUKRj0y69WbQBgg=",
         "owner": "EnigmaCurry",
         "repo": "nifty-filter",
-        "rev": "d285eeba2771d3445cbc4720798bc68cde6ca56a",
+        "rev": "375ff7ec10b632d8832aeb10bed4e5d3fb48f40b",
         "type": "github"
       },
       "original": {
