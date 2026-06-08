@@ -184,6 +184,7 @@ build_profile() {
     fi
 
     echo "Built: $OUTPUT_DIR/profiles/$output_key"
+    ls -l "$OUTPUT_DIR/profiles/$output_key"
 }
 
 # Build all base profiles
