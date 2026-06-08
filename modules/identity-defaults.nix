@@ -23,7 +23,13 @@ in
     systemd.services.identity-defaults = {
       description = "Create default identity files if missing";
       wantedBy = [ "local-fs.target" ];
-      before = [ "local-fs.target" ];
+      before = [
+        "local-fs.target"
+        # Must run before bind mounts that depend on these files
+        "etc-machine\\x2did.mount"
+        "etc-ssh-authorized_keys.d-${adminUser}.mount"
+        "etc-ssh-authorized_keys.d-${regularUser}.mount"
+      ];
       after = [ "var.mount" ];
       requires = [ "var.mount" ];
       unitConfig.DefaultDependencies = false;

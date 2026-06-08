@@ -14,24 +14,17 @@
   config = lib.mkIf (!config.vm.mutable && config.vm.nixOverlay) {
     # Overlay /nix: lower is the read-only /nix from the base image,
     # upper and work directories live on the writable /var disk.
+    # Uses the NixOS overlay options so the built-in preMountService
+    # automatically creates upperdir/workdir before mounting.
     fileSystems."/nix" = {
-      device = "overlay";
-      fsType = "overlay";
-      options = [
-        "lowerdir=/nix"
-        "upperdir=/var/nix-overlay/upper"
-        "workdir=/var/nix-overlay/work"
-      ];
+      overlay = {
+        lowerdir = [ "/nix" ];
+        upperdir = "/var/nix-overlay/upper";
+        workdir = "/var/nix-overlay/work";
+      };
       depends = [ "/var" ];
       neededForBoot = true;
     };
-
-    # Ensure overlay directories exist on /var
-    systemd.tmpfiles.rules = [
-      "d /var/nix-overlay 0755 root root -"
-      "d /var/nix-overlay/upper 0755 root root -"
-      "d /var/nix-overlay/work 0755 root root -"
-    ];
 
     # Enable nix garbage collection (writable /nix supports GC)
     nix.gc.automatic = lib.mkForce true;
