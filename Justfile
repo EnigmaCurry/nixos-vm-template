@@ -20,6 +20,10 @@ build profiles="core":
 build-all:
     @source {{backend_script}} && build_all
 
+# Export a profile image with release metadata filename
+export profiles="core":
+    @source {{backend_script}} && export_profile "{{profiles}}"
+
 # List available profiles
 list-profiles:
     @source {{backend_script}} && list_profiles
