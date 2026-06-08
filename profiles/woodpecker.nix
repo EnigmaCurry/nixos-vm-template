@@ -18,6 +18,8 @@
       environment = {
         WOODPECKER_BACKEND = "local";
         WOODPECKER_HEALTHCHECK = "true";
+        WOODPECKER_GRPC_SECURE = "true";
+        WOODPECKER_AGENT_CONFIG_FILE = "/var/lib/woodpecker/agent.conf";
       };
       environmentFile = [ "/var/identity/woodpecker.env" ];
       path = [
