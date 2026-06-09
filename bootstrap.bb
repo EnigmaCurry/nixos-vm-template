@@ -3,7 +3,7 @@
 ;; Create NixOS VMs from pre-built images — no local image build required.
 ;;
 ;; One-liner:
-;;   bb -e '(load-string (slurp "https://raw.githubusercontent.com/EnigmaCurry/nixos-vm-template/dev/bootstrap.bb"))'
+;;   bb -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/dev/bootstrap.bb"))'
 ;;
 ;; Or from a cloned repo:
 ;;   bb bootstrap.bb
