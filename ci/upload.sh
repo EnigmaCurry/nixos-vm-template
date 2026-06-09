@@ -22,7 +22,7 @@ for f in output/export/nixos-*.qcow2; do
     slug="${slug%-*}"    # strip -SHA
     slug="${slug%-*}"    # strip -YYYYMMDD
     slug="${slug#nixos-}" # strip nixos- prefix
-    profile_key=$(echo "$slug" | tr '-' ',')
+    profile_key=$(echo "$slug" | sed 's/--/,/g')
     date_stamp=$(echo "$filename" | grep -o '[0-9]\{8\}')
     git_sha=$(echo "$filename" | sed 's/.*-\([a-f0-9]*\)\.qcow2$/\1/')
     sha256=$(sha256sum "$f" | cut -d' ' -f1)

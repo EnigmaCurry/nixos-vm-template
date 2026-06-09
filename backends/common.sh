@@ -221,7 +221,7 @@ build_all() {
 }
 
 # Export a profile image with release metadata in the filename
-# Output: output/export/nixos-{profiles}-{date}-{gitsha}.qcow2
+# Output: output/export/nixos-{profiles joined by --}-{date}-{gitsha}.qcow2
 export_profile() {
     local profiles="${1:-core}"
 
@@ -243,9 +243,9 @@ export_profile() {
     local git_sha
     git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-    # Replace commas with dashes for the filename
+    # Replace commas with double-dashes for the filename (preserves dashes within profile names)
     local profile_slug
-    profile_slug=$(echo "$profile_key" | tr ',' '-')
+    profile_slug=$(echo "$profile_key" | sed 's/,/--/g')
 
     mkdir -p "$OUTPUT_DIR/export"
     local export_name="nixos-${profile_slug}-${date_stamp}-${git_sha}.qcow2"
