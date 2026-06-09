@@ -1,9 +1,13 @@
 #!/usr/bin/env bb
 ;; nixos-vm-template bootstrap
-;; Create NixOS VMs from pre-built images — no Nix required.
+;; Create NixOS VMs from pre-built images — no local image build required.
 ;;
-;; Dependencies: babashka, just, qemu-img, guestfish, virsh (or Proxmox tools)
-;; Usage: bb bootstrap.bb
+;; One-liner:
+;;   bb -e '(load-string (slurp "https://raw.githubusercontent.com/EnigmaCurry/nixos-vm-template/dev/bootstrap.bb"))'
+;;
+;; Or from a cloned repo:
+;;   bb bootstrap.bb
+;;   just bootstrap
 
 (require '[babashka.pods :as pods])
 (pods/load-pod 'enigmacurry/script-wizard "0.3.0")
@@ -21,36 +25,64 @@
   (or (System/getenv "NIXOS_MANIFEST_URL")
       "https://nixos-vm-template.nyc3.digitaloceanspaces.com/manifest.json"))
 
-(def script-dir
-  (let [f (io/file *file*)]
-    (if (.isAbsolute f)
-      (.getParent f)
-      (.getCanonicalPath (.getParentFile f)))))
+(def repo-url "https://github.com/EnigmaCurry/nixos-vm-template.git")
+(def repo-branch "dev")
+(def default-repo-dir (str (System/getenv "HOME") "/.local/share/nixos-vm-template"))
+
+;; ─── Repo detection ────────────────────────────────────────────────────────
+
+(defn in-repo?
+  "Check if a directory looks like the nixos-vm-template repo."
+  [dir]
+  (and dir
+       (.exists (io/file dir "Justfile"))
+       (.exists (io/file dir "backends" "common.sh"))))
+
+(defn ensure-repo!
+  "Return path to a usable repo checkout. Clones or updates as needed."
+  []
+  (let [;; Try *file* parent (running from cloned repo)
+        file-dir (try
+                   (let [f (io/file *file*)]
+                     (if (.isAbsolute f)
+                       (.getParent f)
+                       (.getCanonicalPath (.getParentFile f))))
+                   (catch Exception _ nil))]
+    (if (in-repo? file-dir)
+      file-dir
+      ;; Running via URL or from outside repo — use default location
+      (let [dir default-repo-dir]
+        (if (in-repo? dir)
+          (do
+            (println (format "Updating repo in %s ..." dir))
+            (proc/shell {:dir dir :out :string :err :string} "git" "pull" "--ff-only")
+            dir)
+          (do
+            (println (format "Cloning repo to %s ..." dir))
+            (proc/shell {:out :string :err :string}
+                        "git" "clone" "--branch" repo-branch repo-url dir)
+            dir))))))
 
 ;; ─── Utilities ──────────────────────────────────────────────────────────────
 
+(def repo-dir (atom nil))
+
 (defn sh
-  "Run a shell command. Throws on non-zero exit."
+  "Run a shell command in repo dir. Throws on non-zero exit."
   [& args]
   (let [cmd (str/join " " args)]
-    (proc/shell {:out :string :err :string :dir script-dir} "bash" "-c" cmd)))
+    (proc/shell {:out :string :err :string :dir @repo-dir} "bash" "-c" cmd)))
 
 (defn sh-ok
   "Run a shell command, return stdout trimmed."
   [& args]
   (str/trim (:out (apply sh args))))
 
-(defn sh-ok?
-  "Run a shell command, return true if exit 0."
-  [& args]
-  (try (apply sh args) true
-       (catch Exception _ false)))
-
 (defn sh-inherit!
   "Run a shell command with inherited stdout/stderr (visible to user)."
   [& args]
   (let [cmd (str/join " " args)]
-    (proc/shell {:dir script-dir} "bash" "-c" cmd)))
+    (proc/shell {:dir @repo-dir} "bash" "-c" cmd)))
 
 (defn fetch-json
   "Fetch and parse JSON from a URL."
@@ -72,8 +104,10 @@
   (println)
   (println "  nixos-vm-template bootstrap")
   (println "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-  (println "  Create NixOS VMs from pre-built images (no Nix required).")
   (println)
+
+  ;; Ensure we have a repo checkout
+  (reset! repo-dir (ensure-repo!))
 
   ;; Fetch manifest
   (print "Fetching image manifest... ")
@@ -110,7 +144,7 @@
 
         ;; Download image
         (println)
-        (let [profile-dir (str script-dir "/output/profiles/" profile-key)
+        (let [profile-dir (str @repo-dir "/output/profiles/" profile-key)
               image-path (str profile-dir "/nixos.qcow2")
               needs-download? (atom true)]
 
@@ -145,7 +179,7 @@
         (println)
         (println (format "Creating VM '%s' with profile '%s'..." vm-name profile-key))
         (println)
-        (let [result (proc/shell {:dir script-dir
+        (let [result (proc/shell {:dir @repo-dir
                                   :extra-env {"SKIP_BUILD" "true"}}
                                  "just" "create-batch" vm-name profile-key)]
           (when (not= 0 (:exit result))
