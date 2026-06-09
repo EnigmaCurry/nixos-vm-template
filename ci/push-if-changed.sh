@@ -5,13 +5,17 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-if [ "$(git rev-parse HEAD)" = "$(git rev-parse @{u})" ]; then
+BRANCH="${CI_COMMIT_BRANCH:-dev}"
+
+git fetch origin "$BRANCH"
+
+if [ "$(git rev-parse HEAD)" = "$(git rev-parse "origin/$BRANCH")" ]; then
     echo "Nothing to push."
     exit 0
 fi
 
 # Verify the only unpushed commit changes nothing but flake.lock
-changed_files=$(git diff --name-only @{u}..HEAD)
+changed_files=$(git diff --name-only "origin/$BRANCH"..HEAD)
 if [ "$changed_files" != "flake.lock" ]; then
     echo "ERROR: unpushed commits contain unexpected changes:"
     echo "$changed_files"
@@ -20,4 +24,4 @@ if [ "$changed_files" != "flake.lock" ]; then
 fi
 
 echo "Pushing flake.lock update..."
-git push
+git push origin "HEAD:$BRANCH"
