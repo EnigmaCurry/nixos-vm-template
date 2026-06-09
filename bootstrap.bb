@@ -101,10 +101,13 @@
     (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
 (defn clear-below!
-  "Clear any leftover wizard output below the cursor."
+  "Clear any leftover wizard output below the cursor and reset terminal state."
   []
   (print "\033[J")
-  (flush))
+  (flush)
+  ;; Reset terminal state (SSH processes can leave it dirty)
+  (try (proc/shell {:out :string :err :string} "stty" "sane")
+       (catch Exception _ nil)))
 
 (defn- env-vars
   "Strip non-string keys from an env map (keeps only real env vars)."
@@ -378,7 +381,7 @@
             vm-name (:name (nth machines (.indexOf choices choice)))]
 
         ;; Action submenu
-        (println)
+        (clear-below!)
         (let [action (wiz/choose (format "Action for '%s':" vm-name)
                                  ["Upgrade (new image, preserve /var data)"
                                   "Destroy (delete VM and disks, keep config)"
@@ -513,11 +516,11 @@
 
     ;; Main menu loop
     (loop []
-      (println)
+      (clear-below!)
       (let [action (try (wiz/choose "What would you like to do?"
                                     ["Create VM" "Manage VMs" "Exit"])
                         (catch Exception _ "Exit"))]
-        (println)
+        (clear-below!)
         (case action
           "Create VM"  (do (action-create-vm! backend pve-env) (recur))
           "Manage VMs" (do (action-manage-vms! backend pve-env) (recur))
