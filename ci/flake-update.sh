@@ -16,8 +16,7 @@ done
 if git diff --quiet flake.lock; then
     echo "flake.lock unchanged, nothing to commit."
 else
-    echo "flake.lock updated, committing..."
+    echo "flake.lock updated, committing locally..."
     git add flake.lock
     git commit -m "flake.lock: update inputs"
-    git push
 fi

@@ -46,3 +46,8 @@ steps:
         from_secret: s3_public_url
     commands:
       - bash ci/upload.sh
+
+  - name: push
+    image: bash
+    commands:
+      - bash ci/push-if-changed.sh
