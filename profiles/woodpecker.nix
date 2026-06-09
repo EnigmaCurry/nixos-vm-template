@@ -173,7 +173,7 @@
             "url.ssh://git@''${alias}/''${owner}/''${repo}.insteadOf" \
             "ssh://git@''${host}:''${port}/''${owner}/''${repo}"
           # Rewrite HTTPS URLs to SSH (Woodpecker clones via HTTPS)
-          ${pkgs.git}/bin/git config -f "$GIT_CONFIG" \
+          ${pkgs.git}/bin/git config -f "$GIT_CONFIG" --add \
             "url.ssh://git@''${alias}/''${owner}/''${repo}.insteadOf" \
             "https://''${host}/''${owner}/''${repo}"
 
