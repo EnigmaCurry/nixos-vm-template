@@ -44,20 +44,8 @@ steps:
         rclone cleanup "remote:$S3_BUCKET/" -v || true
         # Upload new images
         rclone copy output/export/ "remote:$S3_BUCKET/" --include '*.qcow2' -v
-        # Build manifest from existing entries + newly uploaded images
-        rclone copy "remote:$S3_BUCKET/manifest.json" /tmp/manifest/ 2>/dev/null || true
+        # Build manifest from newly built images only
         manifest='{"profiles":{}}'
-        if [ -f /tmp/manifest/manifest.json ]; then
-          manifest=$(cat /tmp/manifest/manifest.json | jq '{profiles: (.profiles // {})}')
-        fi
-        # List actual files in bucket to prune stale manifest entries
-        bucket_files=$(rclone lsf "remote:$S3_BUCKET/" --include 'nixos-*.qcow2')
-        for key in $(echo "$manifest" | jq -r '.profiles | keys[]'); do
-          entry_filename=$(echo "$manifest" | jq -r --arg k "$key" '.profiles[$k].filename')
-          if ! echo "$bucket_files" | grep -qxF "$entry_filename"; then
-            manifest=$(echo "$manifest" | jq --arg k "$key" 'del(.profiles[$k])')
-          fi
-        done
         # Add entries for newly uploaded images
         for f in output/export/nixos-*.qcow2; do
           filename=$(basename "$f")
