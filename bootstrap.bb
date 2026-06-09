@@ -362,7 +362,7 @@
                               vm-name profile-key memory vcpus var-size network)
                   result (backend-sh! backend vm-env cmd)]
               (when (not= 0 (:exit result))
-                (System/exit (:exit result)))))))))
+                (System/exit (:exit result))))))))))
 
 (defn action-manage-vms!
   "Manage existing VMs — upgrade or destroy."
@@ -417,7 +417,7 @@
                       (let [cmd (format "upgrade_vm '%s'" vm-name)
                             result (backend-sh! backend vm-env cmd)]
                         (when (not= 0 (:exit result))
-                          (System/exit (:exit result))))))))))
+                          (System/exit (:exit result)))))))))
 
             ;; ── Destroy ──
             (str/starts-with? action "Destroy")
