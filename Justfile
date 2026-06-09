@@ -203,7 +203,9 @@ ci-secrets:
     # Activate repo if not already active
     wcli repo show "$repo" >/dev/null 2>&1 || {
         echo "Activating repo in Woodpecker..."
-        fmt=$(printf '{{%s}} {{%s}}' ' .FullName' ' .ForgeRemoteID')
+        lb='{''{'
+        rb='}''}'
+        fmt="${lb} .FullName ${rb} ${lb} .ForgeRemoteID ${rb}"
         sync_output=$(wcli repo sync --format "$fmt" 2>&1)
         echo "$sync_output"
         forge_id=$(echo "$sync_output" | grep "^${repo} " | awk '{print $2}')
