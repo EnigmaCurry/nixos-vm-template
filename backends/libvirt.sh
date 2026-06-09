@@ -208,6 +208,13 @@ backend_create_disks() {
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
     gf_cmds="$gf_cmds : chown 0 0 /identity/root_password_hash"
 
+    # Copy woodpecker agent env file if present
+    if [ -s "$machine_dir/woodpecker.env" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/woodpecker.env /identity/"
+        gf_cmds="$gf_cmds : chmod 0600 /identity/woodpecker.env"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
+    fi
+
     # Initialize /var disk
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
@@ -480,6 +487,13 @@ backend_sync_identity() {
         gf_cmds="$gf_cmds : copy-in $machine_dir/allowed_cidrs /identity/"
         gf_cmds="$gf_cmds : chmod 0644 /identity/allowed_cidrs"
         gf_cmds="$gf_cmds : chown 0 0 /identity/allowed_cidrs"
+    fi
+
+    # Update woodpecker agent env file
+    if [ -s "$machine_dir/woodpecker.env" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/woodpecker.env /identity/"
+        gf_cmds="$gf_cmds : chmod 0600 /identity/woodpecker.env"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
     fi
 
     eval "$GUESTFISH -a $var_disk $gf_cmds"

@@ -20,6 +20,10 @@ build profiles="core":
 build-all:
     @source {{backend_script}} && build_all
 
+# Export a profile image with release metadata filename
+export profiles="core":
+    @source {{backend_script}} && export_profile "{{profiles}}"
+
 # List available profiles
 list-profiles:
     @source {{backend_script}} && list_profiles
@@ -169,6 +173,84 @@ shell:
 # Test connection to the backend (libvirt or proxmox)
 test-connection:
     @source {{backend_script}} && test_connection
+
+# Configure Woodpecker CI secrets for S3 image uploads
+# Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,
+#   S3_BUCKET, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
+# Prompts for: S3_SECRET_ACCESS_KEY
+ci-secrets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    missing=()
+    [ -z "${WOODPECKER_SERVER:-}" ] && missing+=("WOODPECKER_SERVER")
+    [ -z "${WOODPECKER_TOKEN:-}" ] && missing+=("WOODPECKER_TOKEN")
+    [ -z "${CI_REPO:-}" ] && missing+=("CI_REPO")
+    [ -z "${S3_BUCKET:-}" ] && missing+=("S3_BUCKET")
+    [ -z "${S3_PROVIDER:-}" ] && missing+=("S3_PROVIDER")
+    [ -z "${S3_ENDPOINT:-}" ] && missing+=("S3_ENDPOINT")
+    [ -z "${S3_REGION:-}" ] && missing+=("S3_REGION")
+    [ -z "${S3_ACCESS_KEY_ID:-}" ] && missing+=("S3_ACCESS_KEY_ID")
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Error: Missing required environment variables:" >&2
+        for v in "${missing[@]}"; do echo "  $v" >&2; done
+        echo "" >&2
+        echo "Example:" >&2
+        echo "  export WOODPECKER_SERVER=https://woodpecker.example.com" >&2
+        echo "  export WOODPECKER_TOKEN=your-api-token" >&2
+        echo "  export CI_REPO=owner/repo" >&2
+        echo "  export S3_BUCKET=nixos-vm-template" >&2
+        echo "  export S3_PROVIDER=DigitalOcean  # or AWS, Minio" >&2
+        echo "  export S3_ENDPOINT=nyc3.digitaloceanspaces.com" >&2
+        echo "  export S3_REGION=nyc3" >&2
+        echo "  export S3_ACCESS_KEY_ID=your-access-key" >&2
+        exit 1
+    fi
+    repo="$CI_REPO"
+    s3_bucket="$S3_BUCKET"
+    rclone_type="s3"
+    rclone_provider="$S3_PROVIDER"
+    rclone_endpoint="$S3_ENDPOINT"
+    rclone_region="$S3_REGION"
+    rclone_access_key_id="$S3_ACCESS_KEY_ID"
+    read -rsp "S3 secret access key: " rclone_secret_access_key; echo ""
+    echo ""
+    echo "Server: $WOODPECKER_SERVER"
+    echo "Repo: $repo"
+    echo ""
+    wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
+    # Activate repo if not already active
+    wcli repo show "$repo" >/dev/null 2>&1 || {
+        echo "Activating repo in Woodpecker..."
+        lb='{''{'
+        rb='}''}'
+        fmt="${lb} .FullName ${rb} ${lb} .ForgeRemoteID ${rb}"
+        sync_output=$(wcli repo sync --format "$fmt" 2>&1)
+        echo "$sync_output"
+        forge_id=$(echo "$sync_output" | grep "^${repo} " | awk '{print $2}')
+        if [ -n "$forge_id" ]; then
+            echo "Found forge ID: $forge_id"
+            wcli repo add "$forge_id" || { echo "Error: failed to activate repo (forge ID: $forge_id)" >&2; exit 1; }
+        else
+            echo "Error: Could not find '$repo' in forge. Available repos:" >&2
+            echo "$sync_output" >&2
+            exit 1
+        fi
+    }
+    wcli repo secret add --repo "$repo" --name s3_bucket --value "$s3_bucket" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name s3_bucket --value "$s3_bucket"
+    wcli repo secret add --repo "$repo" --name rclone_type --value "$rclone_type" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_type --value "$rclone_type"
+    wcli repo secret add --repo "$repo" --name rclone_provider --value "$rclone_provider" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_provider --value "$rclone_provider"
+    wcli repo secret add --repo "$repo" --name rclone_endpoint --value "$rclone_endpoint" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_endpoint --value "$rclone_endpoint"
+    wcli repo secret add --repo "$repo" --name rclone_region --value "$rclone_region" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_region --value "$rclone_region"
+    wcli repo secret add --repo "$repo" --name rclone_access_key_id --value "$rclone_access_key_id" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_access_key_id --value "$rclone_access_key_id"
+    wcli repo secret add --repo "$repo" --name rclone_secret_access_key --value "$rclone_secret_access_key" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_secret_access_key --value "$rclone_secret_access_key"
+    echo "All secrets configured for $repo"
 
 _completion_profile:
     @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done

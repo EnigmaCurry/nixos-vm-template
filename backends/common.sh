@@ -184,6 +184,7 @@ build_profile() {
     fi
 
     echo "Built: $OUTPUT_DIR/profiles/$output_key"
+    ls -lhL "$OUTPUT_DIR/profiles/$output_key/"
 }
 
 # Build all base profiles
@@ -196,6 +197,42 @@ build_all() {
     build_profile claude
     build_profile open-code
     echo "All base profiles built."
+}
+
+# Export a profile image with release metadata in the filename
+# Output: output/export/nixos-{profiles}-{date}-{gitsha}.qcow2
+export_profile() {
+    local profiles="${1:-core}"
+
+    local profile_key
+    profile_key=$(normalize_profiles "$profiles")
+
+    local profile_dir="$OUTPUT_DIR/profiles/$profile_key"
+    local source_image="$profile_dir/nixos.qcow2"
+
+    if [ ! -f "$source_image" ]; then
+        echo "Error: Profile image not found: $source_image"
+        echo "Run 'just build $profile_key' first"
+        exit 1
+    fi
+
+    local date_stamp
+    date_stamp=$(date +%Y%m%d)
+
+    local git_sha
+    git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+    # Replace commas with dashes for the filename
+    local profile_slug
+    profile_slug=$(echo "$profile_key" | tr ',' '-')
+
+    mkdir -p "$OUTPUT_DIR/export"
+    local export_name="nixos-${profile_slug}-${date_stamp}-${git_sha}.qcow2"
+    local export_path="$OUTPUT_DIR/export/$export_name"
+
+    cp "$source_image" "$export_path"
+    echo "Exported: $export_path"
+    ls -lh "$export_path"
 }
 
 # List available profiles

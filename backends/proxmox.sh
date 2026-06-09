@@ -419,6 +419,13 @@ backend_create_disks() {
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
     gf_cmds="$gf_cmds : chown 0 0 /identity/root_password_hash"
 
+    # Copy woodpecker agent env file if present
+    if [ -s "$machine_dir/woodpecker.env" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/woodpecker.env /identity/"
+        gf_cmds="$gf_cmds : chmod 0600 /identity/woodpecker.env"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
+    fi
+
     # Initialize /var disk
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
@@ -864,7 +871,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs ca-cert.pem; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs ca-cert.pem woodpecker.env; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
@@ -884,6 +891,7 @@ backend_sync_identity() {
     pve_ssh "chmod 0644 $mount_point/identity/hosts 2>/dev/null || true"
     pve_ssh "chmod 0644 $mount_point/identity/static_ip 2>/dev/null || true"
     pve_ssh "chmod 0600 $mount_point/identity/root_password_hash 2>/dev/null || true"
+    pve_ssh "chmod 0600 $mount_point/identity/woodpecker.env 2>/dev/null || true"
     pve_ssh "chown -R 0:0 $mount_point/identity/"
 
     # Remove static_ip if no longer configured (switch back to DHCP)

@@ -13,6 +13,7 @@
     ./mutable.nix
     ./nix-overlay.nix
     ./identity.nix
+    ./identity-defaults.nix
     ./firewall-identity.nix
     ./dns-identity.nix
     ./hosts-identity.nix
