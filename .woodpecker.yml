@@ -39,7 +39,7 @@ steps:
         jq() { nix run nixpkgs#jq -- "$@"; }
         # Delete old images for the same profile
         for f in output/export/nixos-*.qcow2; do
-          profile_prefix=$(basename "$f" | sed 's/-[0-9]\{8\}-[a-f0-9]*.qcow2$//')
+          profile_prefix=$(basename "$f" | sed -E 's/-[0-9]{8}-[a-f0-9]+\.qcow2$//')
           rclone delete "remote:$S3_BUCKET/" --include "${profile_prefix}-*.qcow2" -v
         done
         # Upload new images
