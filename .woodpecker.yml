@@ -32,4 +32,4 @@ steps:
       S3_BUCKET:
         from_secret: s3_bucket
     commands:
-      - nix-shell -p rclone --run "rclone copy output/export/ remote:$S3_BUCKET/ --include '*.qcow2' -v"
+      - nix run nixpkgs#rclone -- copy output/export/ remote:$S3_BUCKET/ --include '*.qcow2' -v
