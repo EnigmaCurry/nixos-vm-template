@@ -3,7 +3,7 @@ labels:
 
 when:
   - event: push
-    branch: master
+    branch: dev
   - event: manual
 
 steps:
