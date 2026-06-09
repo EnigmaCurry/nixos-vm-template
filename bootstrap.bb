@@ -408,16 +408,13 @@
                         (println (format "  %s" k))))
 
                   (do
-                    (let [vm-env (if (= backend "proxmox")
-                                  (pve-prompt-storage-bridge pve-env)
-                                  pve-env)]
-                      (println (format "\nUpgrading '%s' to latest '%s' image..." vm-name profile))
-                      (download-profile! profile profile-info)
-                      (println)
-                      (let [cmd (format "upgrade_vm '%s'" vm-name)
-                            result (backend-sh! backend vm-env cmd)]
-                        (when (not= 0 (:exit result))
-                          (System/exit (:exit result)))))))))
+                    (println (format "\nUpgrading '%s' to latest '%s' image..." vm-name profile))
+                    (download-profile! profile profile-info)
+                    (println)
+                    (let [cmd (format "upgrade_vm '%s'" vm-name)
+                          result (backend-sh! backend pve-env cmd)]
+                      (when (not= 0 (:exit result))
+                        (System/exit (:exit result)))))))
 
             ;; ── Destroy ──
             (str/starts-with? action "Destroy")
@@ -437,7 +434,7 @@
               (let [cmd (format "echo y | purge_vm '%s'" vm-name)
                     result (backend-sh! backend pve-env cmd)]
                 (when (not= 0 (:exit result))
-                  (System/exit (:exit result)))))))))))
+                  (System/exit (:exit result))))))))))))
 
 ;; ─── Main ───────────────────────────────────────────────────────────────────
 
