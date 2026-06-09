@@ -200,19 +200,19 @@ ci-secrets repo:
     read -rsp "Secret access key: " rclone_secret_access_key; echo ""
     echo ""
     wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
-    wcli secret add -r "{{repo}}" -n s3_bucket -v "$s3_bucket" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n s3_bucket -v "$s3_bucket" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n s3_bucket -v "$s3_bucket"
-    wcli secret add -r "{{repo}}" -n rclone_type -v "$rclone_type" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n rclone_type -v "$rclone_type" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n rclone_type -v "$rclone_type"
-    wcli secret add -r "{{repo}}" -n rclone_provider -v "$rclone_provider" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n rclone_provider -v "$rclone_provider" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n rclone_provider -v "$rclone_provider"
-    wcli secret add -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint"
-    wcli secret add -r "{{repo}}" -n rclone_region -v "$rclone_region" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n rclone_region -v "$rclone_region" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n rclone_region -v "$rclone_region"
-    wcli secret add -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id"
-    wcli secret add -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key" 2>/dev/null || \
+    wcli repo secret add -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key" 2>/dev/null || \
         wcli secret update -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key"
     echo "All secrets configured for {{repo}}"
 
