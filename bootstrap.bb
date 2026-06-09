@@ -494,9 +494,15 @@
                         pve-bridges (try
                                      (let [out (pve-ssh "ip -br link show type bridge | awk '{print $1}'")]
                                        (vec (remove str/blank? (str/split-lines out))))
-                                     (catch Exception _ []))]
+                                     (catch Exception _ []))
+                        ;; Auto-detect disk format from primary storage
+                        ;; (lvmthin/lvm require raw, others use qcow2)
+                        default-format (let [stype (:type (first pve-storage-info))]
+                                         (if (or (= stype "lvmthin") (= stype "lvm"))
+                                           "raw" "qcow2"))]
                     {"PVE_HOST" pve-host
                      "PVE_NODE" pve-node
+                     "PVE_DISK_FORMAT" default-format
                      :pve-ssh pve-ssh
                      :pve-storage-info pve-storage-info
                      :pve-bridges pve-bridges}))]
