@@ -93,6 +93,7 @@ export WOODPECKER_SERVER=https://woodpecker.example.com
 export WOODPECKER_TOKEN=your-api-token
 export CI_REPO=youruser/nixos-vm-template
 export S3_BUCKET=nixos-vm-template
+export S3_PUBLIC_URL=https://nixos-vm-template.nyc3.cdn.digitaloceanspaces.com
 export S3_PROVIDER=DigitalOcean    # or AWS, Minio
 export S3_ENDPOINT=nyc3.digitaloceanspaces.com
 export S3_REGION=nyc3
@@ -110,6 +111,8 @@ The pipeline is defined in `.woodpecker.yml`. By default it:
 2. **Exports** it with a release filename
    (e.g., `nixos-core-20260609-abc1234.qcow2`)
 3. **Uploads** to S3, replacing any previous image for the same profile
+4. **Updates** `manifest.json` in the bucket root with URLs and sha256
+   checksums for all available images
 
 The pipeline triggers on push to `master` and can be run manually from
 the Woodpecker UI on any branch.

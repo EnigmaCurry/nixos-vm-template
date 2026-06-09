@@ -176,7 +176,7 @@ test-connection:
 
 # Configure Woodpecker CI secrets for S3 image uploads
 # Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,
-#   S3_BUCKET, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
+#   S3_BUCKET, S3_PUBLIC_URL, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
 # Prompts for: S3_SECRET_ACCESS_KEY
 ci-secrets:
     #!/usr/bin/env bash
@@ -186,6 +186,7 @@ ci-secrets:
     [ -z "${WOODPECKER_TOKEN:-}" ] && missing+=("WOODPECKER_TOKEN")
     [ -z "${CI_REPO:-}" ] && missing+=("CI_REPO")
     [ -z "${S3_BUCKET:-}" ] && missing+=("S3_BUCKET")
+    [ -z "${S3_PUBLIC_URL:-}" ] && missing+=("S3_PUBLIC_URL")
     [ -z "${S3_PROVIDER:-}" ] && missing+=("S3_PROVIDER")
     [ -z "${S3_ENDPOINT:-}" ] && missing+=("S3_ENDPOINT")
     [ -z "${S3_REGION:-}" ] && missing+=("S3_REGION")
@@ -199,6 +200,7 @@ ci-secrets:
         echo "  export WOODPECKER_TOKEN=your-api-token" >&2
         echo "  export CI_REPO=owner/repo" >&2
         echo "  export S3_BUCKET=nixos-vm-template" >&2
+        echo "  export S3_PUBLIC_URL=https://nixos-vm-template.nyc3.cdn.digitaloceanspaces.com" >&2
         echo "  export S3_PROVIDER=DigitalOcean  # or AWS, Minio" >&2
         echo "  export S3_ENDPOINT=nyc3.digitaloceanspaces.com" >&2
         echo "  export S3_REGION=nyc3" >&2
@@ -207,6 +209,7 @@ ci-secrets:
     fi
     repo="$CI_REPO"
     s3_bucket="$S3_BUCKET"
+    s3_public_url="$S3_PUBLIC_URL"
     rclone_type="s3"
     rclone_provider="$S3_PROVIDER"
     rclone_endpoint="$S3_ENDPOINT"
@@ -238,6 +241,8 @@ ci-secrets:
     }
     wcli repo secret add --repo "$repo" --name s3_bucket --value "$s3_bucket" 2>/dev/null || \
         wcli repo secret update --repo "$repo" --name s3_bucket --value "$s3_bucket"
+    wcli repo secret add --repo "$repo" --name s3_public_url --value "$s3_public_url" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name s3_public_url --value "$s3_public_url"
     wcli repo secret add --repo "$repo" --name rclone_type --value "$rclone_type" 2>/dev/null || \
         wcli repo secret update --repo "$repo" --name rclone_type --value "$rclone_type"
     wcli repo secret add --repo "$repo" --name rclone_provider --value "$rclone_provider" 2>/dev/null || \
