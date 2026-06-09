@@ -38,6 +38,8 @@ steps:
       - |
         rclone() { nix run nixpkgs#rclone -- "$@"; }
         jq() { nix run nixpkgs#jq -- "$@"; }
+        # Clean up stale multipart uploads from previous failed runs
+        rclone cleanup "remote:$S3_BUCKET/" -v || true
         # Delete old images for the same profile
         for f in output/export/nixos-*.qcow2; do
           fname=$(basename "$f" .qcow2)
