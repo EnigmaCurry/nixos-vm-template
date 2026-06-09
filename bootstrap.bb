@@ -74,6 +74,8 @@
 (def repo-dir
   (-> (io/file *file*) .getCanonicalFile .getParentFile .getPath))
 
+;; ─── Utilities ──────────────────────────────────────────────────────────────
+
 (defn sh
   "Run a shell command in repo dir. Throws on non-zero exit."
   [& args]
@@ -84,6 +86,12 @@
   "Run a shell command, return stdout trimmed."
   [& args]
   (str/trim (:out (apply sh args))))
+
+(defn sh-ok?
+  "Run a shell command, return true if exit 0."
+  [& args]
+  (try (apply sh args) true
+       (catch Exception _ false)))
 
 (defn sh-inherit!
   "Run a shell command with inherited stdout/stderr (visible to user)."
@@ -104,6 +112,51 @@
     (>= bytes (* 1024 1024 1024)) (format "%.1f GB" (/ bytes (* 1024.0 1024 1024)))
     (>= bytes (* 1024 1024))      (format "%.0f MB" (/ bytes (* 1024.0 1024)))
     :else                          (format "%d bytes" bytes)))
+
+(defn debian?
+  "Check if running on Debian/Ubuntu."
+  []
+  (sh-ok? "test -f /etc/debian_version"))
+
+(defn command-exists?
+  "Check if a command exists on PATH."
+  [cmd]
+  (sh-ok? (format "command -v %s" cmd)))
+
+;; ─── Dependency checking ────────────────────────────────────────────────────
+
+(def libvirt-deps
+  {"curl"      {:debian "curl"}
+   "qemu-img"  {:debian "qemu-utils"}
+   "guestfish" {:debian "libguestfs-tools"}
+   "virsh"     {:debian "libvirt-clients"}
+   "readlink"  {:debian "coreutils"}})
+
+(def proxmox-deps
+  {"curl"      {:debian "curl"}
+   "qemu-img"  {:debian "qemu-utils"}
+   "guestfish" {:debian "libguestfs-tools"}
+   "ssh"       {:debian "openssh-client"}
+   "rsync"     {:debian "rsync"}
+   "readlink"  {:debian "coreutils"}})
+
+(defn check-deps!
+  "Check that all required commands exist. Exit with install instructions if not."
+  [backend]
+  (let [deps (if (= backend "proxmox") proxmox-deps libvirt-deps)
+        missing (vec (filter (fn [[cmd _]] (not (command-exists? cmd))) deps))]
+    (when (seq missing)
+      (println)
+      (println "Missing required commands:")
+      (doseq [[cmd _] missing]
+        (println (format "  - %s" cmd)))
+      (when (debian?)
+        (let [pkgs (str/join " " (distinct (map (fn [[_ info]] (:debian info)) missing)))]
+          (println)
+          (println "Install on Debian/Ubuntu:")
+          (println (format "  sudo apt-get install %s" pkgs))))
+      (println)
+      (System/exit 1))))
 
 ;; ─── Main ───────────────────────────────────────────────────────────────────
 
@@ -160,6 +213,9 @@
                            "PVE_STORAGE" pve-storage
                            "PVE_BRIDGE" pve-bridge}))]
 
+          ;; Check dependencies before proceeding further
+          (check-deps! backend)
+
           ;; VM specs
           (println)
           (let [memory (wiz/ask "Memory (MB):" :default "2048")
@@ -207,14 +263,17 @@
                         (io/delete-file image-path true)
                         (System/exit 1))))))
 
-            ;; Create VM via just create-batch (reuses all existing backend logic)
+            ;; Create VM by sourcing the backend scripts directly (no just dependency)
             (println)
             (println (format "Creating VM '%s' with profile '%s' on %s..." vm-name profile-key backend))
             (println)
-            (let [env (merge {"SKIP_BUILD" "true" "BACKEND" backend} pve-env)
+            (let [backend-script (str "backends/" backend ".sh")
+                  env (merge {"SKIP_BUILD" "true"} pve-env)
+                  cmd (format "source %s && create_vm_batch '%s' '%s' '%s' '%s' '%s' '%s'"
+                              backend-script vm-name profile-key
+                              memory vcpus var-size network)
                   result (proc/shell {:dir repo-dir :extra-env env}
-                                     "just" "create-batch" vm-name profile-key
-                                     memory vcpus var-size network)]
+                                     "bash" "-euo" "pipefail" "-c" cmd)]
               (when (not= 0 (:exit result))
                 (System/exit (:exit result))))))))))
 
