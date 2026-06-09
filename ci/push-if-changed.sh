@@ -5,6 +5,9 @@ set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
+# Ensure git reads the woodpecker user's .gitconfig (insteadOf URL rewrites)
+export HOME=/var/lib/woodpecker
+
 BRANCH="${CI_COMMIT_BRANCH:-dev}"
 
 git fetch origin "$BRANCH"
