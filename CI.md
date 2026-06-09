@@ -22,7 +22,7 @@ Create a repository on your Forgejo instance and push
 nixos-vm-template to it:
 
 ```bash
-git remote add forgejo git@forgejo.example.com:youruser/nixos-vm-template.git
+git remote add forgejo git@forgejo.example.com:your_user/nixos-vm-template.git
 git push forgejo master
 ```
 
@@ -91,7 +91,7 @@ Woodpecker server URL).
 ```bash
 export WOODPECKER_SERVER=https://woodpecker.example.com
 export WOODPECKER_TOKEN=your-api-token
-export CI_REPO=youruser/nixos-vm-template
+export CI_REPO=your_user/nixos-vm-template
 export S3_BUCKET=nixos-vm-template
 export S3_PUBLIC_URL=https://nixos-vm-template.nyc3.cdn.digitaloceanspaces.com
 export S3_PROVIDER=DigitalOcean    # or AWS, Minio
@@ -130,7 +130,7 @@ The `.conf` file maps the key to a specific remote:
 ```ini
 host=git.example.com
 port=2222
-owner=youruser
+owner=your_user
 repo=nixos-vm-template
 ```
 
@@ -159,7 +159,7 @@ After setup (or after an upgrade that adds the service), verify:
 ```bash
 sudo systemctl restart woodpecker-deploy-keys
 journalctl -u woodpecker-deploy-keys
-sudo -u woodpecker -H sh -c 'cd ~ && git ls-remote ssh://git@git.example.com:2222/youruser/nixos-vm-template.git'
+sudo -u woodpecker -H sh -c 'cd ~ && git ls-remote ssh://git@git.example.com:2222/your_user/nixos-vm-template.git'
 ```
 
 ### Managing keys
