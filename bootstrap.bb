@@ -375,8 +375,7 @@
             (when (wiz/confirm (format "Destroy VM '%s'? All disk data will be lost." vm-name)
                                :default :no)
               (println)
-              ;; Use yes to auto-confirm the bash prompt
-              (let [cmd (format "yes | destroy_vm '%s'" vm-name)
+              (let [cmd (format "echo y | destroy_vm '%s'" vm-name)
                     result (backend-sh! backend pve-env cmd)]
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))
@@ -386,7 +385,7 @@
             (when (wiz/confirm (format "Purge VM '%s'? All data AND config will be permanently deleted." vm-name)
                                :default :no)
               (println)
-              (let [cmd (format "yes | purge_vm '%s'" vm-name)
+              (let [cmd (format "echo y | purge_vm '%s'" vm-name)
                     result (backend-sh! backend pve-env cmd)]
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))))))))
