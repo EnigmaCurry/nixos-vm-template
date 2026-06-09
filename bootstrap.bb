@@ -387,9 +387,47 @@
                                    (catch Exception _ []))
                         pve-host (wiz/ask "PVE host (SSH alias or IP):"
                                           :suggestions ssh-hosts)
-                        pve-node (wiz/ask "PVE node name:" :default pve-host)
-                        pve-storage (wiz/ask "PVE storage:" :default "local")
-                        pve-bridge (wiz/ask "PVE bridge:" :default "vmbr0")]
+                        _ (do (print (format "  Connecting to %s ... " pve-host))
+                              (flush))
+                        pve-ssh (fn [cmd]
+                                  (str/trim (:out (proc/shell
+                                                   {:out :string :err :string}
+                                                   "ssh" "-o" "BatchMode=yes"
+                                                   "-o" "ConnectTimeout=10"
+                                                   pve-host cmd))))
+                        ;; Test connection and detect node name
+                        pve-node-detected (try
+                                           (let [n (pve-ssh "hostname")]
+                                             (println "OK")
+                                             n)
+                                           (catch Exception _
+                                             (println "FAILED")
+                                             (println (format "  Could not SSH to %s." pve-host))
+                                             (println "  Ensure SSH is configured: ssh-copy-id root@<host>")
+                                             (System/exit 1)))
+                        pve-node (wiz/ask "PVE node name:" :default pve-node-detected)
+                        ;; Discover storage backends that support VM images
+                        pve-storages (try
+                                      (let [out (pve-ssh "pvesm status --content images 2>/dev/null | awk 'NR>1 && $2==\"active\" {print $1}'")]
+                                        (vec (remove str/blank? (str/split-lines out))))
+                                      (catch Exception _ []))
+                        pve-storage (if (= 1 (count pve-storages))
+                                      (do (println (format "  Storage: %s" (first pve-storages)))
+                                          (first pve-storages))
+                                      (if (seq pve-storages)
+                                        (wiz/choose "PVE storage:" pve-storages)
+                                        (wiz/ask "PVE storage:" :default "local")))
+                        ;; Discover bridges
+                        pve-bridges (try
+                                     (let [out (pve-ssh "ip -br link show type bridge | awk '{print $1}'")]
+                                       (vec (remove str/blank? (str/split-lines out))))
+                                     (catch Exception _ []))
+                        pve-bridge (if (= 1 (count pve-bridges))
+                                     (do (println (format "  Bridge: %s" (first pve-bridges)))
+                                         (first pve-bridges))
+                                     (if (seq pve-bridges)
+                                       (wiz/choose "PVE bridge:" pve-bridges)
+                                       (wiz/ask "PVE bridge:" :default "vmbr0")))]
                     {"PVE_HOST" pve-host
                      "PVE_NODE" pve-node
                      "PVE_STORAGE" pve-storage
