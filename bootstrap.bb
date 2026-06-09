@@ -2,8 +2,8 @@
 ;; nixos-vm-template bootstrap
 ;; Create NixOS VMs from pre-built images — no local image build required.
 ;;
-;; One-liner:
-;;   bb -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/dev/bootstrap.bb"))'
+;; One-liner (auto-detects branch from URL):
+;;   bb -e '(def *url* "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/dev/bootstrap.bb") (load-string (slurp *url*))'
 ;;
 ;; Or from a cloned repo:
 ;;   bb bootstrap.bb
@@ -26,7 +26,13 @@
       "https://nixos-vm-template.nyc3.digitaloceanspaces.com/manifest.json"))
 
 (def repo-url "https://github.com/EnigmaCurry/nixos-vm-template.git")
-(def repo-branch "dev")
+(def repo-branch
+  (or (System/getenv "NIXOS_VM_BRANCH")
+      (try
+        (when-let [v (resolve '*url*)]
+          (second (re-find #"/refs/heads/([^/]+)/" (str @v))))
+        (catch Exception _ nil))
+      "dev"))
 (def default-repo-dir (str (System/getenv "HOME") "/.cache/nixos-vm-template"))
 
 ;; ─── Repo detection ────────────────────────────────────────────────────────
