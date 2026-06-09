@@ -192,8 +192,8 @@ ci-secrets:
     echo ""
     read -rp "Repository (e.g. owner/repo): " repo
     read -rp "S3 bucket name: " s3_bucket
-    read -rp "rclone type [s3]: " rclone_type; rclone_type="${rclone_type:-s3}"
-    read -rp "rclone provider (e.g. DigitalOcean, AWS, Minio): " rclone_provider
+    rclone_type="s3"
+    read -rp "S3 provider (e.g. DigitalOcean, AWS, Minio): " rclone_provider
     read -rp "rclone endpoint (e.g. nyc3.digitaloceanspaces.com): " rclone_endpoint
     read -rp "rclone region (e.g. nyc3, us-east-1): " rclone_region
     read -rp "Access key ID: " rclone_access_key_id
