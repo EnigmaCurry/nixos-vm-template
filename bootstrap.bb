@@ -37,11 +37,12 @@
        (.exists (io/file dir "backends" "common.sh"))
        (.exists (io/file dir "bootstrap.bb"))))
 
-(let [file-dir (try
-                 (let [f (io/file *file*)]
-                   (-> (if (.isAbsolute f) f (.getCanonicalFile f))
-                       .getParentFile .getPath))
-                 (catch Exception _ nil))]
+(let [file-dir (when-not (= *file* "NO_SOURCE_PATH")
+                 (try
+                   (let [f (io/file *file*)]
+                     (-> (if (.isAbsolute f) f (.getCanonicalFile f))
+                         .getParentFile .getPath))
+                   (catch Exception _ nil)))]
   (when-not (in-repo? file-dir)
     ;; Not running from a repo checkout — clone/update, then hand off
     (let [dir default-repo-dir
