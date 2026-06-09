@@ -14,6 +14,10 @@ steps:
     commands:
       - source backends/common.sh && build_profile core
       - source backends/common.sh && export_profile core
+      - source backends/common.sh && build_profile step-ca
+      - source backends/common.sh && export_profile step-ca
+      - source backends/common.sh && build_profile podman,nifty-services
+      - source backends/common.sh && export_profile podman,nifty-services
       - ls -lh output/export/
 
   - name: upload
