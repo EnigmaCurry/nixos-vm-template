@@ -230,7 +230,7 @@ export_profile() {
     local export_name="nixos-${profile_slug}-${date_stamp}-${git_sha}.qcow2"
     local export_path="$OUTPUT_DIR/export/$export_name"
 
-    cp "$source_image" "$export_path"
+    $NIX shell nixpkgs#qemu-utils -c qemu-img convert -f qcow2 -O qcow2 -c "$source_image" "$export_path"
     echo "Exported: $export_path"
     ls -lh "$export_path"
 }
