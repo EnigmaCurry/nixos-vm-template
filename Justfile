@@ -200,20 +200,20 @@ ci-secrets repo:
     read -rsp "Secret access key: " rclone_secret_access_key; echo ""
     echo ""
     wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
-    wcli repo secret add -r "{{repo}}" -n s3_bucket -v "$s3_bucket" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n s3_bucket -v "$s3_bucket"
-    wcli repo secret add -r "{{repo}}" -n rclone_type -v "$rclone_type" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n rclone_type -v "$rclone_type"
-    wcli repo secret add -r "{{repo}}" -n rclone_provider -v "$rclone_provider" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n rclone_provider -v "$rclone_provider"
-    wcli repo secret add -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint"
-    wcli repo secret add -r "{{repo}}" -n rclone_region -v "$rclone_region" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n rclone_region -v "$rclone_region"
-    wcli repo secret add -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id"
-    wcli repo secret add -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key" 2>/dev/null || \
-        wcli repo secret update -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key"
+    wcli repo secret add --repo "{{repo}}" --names3_bucket --value "$s3_bucket" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --names3_bucket --value "$s3_bucket"
+    wcli repo secret add --repo "{{repo}}" --namerclone_type --value "$rclone_type" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --namerclone_type --value "$rclone_type"
+    wcli repo secret add --repo "{{repo}}" --namerclone_provider --value "$rclone_provider" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --namerclone_provider --value "$rclone_provider"
+    wcli repo secret add --repo "{{repo}}" --namerclone_endpoint --value "$rclone_endpoint" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --namerclone_endpoint --value "$rclone_endpoint"
+    wcli repo secret add --repo "{{repo}}" --namerclone_region --value "$rclone_region" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --namerclone_region --value "$rclone_region"
+    wcli repo secret add --repo "{{repo}}" --namerclone_access_key_id --value "$rclone_access_key_id" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --namerclone_access_key_id --value "$rclone_access_key_id"
+    wcli repo secret add --repo "{{repo}}" --namerclone_secret_access_key --value "$rclone_secret_access_key" 2>/dev/null || \
+        wcli repo secret update --repo "{{repo}}" --namerclone_secret_access_key --value "$rclone_secret_access_key"
     echo "All secrets configured for {{repo}}"
 
 _completion_profile:
