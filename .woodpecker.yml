@@ -58,6 +58,7 @@ steps:
           git_sha=$(echo "$filename" | sed 's/.*-\([a-f0-9]*\)\.qcow2$/\1/')
           sha256=$(sha256sum "$f" | cut -d' ' -f1)
           url="${S3_PUBLIC_URL%/}/${filename}"
+          echo "DEBUG: filename=$filename slug=$slug profile_key=$profile_key url=$url"
           manifest=$(echo "$manifest" | jq \
             --arg key "$profile_key" \
             --arg url "$url" \
