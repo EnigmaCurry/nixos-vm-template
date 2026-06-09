@@ -1,8 +1,6 @@
 labels:
   backend: local
 
-timeout: 30
-
 when:
   - event: push
     branch: dev
