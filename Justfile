@@ -204,11 +204,11 @@ ci-secrets:
     wcli repo show "$repo" >/dev/null 2>&1 || {
         echo "Activating repo in Woodpecker..."
         wcli repo sync
-        forge_id=$(wcli repo sync 2>&1 | grep "^{{repo}} " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
+        forge_id=$(wcli repo sync 2>&1 | grep "^$repo " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
         if [ -n "$forge_id" ]; then
             wcli repo add "$forge_id"
         else
-            echo "Error: Could not find forge remote ID for {{repo}}" >&2
+            echo "Error: Could not find forge remote ID for $repo" >&2
             exit 1
         fi
     }
@@ -226,7 +226,7 @@ ci-secrets:
         wcli repo secret update --repo "$repo" --name rclone_access_key_id --value "$rclone_access_key_id"
     wcli repo secret add --repo "$repo" --name rclone_secret_access_key --value "$rclone_secret_access_key" 2>/dev/null || \
         wcli repo secret update --repo "$repo" --name rclone_secret_access_key --value "$rclone_secret_access_key"
-    echo "All secrets configured for {{repo}}"
+    echo "All secrets configured for $repo"
 
 _completion_profile:
     @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done
