@@ -42,20 +42,13 @@ steps:
         jq() { nix run nixpkgs#jq -- "$@"; }
         # Clean up stale multipart uploads from previous failed runs
         rclone cleanup "remote:$S3_BUCKET/" -v || true
-        # Delete old images for the same profile
-        for f in output/export/nixos-*.qcow2; do
-          fname=$(basename "$f" .qcow2)
-          profile_prefix="${fname%-*}"    # strip -SHA
-          profile_prefix="${profile_prefix%-*}"  # strip -YYYYMMDD
-          rclone delete "remote:$S3_BUCKET/" --include "${profile_prefix}-*.qcow2" -v
-        done
         # Upload new images
         rclone copy output/export/ "remote:$S3_BUCKET/" --include '*.qcow2' -v
         # Build manifest from existing entries + newly uploaded images
         rclone copy "remote:$S3_BUCKET/manifest.json" /tmp/manifest/ 2>/dev/null || true
         manifest='{"profiles":{}}'
         if [ -f /tmp/manifest/manifest.json ]; then
-          manifest=$(cat /tmp/manifest/manifest.json)
+          manifest=$(cat /tmp/manifest/manifest.json | jq '{profiles: (.profiles // {})}')
         fi
         # List actual files in bucket to prune stale manifest entries
         bucket_files=$(rclone lsf "remote:$S3_BUCKET/" --include 'nixos-*.qcow2')
@@ -90,3 +83,11 @@ steps:
         echo "Manifest:"
         cat /tmp/manifest.json
         rclone copyto /tmp/manifest.json "remote:$S3_BUCKET/manifest.json" --s3-no-check-bucket -v
+        # Delete any qcow2 files not referenced in the manifest
+        manifest_files=$(jq -r '.profiles[].filename' /tmp/manifest.json)
+        rclone lsf "remote:$S3_BUCKET/" --include 'nixos-*.qcow2' | while read -r bucket_file; do
+          if ! echo "$manifest_files" | grep -qxF "$bucket_file"; then
+            echo "Deleting stale image: $bucket_file"
+            rclone deletefile "remote:$S3_BUCKET/$bucket_file" -v
+          fi
+        done
