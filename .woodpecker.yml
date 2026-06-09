@@ -2,18 +2,15 @@ labels:
   backend: local
 
 when:
-  event: [push, manual]
+  - event: push
+    branch: master
+  - event: manual
 
 steps:
   - name: build
     image: bash
     commands:
-      - nix build .#core --out-link result
-      - ls -lh result/nixos.qcow2
-
-  - name: export
-    image: bash
-    commands:
+      - source backends/common.sh && build_profile core
       - source backends/common.sh && export_profile core
       - ls -lh output/export/
 
