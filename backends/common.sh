@@ -69,7 +69,7 @@ is_semi_mutable() {
 }
 
 # Generate guestfish commands to copy deploy keys from machine config to /var disk.
-# Keys are stored as machines/<name>/deploy_keys/<owner>__<repo> (private key files).
+# Keys are stored as pairs: <name> (private key) + <name>.conf (host/port/owner/repo).
 # On the VM they land in /identity/deploy_keys/ with the same naming.
 # Returns guestfish command string fragment (empty if no deploy keys).
 # Usage: gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"

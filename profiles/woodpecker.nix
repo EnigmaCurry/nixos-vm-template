@@ -80,10 +80,18 @@
     nix.settings.trusted-users = [ "woodpecker" ];
 
     # Generate SSH config and gitconfig from deploy keys at boot.
-    # Deploy keys are provisioned to /var/identity/deploy_keys/<owner>__<repo>
-    # This service creates:
-    #   ~woodpecker/.ssh/config    - host alias per key (github--<owner>--<repo>)
-    #   ~woodpecker/.gitconfig     - insteadOf rules to route git@github.com:<owner>/<repo> through the alias
+    # Deploy keys in /var/identity/deploy_keys/ as pairs:
+    #   <name>      - private key file
+    #   <name>.conf - config with host, port, owner, repo (one key=value per line)
+    # Example .conf for GitHub:
+    #   host=github.com
+    #   owner=EnigmaCurry
+    #   repo=nixos-vm-template
+    # Example .conf for self-hosted Forgejo on port 2222:
+    #   host=git.example.com
+    #   port=2222
+    #   owner=org
+    #   repo=project
     systemd.services.woodpecker-deploy-keys = {
       description = "Configure SSH and git for deploy keys";
       wantedBy = [ "multi-user.target" ];
@@ -98,7 +106,7 @@
         HOME_DIR="/var/lib/woodpecker"
         SSH_DIR="$HOME_DIR/.ssh"
 
-        if [ ! -d "$DEPLOY_DIR" ] || [ -z "$(ls -A "$DEPLOY_DIR" 2>/dev/null)" ]; then
+        if [ ! -d "$DEPLOY_DIR" ] || [ -z "$(ls -A "$DEPLOY_DIR"/*.conf 2>/dev/null)" ]; then
           echo "No deploy keys found, skipping."
           exit 0
         fi
@@ -112,36 +120,60 @@
         : > "$SSH_CONFIG"
         : > "$GIT_CONFIG"
 
-        for key in "$DEPLOY_DIR"/*; do
-          [ -f "$key" ] || continue
-          filename="$(basename "$key")"
-          # Expect <owner>__<repo> naming
-          owner="''${filename%%__*}"
-          repo="''${filename#*__}"
-          if [ "$owner" = "$filename" ] || [ -z "$repo" ]; then
-            echo "Skipping $filename: expected <owner>__<repo> format"
+        for conf in "$DEPLOY_DIR"/*.conf; do
+          [ -f "$conf" ] || continue
+          keyfile="''${conf%.conf}"
+          if [ ! -f "$keyfile" ]; then
+            echo "Skipping $(basename "$conf"): no matching key file"
             continue
           fi
 
-          alias="github--''${owner}--''${repo}"
+          # Parse config
+          host="" port="22" owner="" repo=""
+          while IFS='=' read -r k v; do
+            case "$k" in
+              host) host="$v" ;;
+              port) port="$v" ;;
+              owner) owner="$v" ;;
+              repo) repo="$v" ;;
+            esac
+          done < "$conf"
+
+          if [ -z "$host" ] || [ -z "$owner" ] || [ -z "$repo" ]; then
+            echo "Skipping $(basename "$conf"): missing host, owner, or repo"
+            continue
+          fi
+
+          filename="$(basename "$keyfile")"
+          host_alias="''${host//./-}"
+          alias="deploy--''${host_alias}--''${owner}--''${repo}"
 
           # Copy key to .ssh so permissions are under woodpecker's home
-          cp "$key" "$SSH_DIR/$filename"
+          cp "$keyfile" "$SSH_DIR/$filename"
           chmod 600 "$SSH_DIR/$filename"
 
           printf '%s\n' \
             "Host $alias" \
-            "    HostName github.com" \
+            "    HostName $host" \
+            "    Port $port" \
             "    User git" \
             "    IdentityFile $SSH_DIR/$filename" \
             "    IdentitiesOnly yes" \
             "    StrictHostKeyChecking accept-new" \
             "" >> "$SSH_CONFIG"
 
+          if [ "$port" = "22" ]; then
+            # Standard port: rewrite git@host:owner/repo style URLs
+            ${pkgs.git}/bin/git config -f "$GIT_CONFIG" \
+              "url.git@''${alias}:''${owner}/''${repo}.insteadOf" \
+              "git@''${host}:''${owner}/''${repo}"
+          fi
+          # Always add ssh:// rewrite (works for any port)
           ${pkgs.git}/bin/git config -f "$GIT_CONFIG" \
-            "url.git@''${alias}:''${owner}/''${repo}.insteadOf" \
-            "git@github.com:''${owner}/''${repo}"
-          echo "Configured deploy key: $owner/$repo -> $alias"
+            "url.ssh://git@''${alias}/''${owner}/''${repo}.insteadOf" \
+            "ssh://git@''${host}:''${port}/''${owner}/''${repo}"
+
+          echo "Configured deploy key: ssh://git@$host:$port/$owner/$repo -> $alias"
         done
 
         chmod 600 "$SSH_CONFIG"
