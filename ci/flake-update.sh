@@ -18,5 +18,5 @@ if git diff --quiet flake.lock; then
 else
     echo "flake.lock updated, committing locally..."
     git add flake.lock
-    git commit -m "flake.lock: update inputs"
+    git commit -m "flake.lock: update inputs [CI SKIP]"
 fi
