@@ -91,18 +91,16 @@ Woodpecker server URL).
 ```bash
 export WOODPECKER_SERVER=https://woodpecker.example.com
 export WOODPECKER_TOKEN=your-api-token
+export CI_REPO=youruser/nixos-vm-template
+export S3_BUCKET=nixos-vm-template
+export S3_PROVIDER=DigitalOcean    # or AWS, Minio
+export S3_ENDPOINT=nyc3.digitaloceanspaces.com
+export S3_REGION=nyc3
+export S3_ACCESS_KEY_ID=your-access-key
 just ci-secrets
 ```
 
-This will prompt for:
-
-- **Repository**: The Forgejo repo name (e.g., `youruser/nixos-vm-template`)
-- **S3 bucket name**: The name of your storage bucket
-- **S3 provider**: e.g., `DigitalOcean`, `AWS`, `Minio`
-- **S3 endpoint**: e.g., `nyc3.digitaloceanspaces.com`
-- **S3 region**: e.g., `nyc3`, `us-east-1`
-- **Access key ID**: Your S3 access key
-- **Secret access key**: Your S3 secret key
+The recipe will prompt for the S3 secret access key interactively.
 
 ## 5. Pipeline
 

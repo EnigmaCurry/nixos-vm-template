@@ -174,30 +174,48 @@ shell:
 test-connection:
     @source {{backend_script}} && test_connection
 
-# Configure Woodpecker CI secrets for S3 image uploads (requires WOODPECKER_SERVER and WOODPECKER_TOKEN)
+# Configure Woodpecker CI secrets for S3 image uploads
+# Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,
+#   S3_BUCKET, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
+# Prompts for: S3_SECRET_ACCESS_KEY
 ci-secrets:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ -z "${WOODPECKER_SERVER:-}" ]; then
-        echo "Error: WOODPECKER_SERVER is not set" >&2
+    missing=()
+    [ -z "${WOODPECKER_SERVER:-}" ] && missing+=("WOODPECKER_SERVER")
+    [ -z "${WOODPECKER_TOKEN:-}" ] && missing+=("WOODPECKER_TOKEN")
+    [ -z "${CI_REPO:-}" ] && missing+=("CI_REPO")
+    [ -z "${S3_BUCKET:-}" ] && missing+=("S3_BUCKET")
+    [ -z "${S3_PROVIDER:-}" ] && missing+=("S3_PROVIDER")
+    [ -z "${S3_ENDPOINT:-}" ] && missing+=("S3_ENDPOINT")
+    [ -z "${S3_REGION:-}" ] && missing+=("S3_REGION")
+    [ -z "${S3_ACCESS_KEY_ID:-}" ] && missing+=("S3_ACCESS_KEY_ID")
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Error: Missing required environment variables:" >&2
+        for v in "${missing[@]}"; do echo "  $v" >&2; done
+        echo "" >&2
+        echo "Example:" >&2
         echo "  export WOODPECKER_SERVER=https://woodpecker.example.com" >&2
-        exit 1
-    fi
-    if [ -z "${WOODPECKER_TOKEN:-}" ]; then
-        echo "Error: WOODPECKER_TOKEN is not set" >&2
         echo "  export WOODPECKER_TOKEN=your-api-token" >&2
+        echo "  export CI_REPO=owner/repo" >&2
+        echo "  export S3_BUCKET=nixos-vm-template" >&2
+        echo "  export S3_PROVIDER=DigitalOcean  # or AWS, Minio" >&2
+        echo "  export S3_ENDPOINT=nyc3.digitaloceanspaces.com" >&2
+        echo "  export S3_REGION=nyc3" >&2
+        echo "  export S3_ACCESS_KEY_ID=your-access-key" >&2
         exit 1
     fi
-    echo "Server: $WOODPECKER_SERVER"
-    echo ""
-    read -rp "Repository (e.g. owner/repo): " repo
-    read -rp "S3 bucket name: " s3_bucket
+    repo="$CI_REPO"
+    s3_bucket="$S3_BUCKET"
     rclone_type="s3"
-    read -rp "S3 provider (e.g. DigitalOcean, AWS, Minio): " rclone_provider
-    read -rp "rclone endpoint (e.g. nyc3.digitaloceanspaces.com): " rclone_endpoint
-    read -rp "rclone region (e.g. nyc3, us-east-1): " rclone_region
-    read -rp "Access key ID: " rclone_access_key_id
-    read -rsp "Secret access key: " rclone_secret_access_key; echo ""
+    rclone_provider="$S3_PROVIDER"
+    rclone_endpoint="$S3_ENDPOINT"
+    rclone_region="$S3_REGION"
+    rclone_access_key_id="$S3_ACCESS_KEY_ID"
+    read -rsp "S3 secret access key: " rclone_secret_access_key; echo ""
+    echo ""
+    echo "Server: $WOODPECKER_SERVER"
+    echo "Repo: $repo"
     echo ""
     wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
     # Activate repo if not already active
