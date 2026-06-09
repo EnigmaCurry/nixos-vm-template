@@ -458,8 +458,13 @@
                                         (remove #(str/includes? % "*"))
                                         vec)
                                    (catch Exception _ []))
-                        pve-host (wiz/ask "PVE host (SSH alias or IP):"
-                                          :suggestions ssh-hosts)
+                        pve-host (if (seq ssh-hosts)
+                                  (let [options (conj ssh-hosts "Other (enter manually)")
+                                        choice (wiz/choose "PVE host:" options)]
+                                    (if (= choice "Other (enter manually)")
+                                      (wiz/ask "PVE host (hostname or IP):")
+                                      choice))
+                                  (wiz/ask "PVE host (hostname or IP):"))
                         _ (do (print (format "  Connecting to %s ... " pve-host))
                               (flush))
                         pve-ssh (fn [cmd]
