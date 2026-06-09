@@ -138,7 +138,7 @@
     (println)
 
     ;; Choose profile
-    (let [profile-key (wiz/choose "Select profile:" profile-keys)
+    (let [profile-key (wiz/choose "Create VM from profile combination:" profile-keys)
           profile-info (get profiles (keyword profile-key))
           image-url (:url profile-info)
           image-sha256 (:sha256 profile-info)]
