@@ -79,4 +79,4 @@ steps:
         echo "$manifest" | jq . > /tmp/manifest.json
         echo "Manifest:"
         cat /tmp/manifest.json
-        rclone copyto /tmp/manifest.json "remote:$S3_BUCKET/manifest.json" -v
+        rclone copyto /tmp/manifest.json "remote:$S3_BUCKET/manifest.json" --s3-no-check-bucket -v
