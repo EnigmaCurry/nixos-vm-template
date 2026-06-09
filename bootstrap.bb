@@ -516,8 +516,9 @@
     (loop []
       (clear-below!)
       (println)
-      (let [action (wiz/choose "What would you like to do?"
-                               ["Create VM" "Manage VMs" "Exit"])]
+      (let [action (try (wiz/choose "What would you like to do?"
+                                    ["Create VM" "Manage VMs" "Exit"])
+                        (catch Exception _ "Exit"))]
         (clear-below!)
         (println)
         (case action
