@@ -99,12 +99,17 @@
   (let [cmd (str/join " " args)]
     (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
+(defn- env-vars
+  "Strip non-string keys from an env map (keeps only real env vars)."
+  [env]
+  (into {} (filter (fn [[k _]] (string? k)) env)))
+
 (defn backend-sh!
   "Run a bash command with the backend sourced. Returns process result."
   [backend env cmd]
   (let [backend-script (str "backends/" backend ".sh")
         full-cmd (format "source %s && %s" backend-script cmd)]
-    (proc/shell {:dir repo-dir :extra-env (merge {"SKIP_BUILD" "true"} env)}
+    (proc/shell {:dir repo-dir :extra-env (merge {"SKIP_BUILD" "true"} (env-vars env))}
                 "bash" "-euo" "pipefail" "-c" full-cmd)))
 
 (defn backend-sh-ok
@@ -113,7 +118,7 @@
   (let [backend-script (str "backends/" backend ".sh")
         full-cmd (format "source %s && %s" backend-script cmd)]
     (str/trim (:out (proc/shell {:dir repo-dir :out :string :err :string
-                                 :extra-env (merge {"SKIP_BUILD" "true"} env)}
+                                 :extra-env (merge {"SKIP_BUILD" "true"} (env-vars env))}
                                 "bash" "-euo" "pipefail" "-c" full-cmd)))))
 
 (defn fetch-json
@@ -284,6 +289,26 @@
           (println)
           (download-profile! profile-key profile-info)
 
+          ;; Pre-allocate VMID for proxmox (avoids interactive bash prompt)
+          (when (= backend "proxmox")
+            (when-let [pve-ssh (:pve-ssh pve-env)]
+              (let [machine-dir (str repo-dir "/machines/" vm-name)]
+                (when-not (.exists (io/file machine-dir "vmid"))
+                  (let [next-id (try (pve-ssh "pvesh get /cluster/nextid")
+                                     (catch Exception _ "100"))
+                        vmid (loop []
+                               (let [id (wiz/ask "VMID:" :default next-id)
+                                     existing (try
+                                                (pve-ssh (format "qm config %s --current 2>/dev/null | grep '^name:' | sed 's/^name: //'" id))
+                                                (catch Exception _ ""))]
+                                 (if (and (not (str/blank? existing))
+                                          (not= existing vm-name))
+                                   (do (println (format "  VMID %s is already in use by VM '%s'." id existing))
+                                       (recur))
+                                   id)))]
+                    (.mkdirs (io/file machine-dir))
+                    (spit (str machine-dir "/vmid") vmid))))))
+
           ;; Create VM
           (println)
           (println (format "Creating VM '%s' with profile '%s' on %s..." vm-name profile-key backend))
@@ -408,16 +433,30 @@
                         _ (println (format "  Node: %s" pve-node-detected))
                         pve-node pve-node-detected
                         ;; Discover storage backends that support VM images
-                        pve-storages (try
-                                      (let [out (pve-ssh "pvesm status --content images 2>/dev/null | awk 'NR>1 && $3==\"active\" {print $1}'")]
-                                        (vec (remove str/blank? (str/split-lines out))))
-                                      (catch Exception _ []))
-                        pve-storage (if (= 1 (count pve-storages))
-                                      (do (println (format "  Storage: %s" (first pve-storages)))
-                                          (first pve-storages))
-                                      (if (seq pve-storages)
-                                        (wiz/choose "PVE storage:" pve-storages)
+                        pve-storage-info (try
+                                          (let [out (pve-ssh "pvesm status --content images 2>/dev/null | awk 'NR>1 && $3==\"active\" {print $1, $2}'")]
+                                            (->> (str/split-lines out)
+                                                 (remove str/blank?)
+                                                 (mapv (fn [line]
+                                                         (let [[name type] (str/split (str/trim line) #"\s+")]
+                                                           {:name name :type type})))))
+                                          (catch Exception _ []))
+                        pve-storage (if (= 1 (count pve-storage-info))
+                                      (do (println (format "  Storage: %s (%s)"
+                                                           (:name (first pve-storage-info))
+                                                           (:type (first pve-storage-info))))
+                                          (:name (first pve-storage-info)))
+                                      (if (seq pve-storage-info)
+                                        (let [choices (mapv #(format "%s (%s)" (:name %) (:type %)) pve-storage-info)
+                                              choice (wiz/choose "PVE storage:" choices)]
+                                          (:name (nth pve-storage-info (.indexOf choices choice))))
                                         (wiz/ask "PVE storage:" :default "local")))
+                        ;; Detect disk format from storage type (lvmthin/lvm require raw)
+                        pve-storage-type (:type (first (filter #(= (:name %) pve-storage) pve-storage-info)))
+                        pve-disk-format (if (or (= pve-storage-type "lvmthin")
+                                                (= pve-storage-type "lvm"))
+                                          "raw"
+                                          "qcow2")
                         ;; Discover bridges
                         pve-bridges (try
                                      (let [out (pve-ssh "ip -br link show type bridge | awk '{print $1}'")]
@@ -432,7 +471,9 @@
                     {"PVE_HOST" pve-host
                      "PVE_NODE" pve-node
                      "PVE_STORAGE" pve-storage
-                     "PVE_BRIDGE" pve-bridge}))]
+                     "PVE_BRIDGE" pve-bridge
+                     "PVE_DISK_FORMAT" pve-disk-format
+                     :pve-ssh pve-ssh}))]
 
     ;; Check dependencies
     (check-deps! backend)
