@@ -175,7 +175,7 @@ test-connection:
     @source {{backend_script}} && test_connection
 
 # Configure Woodpecker CI secrets for S3 image uploads (requires WOODPECKER_SERVER and WOODPECKER_TOKEN)
-ci-secrets repo:
+ci-secrets:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -z "${WOODPECKER_SERVER:-}" ]; then
@@ -188,9 +188,9 @@ ci-secrets repo:
         echo "  export WOODPECKER_TOKEN=your-api-token" >&2
         exit 1
     fi
-    echo "Configuring Woodpecker CI secrets for repo: {{repo}}"
     echo "Server: $WOODPECKER_SERVER"
     echo ""
+    read -rp "Repository (e.g. owner/repo): " repo
     read -rp "S3 bucket name: " s3_bucket
     read -rp "rclone type [s3]: " rclone_type; rclone_type="${rclone_type:-s3}"
     read -rp "rclone provider (e.g. DigitalOcean, AWS, Minio): " rclone_provider
@@ -201,7 +201,7 @@ ci-secrets repo:
     echo ""
     wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
     # Activate repo if not already active
-    wcli repo show "{{repo}}" >/dev/null 2>&1 || {
+    wcli repo show "$repo" >/dev/null 2>&1 || {
         echo "Activating repo in Woodpecker..."
         wcli repo sync
         forge_id=$(wcli repo sync 2>&1 | grep "^{{repo}} " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
@@ -212,20 +212,20 @@ ci-secrets repo:
             exit 1
         fi
     }
-    wcli repo secret add --repo "{{repo}}" --name s3_bucket --value "$s3_bucket" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name s3_bucket --value "$s3_bucket"
-    wcli repo secret add --repo "{{repo}}" --name rclone_type --value "$rclone_type" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name rclone_type --value "$rclone_type"
-    wcli repo secret add --repo "{{repo}}" --name rclone_provider --value "$rclone_provider" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name rclone_provider --value "$rclone_provider"
-    wcli repo secret add --repo "{{repo}}" --name rclone_endpoint --value "$rclone_endpoint" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name rclone_endpoint --value "$rclone_endpoint"
-    wcli repo secret add --repo "{{repo}}" --name rclone_region --value "$rclone_region" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name rclone_region --value "$rclone_region"
-    wcli repo secret add --repo "{{repo}}" --name rclone_access_key_id --value "$rclone_access_key_id" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name rclone_access_key_id --value "$rclone_access_key_id"
-    wcli repo secret add --repo "{{repo}}" --name rclone_secret_access_key --value "$rclone_secret_access_key" 2>/dev/null || \
-        wcli repo secret update --repo "{{repo}}" --name rclone_secret_access_key --value "$rclone_secret_access_key"
+    wcli repo secret add --repo "$repo" --name s3_bucket --value "$s3_bucket" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name s3_bucket --value "$s3_bucket"
+    wcli repo secret add --repo "$repo" --name rclone_type --value "$rclone_type" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_type --value "$rclone_type"
+    wcli repo secret add --repo "$repo" --name rclone_provider --value "$rclone_provider" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_provider --value "$rclone_provider"
+    wcli repo secret add --repo "$repo" --name rclone_endpoint --value "$rclone_endpoint" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_endpoint --value "$rclone_endpoint"
+    wcli repo secret add --repo "$repo" --name rclone_region --value "$rclone_region" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_region --value "$rclone_region"
+    wcli repo secret add --repo "$repo" --name rclone_access_key_id --value "$rclone_access_key_id" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_access_key_id --value "$rclone_access_key_id"
+    wcli repo secret add --repo "$repo" --name rclone_secret_access_key --value "$rclone_secret_access_key" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name rclone_secret_access_key --value "$rclone_secret_access_key"
     echo "All secrets configured for {{repo}}"
 
 _completion_profile:
