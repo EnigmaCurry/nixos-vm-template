@@ -68,6 +68,27 @@ is_semi_mutable() {
     fi
 }
 
+# Generate guestfish commands to copy deploy keys from machine config to /var disk.
+# Keys are stored as machines/<name>/deploy_keys/<owner>__<repo> (private key files).
+# On the VM they land in /identity/deploy_keys/ with the same naming.
+# Returns guestfish command string fragment (empty if no deploy keys).
+# Usage: gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
+guestfish_deploy_keys_cmds() {
+    local machine_dir="$1"
+    local deploy_dir="$machine_dir/deploy_keys"
+    local cmds=""
+    if [ -d "$deploy_dir" ] && [ -n "$(ls -A "$deploy_dir" 2>/dev/null)" ]; then
+        cmds="$cmds : mkdir-p /identity/deploy_keys"
+        for key in "$deploy_dir"/*; do
+            [ -f "$key" ] || continue
+            cmds="$cmds : copy-in $key /identity/deploy_keys/"
+            cmds="$cmds : chmod 0600 /identity/deploy_keys/$(basename "$key")"
+            cmds="$cmds : chown 0 0 /identity/deploy_keys/$(basename "$key")"
+        done
+    fi
+    echo "$cmds"
+}
+
 # Get the VM's IP address for display (from static_ip config, or "<ip>" if DHCP)
 # Usage: vm_ip <name>
 vm_ip() {

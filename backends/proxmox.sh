@@ -426,6 +426,9 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
     fi
 
+    # Copy deploy keys if present
+    gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
+
     # Initialize /var disk
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
@@ -877,6 +880,12 @@ backend_sync_identity() {
         fi
     done
 
+    # Copy deploy keys directory if present
+    if [ -d "$machine_dir/deploy_keys" ] && [ -n "$(ls -A "$machine_dir/deploy_keys" 2>/dev/null)" ]; then
+        mkdir -p "$tmp_identity/deploy_keys"
+        cp "$machine_dir/deploy_keys"/* "$tmp_identity/deploy_keys/"
+    fi
+
     # rsync identity files to PVE node
     pve_rsync "$tmp_identity/" "${PVE_HOST}:${mount_point}/identity/"
 
@@ -892,6 +901,8 @@ backend_sync_identity() {
     pve_ssh "chmod 0644 $mount_point/identity/static_ip 2>/dev/null || true"
     pve_ssh "chmod 0600 $mount_point/identity/root_password_hash 2>/dev/null || true"
     pve_ssh "chmod 0600 $mount_point/identity/woodpecker.env 2>/dev/null || true"
+    pve_ssh "chmod 0700 $mount_point/identity/deploy_keys 2>/dev/null || true"
+    pve_ssh "find $mount_point/identity/deploy_keys -type f -exec chmod 0600 {} + 2>/dev/null || true"
     pve_ssh "chown -R 0:0 $mount_point/identity/"
 
     # Remove static_ip if no longer configured (switch back to DHCP)

@@ -215,6 +215,9 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
     fi
 
+    # Copy deploy keys if present
+    gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
+
     # Initialize /var disk
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
@@ -495,6 +498,9 @@ backend_sync_identity() {
         gf_cmds="$gf_cmds : chmod 0600 /identity/woodpecker.env"
         gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
     fi
+
+    # Update deploy keys
+    gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
 
     eval "$GUESTFISH -a $var_disk $gf_cmds"
     echo "Identity files synced."
