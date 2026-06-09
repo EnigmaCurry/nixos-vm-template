@@ -201,19 +201,19 @@ ci-secrets repo:
     echo ""
     wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
     wcli repo secret add -r "{{repo}}" -n s3_bucket -v "$s3_bucket" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n s3_bucket -v "$s3_bucket"
+        wcli repo secret update -r "{{repo}}" -n s3_bucket -v "$s3_bucket"
     wcli repo secret add -r "{{repo}}" -n rclone_type -v "$rclone_type" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n rclone_type -v "$rclone_type"
+        wcli repo secret update -r "{{repo}}" -n rclone_type -v "$rclone_type"
     wcli repo secret add -r "{{repo}}" -n rclone_provider -v "$rclone_provider" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n rclone_provider -v "$rclone_provider"
+        wcli repo secret update -r "{{repo}}" -n rclone_provider -v "$rclone_provider"
     wcli repo secret add -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint"
+        wcli repo secret update -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint"
     wcli repo secret add -r "{{repo}}" -n rclone_region -v "$rclone_region" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n rclone_region -v "$rclone_region"
+        wcli repo secret update -r "{{repo}}" -n rclone_region -v "$rclone_region"
     wcli repo secret add -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id"
+        wcli repo secret update -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id"
     wcli repo secret add -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key" 2>/dev/null || \
-        wcli secret update -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key"
+        wcli repo secret update -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key"
     echo "All secrets configured for {{repo}}"
 
 _completion_profile:
