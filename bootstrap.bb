@@ -27,7 +27,7 @@
 
 (def repo-url "https://github.com/EnigmaCurry/nixos-vm-template.git")
 (def repo-branch "dev")
-(def default-repo-dir (str (System/getenv "HOME") "/.local/share/nixos-vm-template"))
+(def default-repo-dir (str (System/getenv "HOME") "/.cache/nixos-vm-template"))
 
 ;; ─── Repo detection ────────────────────────────────────────────────────────
 
