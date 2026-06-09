@@ -15,8 +15,32 @@
 {
   # Immutable-mode identity configuration
   config = lib.mkIf (!config.vm.mutable) {
-    # Default hostname (overridden at runtime from /var/identity/hostname)
-    networking.hostName = lib.mkDefault "nixos";
+    # Don't let NixOS manage the hostname - we set it from /var/identity/hostname at boot
+    networking.hostName = lib.mkDefault "";
+
+    # Service to set hostname from /var/identity/hostname at boot
+    systemd.services.vm-hostname = {
+      description = "Set hostname from /var/identity/hostname";
+      wantedBy = [ "sysinit.target" ];
+      before = [ "network-pre.target" "systemd-hostnamed.service" ];
+      after = [ "local-fs.target" ];
+      unitConfig.DefaultDependencies = false;
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        if [ -f /var/identity/hostname ]; then
+          hostname=$(cat /var/identity/hostname | tr -d '\n')
+          ${pkgs.hostname}/bin/hostname "$hostname"
+          echo "Hostname set to: $hostname"
+        fi
+      '';
+    };
+
+    # Tell systemd-hostnamed to read hostname from /var/identity instead of /etc/static
+    systemd.services.systemd-hostnamed.environment.SYSTEMD_ETC_HOSTNAME =
+      lib.mkForce "/var/identity/hostname";
 
     # Ensure identity directory exists on /var
     systemd.tmpfiles.rules = [

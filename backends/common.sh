@@ -606,6 +606,21 @@ set_mutable() {
         current_mode="semi-mutable"
     fi
 
+    # Determine how to run script-wizard
+    local SCRIPT_WIZARD=""
+    if command -v script-wizard &>/dev/null; then
+        SCRIPT_WIZARD="script-wizard"
+    elif command -v nix &>/dev/null && nix --version 2>&1 | grep -q "nix"; then
+        if nix flake --help &>/dev/null; then
+            SCRIPT_WIZARD="nix run github:enigmacurry/script-wizard --"
+        fi
+    fi
+    if [ -z "$SCRIPT_WIZARD" ]; then
+        echo "Error: script-wizard is not installed."
+        echo "Install it from: https://github.com/enigmacurry/script-wizard"
+        exit 1
+    fi
+
     echo "Configure VM mode for '$name'"
     echo ""
     echo "Current mode: $current_mode"
@@ -618,18 +633,28 @@ set_mutable() {
     fi
     local mutable_choice
     mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Semi-mutable (read-only root + writable /nix overlay)" "Mutable (read-write pet VM, use nixos-rebuild)")
+    local new_mode="immutable"
     if [[ "$mutable_choice" == "Mutable"* ]]; then
         echo "true" > "$machine_dir/mutable"
         echo "Mutable mode enabled."
+        new_mode="mutable"
     elif [[ "$mutable_choice" == "Semi-mutable"* ]]; then
         echo "semi" > "$machine_dir/mutable"
         echo "Semi-mutable mode enabled."
+        new_mode="semi-mutable"
     else
         rm -f "$machine_dir/mutable"
         echo "Immutable mode set."
     fi
     echo ""
-    echo "Run 'just recreate $name' to apply the change."
+    # Switching between immutable/semi-mutable only changes the boot image,
+    # so 'upgrade' preserves /var data. Switching to/from mutable changes
+    # the disk layout entirely, requiring 'recreate' (destroys /var).
+    if [ "$current_mode" = "mutable" ] || [ "$new_mode" = "mutable" ]; then
+        echo "Run 'just recreate $name' to apply the change (WARNING: destroys /var data)."
+    else
+        echo "Run 'just upgrade $name' to apply the change (/var data preserved)."
+    fi
 }
 
 # Configure a VM (creates machine config without creating the VM)

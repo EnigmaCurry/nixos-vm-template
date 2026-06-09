@@ -15,6 +15,7 @@ PVE_NODE="${PVE_NODE:-$PVE_HOST}"
 PVE_STORAGE="${PVE_STORAGE:-local}"
 PVE_BRIDGE="${PVE_BRIDGE:-vmbr0}"
 PVE_DISK_FORMAT="${PVE_DISK_FORMAT:-qcow2}"
+PVE_FIREWALL="${PVE_FIREWALL:-1}"
 PVE_BACKUP_STORAGE="${PVE_BACKUP_STORAGE:-local}"
 PVE_STAGING_DIR="${PVE_STAGING_DIR:-/tmp/nixos-vm-staging}"
 
@@ -406,6 +407,13 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/static_ip"
     fi
 
+    # Copy CA certificate if present (for trusting private CAs)
+    if [ -s "$machine_dir/ca-cert.pem" ]; then
+        gf_cmds="$gf_cmds : copy-in $machine_dir/ca-cert.pem /identity/"
+        gf_cmds="$gf_cmds : chmod 0644 /identity/ca-cert.pem"
+        gf_cmds="$gf_cmds : chown 0 0 /identity/ca-cert.pem"
+    fi
+
     # Copy root password hash (empty = no password)
     gf_cmds="$gf_cmds : copy-in $machine_dir/root_password_hash /identity/"
     gf_cmds="$gf_cmds : chmod 0600 /identity/root_password_hash"
@@ -457,7 +465,7 @@ backend_create_disks() {
         --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0,format=${PVE_DISK_FORMAT} \
         --serial0 socket \
         --vga serial0 \
-        --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+        --net0 virtio=$mac_address,bridge=$bridge,firewall=$PVE_FIREWALL"
 
     # Flatten boot disk (remove backing file reference)
     echo "Flattening boot disk for transfer..."
@@ -724,7 +732,7 @@ EOF
         --efidisk0 ${PVE_STORAGE}:1,efitype=4m,pre-enrolled-keys=0,format=${PVE_DISK_FORMAT} \
         --serial0 socket \
         --vga serial0 \
-        --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+        --net0 virtio=$mac_address,bridge=$bridge,firewall=$PVE_FIREWALL"
 
     # Create staging directory on PVE node
     pve_ssh "mkdir -p $PVE_STAGING_DIR/$name"
@@ -863,7 +871,7 @@ backend_sync_identity() {
     echo -n "$machine_id" > "$tmp_identity/machine-id"
 
     # Copy identity files to temp dir (SSH keys excluded - generated on first boot)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs woodpecker.env; do
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash static_ip allowed_cidrs ca-cert.pem woodpecker.env; do
         if [ -f "$machine_dir/$f" ]; then
             cp "$machine_dir/$f" "$tmp_identity/$f"
         fi
@@ -1416,7 +1424,7 @@ clone_vm() {
         bridge="$PVE_BRIDGE"
     fi
     mac_address=$(cat "$dest_machine_dir/mac-address")
-    pve_ssh "qm set $dest_vmid --net0 virtio=$mac_address,bridge=$bridge,firewall=1"
+    pve_ssh "qm set $dest_vmid --net0 virtio=$mac_address,bridge=$bridge,firewall=$PVE_FIREWALL"
 
     # Update memory/vcpus
     pve_ssh "qm set $dest_vmid --memory $memory --cores $vcpus"

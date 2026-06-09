@@ -20,6 +20,7 @@
     ./network-identity.nix
     ./root-password.nix
     ./guest-agent.nix
+    ./ca-cert-identity.nix
     ./zram.nix
   ];
 }

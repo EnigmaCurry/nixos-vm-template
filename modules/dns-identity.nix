@@ -18,8 +18,10 @@ options edns0 trust-ad
 '';
 in
 {
+  options.vm.dnsIdentity = lib.mkEnableOption "systemd-resolved DNS identity management" // { default = true; };
+
   # Immutable-mode DNS identity configuration
-  config = lib.mkIf (!config.vm.mutable) {
+  config = lib.mkIf (!config.vm.mutable && config.vm.dnsIdentity) {
     # Enable systemd-resolved with listeners on 127.0.0.1 and ::1
     # (in addition to the default 127.0.0.53)
     services.resolved.enable = true;

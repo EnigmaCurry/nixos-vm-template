@@ -10,6 +10,9 @@
   # Enable flakes
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
+  # Ghostty terminal support
+  environment.systemPackages = [ pkgs.ghostty.terminfo ];
+
   # Packages are defined in profiles (see profiles/ directory)
   # SSH is enabled via profiles/ssh.nix
 

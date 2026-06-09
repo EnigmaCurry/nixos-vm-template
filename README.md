@@ -699,7 +699,7 @@ Use `just mutable` to select semi-mutable mode for an existing machine config:
 
 ```bash
 just mutable myvm      # Select "Semi-mutable" from the interactive prompt
-just recreate myvm     # Apply the change
+just upgrade myvm      # Apply the change (preserves /var data)
 ```
 
 Or set the `mutable` file manually before creating a new VM:
@@ -759,6 +759,14 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
 | **open-code** | Open Code CLI (open-source AI coding assistant) |
+
+> **Tip for agentic use:** Consider enabling
+> [semi-mutable mode](#semi-mutable-vms) for `claude` or `open-code` VMs
+> (`echo "semi" > machines/<name>/mutable`). This gives a writable `/nix`
+> overlay so that software can be installed on the fly with
+> `nix profile install`, and nix-based projects can build and evaluate
+> flakes — all while keeping the root filesystem immutable and
+> host-upgradeable.
 
 ### Common Combinations
 
