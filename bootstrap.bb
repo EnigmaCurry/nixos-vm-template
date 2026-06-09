@@ -2,18 +2,14 @@
 ;; nixos-vm-template bootstrap
 ;; Create NixOS VMs from pre-built images — no local image build required.
 ;;
-;; One-liner (auto-detects branch from URL):
-;;   bb -e '(def *url* "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/dev/bootstrap.bb") (load-string (slurp *url*))'
+;; One-liner:
+;;   bb -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/dev/bootstrap.bb"))'
 ;;
 ;; Or from a cloned repo:
 ;;   bb bootstrap.bb
 ;;   just bootstrap
 
-(require '[babashka.pods :as pods])
-(pods/load-pod 'enigmacurry/script-wizard "0.3.0")
-
-(require '[pod.enigmacurry.script-wizard :as wiz]
-         '[babashka.process :as proc]
+(require '[babashka.process :as proc]
          '[babashka.http-client :as http]
          '[clojure.java.io :as io]
          '[clojure.string :as str]
@@ -21,63 +17,68 @@
 
 ;; ─── Constants ──────────────────────────────────────────────────────────────
 
+(def repo-url "https://github.com/EnigmaCurry/nixos-vm-template.git")
+(def default-branch "dev")
+(def default-repo-dir (str (System/getenv "HOME") "/.cache/nixos-vm-template"))
+
 (def manifest-url
   (or (System/getenv "NIXOS_MANIFEST_URL")
       "https://nixos-vm-template.nyc3.digitaloceanspaces.com/manifest.json"))
 
-(def repo-url "https://github.com/EnigmaCurry/nixos-vm-template.git")
-(def repo-branch
-  (or (System/getenv "NIXOS_VM_BRANCH")
-      (try
-        (when-let [v (resolve '*url*)]
-          (second (re-find #"/refs/heads/([^/]+)/" (str @v))))
-        (catch Exception _ nil))
-      "dev"))
-(def default-repo-dir (str (System/getenv "HOME") "/.cache/nixos-vm-template"))
-
-;; ─── Repo detection ────────────────────────────────────────────────────────
+;; ─── Repo bootstrap ────────────────────────────────────────────────────────
+;; When loaded from a URL, this section clones/updates the repo and re-execs
+;; the local copy so the user always runs the latest version.
 
 (defn in-repo?
-  "Check if a directory looks like the nixos-vm-template repo."
+  "Check if a directory has the files needed to create VMs."
   [dir]
   (and dir
        (.exists (io/file dir "Justfile"))
-       (.exists (io/file dir "backends" "common.sh"))))
+       (.exists (io/file dir "backends" "common.sh"))
+       (.exists (io/file dir "bootstrap.bb"))))
 
-(defn ensure-repo!
-  "Return path to a usable repo checkout. Clones or updates as needed."
-  []
-  (let [;; Try *file* parent (running from cloned repo)
-        file-dir (try
-                   (let [f (io/file *file*)]
-                     (if (.isAbsolute f)
-                       (.getParent f)
-                       (.getCanonicalPath (.getParentFile f))))
-                   (catch Exception _ nil))]
-    (if (in-repo? file-dir)
-      file-dir
-      ;; Running via URL or from outside repo — use default location
-      (let [dir default-repo-dir]
-        (if (in-repo? dir)
-          (do
-            (println (format "Updating repo in %s ..." dir))
-            (proc/shell {:dir dir :out :string :err :string} "git" "pull" "--ff-only")
-            dir)
-          (do
-            (println (format "Cloning repo to %s (branch: %s) ..." dir repo-branch))
-            (proc/shell {:out :string :err :string}
-                        "git" "clone" "--branch" repo-branch repo-url dir)
-            dir))))))
+(let [file-dir (try
+                 (let [f (io/file *file*)]
+                   (-> (if (.isAbsolute f) f (.getCanonicalFile f))
+                       .getParentFile .getPath))
+                 (catch Exception _ nil))]
+  (when-not (in-repo? file-dir)
+    ;; Not running from a repo checkout — clone/update, then hand off
+    (let [dir default-repo-dir
+          branch (or (System/getenv "NIXOS_VM_BRANCH") default-branch)]
+      (if (in-repo? dir)
+        (do
+          (proc/shell {:dir dir :out :string :err :string}
+                      "git" "fetch" "origin" branch)
+          (proc/shell {:dir dir :out :string :err :string}
+                      "git" "checkout" branch)
+          (proc/shell {:dir dir :out :string :err :string}
+                      "git" "reset" "--hard" (str "origin/" branch)))
+        (do
+          (.mkdirs (.getParentFile (io/file dir)))
+          (proc/shell {:out :string :err :string}
+                      "git" "clone" "--branch" branch repo-url dir)))
+      (let [sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
+                                            "git" "rev-parse" "--short" "HEAD")))]
+        (println (format "Using %s (branch: %s, commit: %s)" dir branch sha)))
+      ;; Re-exec the repo's local copy (guarantees we run the latest code)
+      (load-file (str dir "/bootstrap.bb"))
+      (System/exit 0))))
 
-;; ─── Utilities ──────────────────────────────────────────────────────────────
+;; ─── From here on, we are always running from within a repo checkout ───────
 
-(def repo-dir (atom nil))
+(require '[babashka.pods :as pods])
+(pods/load-pod 'enigmacurry/script-wizard "0.3.0")
+(require '[pod.enigmacurry.script-wizard :as wiz])
+
+(def repo-dir
+  (-> (io/file *file*) .getCanonicalFile .getParentFile .getPath))
 
 (defn sh
   "Run a shell command in repo dir. Throws on non-zero exit."
   [& args]
   (let [cmd (str/join " " args)]
-    (proc/shell {:out :string :err :string :dir @repo-dir} "bash" "-c" cmd)))
+    (proc/shell {:out :string :err :string :dir repo-dir} "bash" "-c" cmd)))
 
 (defn sh-ok
   "Run a shell command, return stdout trimmed."
@@ -88,7 +89,7 @@
   "Run a shell command with inherited stdout/stderr (visible to user)."
   [& args]
   (let [cmd (str/join " " args)]
-    (proc/shell {:dir @repo-dir} "bash" "-c" cmd)))
+    (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
 (defn fetch-json
   "Fetch and parse JSON from a URL."
@@ -111,9 +112,6 @@
   (println "  nixos-vm-template bootstrap")
   (println "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
   (println)
-
-  ;; Ensure we have a repo checkout
-  (reset! repo-dir (ensure-repo!))
 
   ;; Fetch manifest
   (print "Fetching image manifest... ")
@@ -150,7 +148,7 @@
 
         ;; Download image
         (println)
-        (let [profile-dir (str @repo-dir "/output/profiles/" profile-key)
+        (let [profile-dir (str repo-dir "/output/profiles/" profile-key)
               image-path (str profile-dir "/nixos.qcow2")
               needs-download? (atom true)]
 
@@ -185,7 +183,7 @@
         (println)
         (println (format "Creating VM '%s' with profile '%s'..." vm-name profile-key))
         (println)
-        (let [result (proc/shell {:dir @repo-dir
+        (let [result (proc/shell {:dir repo-dir
                                   :extra-env {"SKIP_BUILD" "true"}}
                                  "just" "create-batch" vm-name profile-key)]
           (when (not= 0 (:exit result))
