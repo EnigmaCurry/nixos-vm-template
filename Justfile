@@ -174,6 +174,47 @@ shell:
 test-connection:
     @source {{backend_script}} && test_connection
 
+# Configure Woodpecker CI secrets for S3 image uploads (requires WOODPECKER_SERVER and WOODPECKER_TOKEN)
+ci-secrets repo:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${WOODPECKER_SERVER:-}" ]; then
+        echo "Error: WOODPECKER_SERVER is not set" >&2
+        echo "  export WOODPECKER_SERVER=https://woodpecker.example.com" >&2
+        exit 1
+    fi
+    if [ -z "${WOODPECKER_TOKEN:-}" ]; then
+        echo "Error: WOODPECKER_TOKEN is not set" >&2
+        echo "  export WOODPECKER_TOKEN=your-api-token" >&2
+        exit 1
+    fi
+    echo "Configuring Woodpecker CI secrets for repo: {{repo}}"
+    echo "Server: $WOODPECKER_SERVER"
+    echo ""
+    read -rp "S3 bucket name: " s3_bucket
+    read -rp "rclone type [s3]: " rclone_type; rclone_type="${rclone_type:-s3}"
+    read -rp "rclone provider (e.g. DigitalOcean, AWS, Minio): " rclone_provider
+    read -rp "rclone endpoint (e.g. nyc3.digitaloceanspaces.com): " rclone_endpoint
+    read -rp "rclone region (e.g. nyc3, us-east-1): " rclone_region
+    read -rp "Access key ID: " rclone_access_key_id
+    read -rsp "Secret access key: " rclone_secret_access_key; echo ""
+    echo ""
+    woodpecker-cli secret add -r "{{repo}}" -n s3_bucket -v "$s3_bucket" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n s3_bucket -v "$s3_bucket"
+    woodpecker-cli secret add -r "{{repo}}" -n rclone_type -v "$rclone_type" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n rclone_type -v "$rclone_type"
+    woodpecker-cli secret add -r "{{repo}}" -n rclone_provider -v "$rclone_provider" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n rclone_provider -v "$rclone_provider"
+    woodpecker-cli secret add -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n rclone_endpoint -v "$rclone_endpoint"
+    woodpecker-cli secret add -r "{{repo}}" -n rclone_region -v "$rclone_region" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n rclone_region -v "$rclone_region"
+    woodpecker-cli secret add -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n rclone_access_key_id -v "$rclone_access_key_id"
+    woodpecker-cli secret add -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key" 2>/dev/null || \
+        woodpecker-cli secret update -r "{{repo}}" -n rclone_secret_access_key -v "$rclone_secret_access_key"
+    echo "All secrets configured for {{repo}}"
+
 _completion_profile:
     @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done
 
