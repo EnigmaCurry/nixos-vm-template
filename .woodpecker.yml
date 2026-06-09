@@ -1,3 +1,6 @@
+labels:
+  backend: local
+
 when:
   event: [push, manual]
 
