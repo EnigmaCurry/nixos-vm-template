@@ -820,6 +820,11 @@ With a 4GB VM and an assumed 3:1 compression ratio:
 The zram device itself lives in RAM, so higher values trade active
 memory for more compressed swap capacity.
 
+## Continuous Integration
+
+Automated image builds and S3 publishing via Woodpecker CI. See
+[CI.md](CI.md) for setup instructions.
+
 ## Machine Configuration
 
 Each VM has a machine config directory at `machines/<name>/` containing:
