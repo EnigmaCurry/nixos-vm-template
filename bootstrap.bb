@@ -58,7 +58,7 @@
             (proc/shell {:dir dir :out :string :err :string} "git" "pull" "--ff-only")
             dir)
           (do
-            (println (format "Cloning repo to %s ..." dir))
+            (println (format "Cloning repo to %s (branch: %s) ..." dir repo-branch))
             (proc/shell {:out :string :err :string}
                         "git" "clone" "--branch" repo-branch repo-url dir)
             dir))))))
