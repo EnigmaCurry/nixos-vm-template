@@ -8,6 +8,11 @@ when:
   - event: cron
 
 steps:
+  - name: gc
+    image: bash
+    commands:
+      - bash ci/nix-gc.sh
+
   - name: update
     image: bash
     commands:
