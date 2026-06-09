@@ -146,47 +146,76 @@
       ;; Ask for VM name
       (let [vm-name (wiz/ask "VM name:" :default "nixos")]
 
-        ;; Download image
+        ;; Backend selection
         (println)
-        (let [profile-dir (str repo-dir "/output/profiles/" profile-key)
-              image-path (str profile-dir "/nixos.qcow2")
-              needs-download? (atom true)]
+        (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
+              ;; Proxmox-specific settings
+              pve-env (when (= backend "proxmox")
+                        (let [pve-host (wiz/ask "PVE host (SSH alias or IP):")
+                              pve-node (wiz/ask "PVE node name:" :default pve-host)
+                              pve-storage (wiz/ask "PVE storage:" :default "local")
+                              pve-bridge (wiz/ask "PVE bridge:" :default "vmbr0")]
+                          {"PVE_HOST" pve-host
+                           "PVE_NODE" pve-node
+                           "PVE_STORAGE" pve-storage
+                           "PVE_BRIDGE" pve-bridge}))]
 
-          ;; Check if image already exists with correct checksum
-          (when (.exists (io/file image-path))
-            (print "  Checking existing image... ")
-            (flush)
-            (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
-              (if (= actual image-sha256)
-                (do (println "OK (checksum matches)")
-                    (reset! needs-download? false))
-                (println "stale (re-downloading)"))))
+          ;; VM specs
+          (println)
+          (let [memory (wiz/ask "Memory (MB):" :default "2048")
+                vcpus (wiz/ask "vCPUs:" :default "2")
+                var-size (wiz/ask "/var disk size:" :default "30G")
+                network (if (= backend "libvirt")
+                          (let [net-choice (wiz/choose "Network:"
+                                                       ["NAT (default libvirt network)"
+                                                        "Bridge (specify name)"])]
+                            (if (str/starts-with? net-choice "NAT")
+                              "nat"
+                              (str "bridge:" (wiz/ask "Bridge name:" :default "virbr0"))))
+                          "nat")]
 
-          (when @needs-download?
-            (.mkdirs (io/file profile-dir))
-            (println (format "Downloading %s (%s)..."
-                             (:filename profile-info)
-                             (format-size (:size profile-info))))
-            (sh-inherit! (format "curl -fL --progress-bar -o '%s' '%s'" image-path image-url))
-            (print "  Verifying checksum... ")
-            (flush)
-            (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
-              (if (= actual image-sha256)
-                (println "OK")
-                (do (println "FAILED")
-                    (println (format "  Expected: %s" image-sha256))
-                    (println (format "  Actual:   %s" actual))
-                    (io/delete-file image-path true)
-                    (System/exit 1))))))
+            ;; Download image
+            (println)
+            (let [profile-dir (str repo-dir "/output/profiles/" profile-key)
+                  image-path (str profile-dir "/nixos.qcow2")
+                  needs-download? (atom true)]
 
-        ;; Create VM via just create-batch (reuses all existing backend logic)
-        (println)
-        (println (format "Creating VM '%s' with profile '%s'..." vm-name profile-key))
-        (println)
-        (let [result (proc/shell {:dir repo-dir
-                                  :extra-env {"SKIP_BUILD" "true"}}
-                                 "just" "create-batch" vm-name profile-key)]
-          (when (not= 0 (:exit result))
-            (System/exit (:exit result))))))))
+              ;; Check if image already exists with correct checksum
+              (when (.exists (io/file image-path))
+                (print "  Checking existing image... ")
+                (flush)
+                (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
+                  (if (= actual image-sha256)
+                    (do (println "OK (checksum matches)")
+                        (reset! needs-download? false))
+                    (println "stale (re-downloading)"))))
+
+              (when @needs-download?
+                (.mkdirs (io/file profile-dir))
+                (println (format "Downloading %s (%s)..."
+                                 (:filename profile-info)
+                                 (format-size (:size profile-info))))
+                (sh-inherit! (format "curl -fL --progress-bar -o '%s' '%s'" image-path image-url))
+                (print "  Verifying checksum... ")
+                (flush)
+                (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
+                  (if (= actual image-sha256)
+                    (println "OK")
+                    (do (println "FAILED")
+                        (println (format "  Expected: %s" image-sha256))
+                        (println (format "  Actual:   %s" actual))
+                        (io/delete-file image-path true)
+                        (System/exit 1))))))
+
+            ;; Create VM via just create-batch (reuses all existing backend logic)
+            (println)
+            (println (format "Creating VM '%s' with profile '%s' on %s..." vm-name profile-key backend))
+            (println)
+            (let [env (merge {"SKIP_BUILD" "true" "BACKEND" backend} pve-env)
+                  result (proc/shell {:dir repo-dir :extra-env env}
+                                     "just" "create-batch" vm-name profile-key
+                                     memory vcpus var-size network)]
+              (when (not= 0 (:exit result))
+                (System/exit (:exit result))))))))))
 
 (-main)
