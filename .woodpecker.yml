@@ -29,6 +29,7 @@ steps:
         from_secret: rclone_endpoint
       RCLONE_CONFIG_REMOTE_REGION:
         from_secret: rclone_region
+      RCLONE_CONFIG_REMOTE_ACL: public-read
       S3_BUCKET:
         from_secret: s3_bucket
       S3_PUBLIC_URL:
