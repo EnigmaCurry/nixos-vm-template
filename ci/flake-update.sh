@@ -17,6 +17,6 @@ if git diff --quiet flake.lock; then
     echo "flake.lock unchanged, nothing to commit."
 else
     echo "flake.lock updated, committing locally..."
-    git add flake.lock
-    git commit -m "flake.lock: update inputs [CI SKIP]"
+    git -c user.name="Woodpecker CI" -c user.email="ci@localhost" add flake.lock
+    git -c user.name="Woodpecker CI" -c user.email="ci@localhost" commit -m "flake.lock: update inputs [CI SKIP]"
 fi
