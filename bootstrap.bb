@@ -101,11 +101,15 @@
     (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
 (defn section-break!
-  "Print a visual separator between wizard sections."
+  "Print a visual separator and flush terminal input buffer."
   []
   (println)
   (println "  ──────────────────────────────────")
-  (println))
+  (println)
+  ;; Drain any stale bytes from terminal input buffer
+  (try (proc/shell {:out :string :err :string}
+                   "bash" "-c" "read -t 0.1 -n 10000 < /dev/tty 2>/dev/null || true")
+       (catch Exception _ nil)))
 
 (defn- env-vars
   "Strip non-string keys from an env map (keeps only real env vars)."
