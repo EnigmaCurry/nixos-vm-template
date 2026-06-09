@@ -405,7 +405,8 @@
                                              (println (format "  Could not SSH to %s." pve-host))
                                              (println "  Ensure SSH is configured: ssh-copy-id root@<host>")
                                              (System/exit 1)))
-                        pve-node (wiz/ask "PVE node name:" :default pve-node-detected)
+                        _ (println (format "  Node: %s" pve-node-detected))
+                        pve-node pve-node-detected
                         ;; Discover storage backends that support VM images
                         pve-storages (try
                                       (let [out (pve-ssh "pvesm status --content images 2>/dev/null | awk 'NR>1 && $3==\"active\" {print $1}'")]
