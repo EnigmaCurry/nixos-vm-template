@@ -378,7 +378,7 @@
 
         ;; Action submenu
         (clear-below!)
-    (println)
+        (println)
         (let [action (wiz/choose (format "Action for '%s':" vm-name)
                                  ["Upgrade (new image, preserve /var data)"
                                   "Destroy (delete VM and disks, keep config)"
@@ -507,7 +507,7 @@
     (let [action (wiz/choose "What would you like to do?"
                              ["Create VM" "Manage VMs"])]
       (clear-below!)
-    (println)
+      (println)
       (case action
         "Create VM"  (action-create-vm! backend pve-env)
         "Manage VMs" (action-manage-vms! backend pve-env)))))
