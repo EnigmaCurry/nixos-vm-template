@@ -377,7 +377,16 @@
   ;; Backend selection (first, since deps depend on it)
   (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
         pve-env (when (= backend "proxmox")
-                  (let [pve-host (wiz/ask "PVE host (SSH alias or IP):")
+                  (let [ssh-hosts (try
+                                   (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
+                                        str/split-lines
+                                        (keep #(second (re-find #"(?i)^\s*Host\s+(.+)" %)))
+                                        (mapcat #(str/split % #"\s+"))
+                                        (remove #(str/includes? % "*"))
+                                        vec)
+                                   (catch Exception _ []))
+                        pve-host (wiz/ask "PVE host (SSH alias or IP):"
+                                          :suggestions ssh-hosts)
                         pve-node (wiz/ask "PVE node name:" :default pve-host)
                         pve-storage (wiz/ask "PVE storage:" :default "local")
                         pve-bridge (wiz/ask "PVE bridge:" :default "vmbr0")]
