@@ -204,11 +204,13 @@ ci-secrets:
     wcli repo show "$repo" >/dev/null 2>&1 || {
         echo "Activating repo in Woodpecker..."
         wcli repo sync
-        forge_id=$(wcli repo sync 2>&1 | grep "^$repo " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
+        sync_output=$(wcli repo sync 2>&1)
+        forge_id=$(echo "$sync_output" | grep "^$repo " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
         if [ -n "$forge_id" ]; then
             wcli repo add "$forge_id"
         else
-            echo "Error: Could not find forge remote ID for $repo" >&2
+            echo "Error: Could not find '$repo' in forge. Available repos:" >&2
+            echo "$sync_output" >&2
             exit 1
         fi
     }
