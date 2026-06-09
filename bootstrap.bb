@@ -502,15 +502,17 @@
     ;; Check dependencies
     (check-deps! backend)
 
-    ;; Main menu
-    (clear-below!)
-    (println)
-    (let [action (wiz/choose "What would you like to do?"
-                             ["Create VM" "Manage VMs"])]
+    ;; Main menu loop
+    (loop []
       (clear-below!)
       (println)
-      (case action
-        "Create VM"  (action-create-vm! backend pve-env)
-        "Manage VMs" (action-manage-vms! backend pve-env)))))
+      (let [action (wiz/choose "What would you like to do?"
+                               ["Create VM" "Manage VMs" "Exit"])]
+        (clear-below!)
+        (println)
+        (case action
+          "Create VM"  (do (action-create-vm! backend pve-env) (recur))
+          "Manage VMs" (do (action-manage-vms! backend pve-env) (recur))
+          "Exit"       (println "Bye."))))))
 
 (-main)
