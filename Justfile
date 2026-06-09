@@ -207,7 +207,8 @@ ci-secrets:
         echo "$sync_output"
         forge_id=$(echo "$sync_output" | grep "^${repo} " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
         if [ -n "$forge_id" ]; then
-            wcli repo add "$forge_id"
+            echo "Found forge ID: $forge_id"
+            wcli repo add "$forge_id" || { echo "Error: failed to activate repo (forge ID: $forge_id)" >&2; exit 1; }
         else
             echo "Error: Could not find '$repo' in forge. Available repos:" >&2
             echo "$sync_output" >&2
