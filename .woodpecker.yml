@@ -5,8 +5,14 @@ when:
   - event: push
     branch: dev
   - event: manual
+  - event: cron
 
 steps:
+  - name: update
+    image: bash
+    commands:
+      - bash ci/flake-update.sh
+
   - name: build
     image: bash
     commands:
