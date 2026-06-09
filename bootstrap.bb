@@ -99,10 +99,10 @@
   (let [cmd (str/join " " args)]
     (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
-(defn reset-terminal!
-  "Reset terminal state after script-wizard prompts."
+(defn clear-below!
+  "Clear any leftover wizard output below the cursor."
   []
-  (print "\033[0m")
+  (print "\033[J")
   (flush))
 
 (defn- env-vars
@@ -377,7 +377,7 @@
             vm-name (:name (nth machines (.indexOf choices choice)))]
 
         ;; Action submenu
-        (reset-terminal!)
+        (clear-below!)
     (println)
         (let [action (wiz/choose (format "Action for '%s':" vm-name)
                                  ["Upgrade (new image, preserve /var data)"
@@ -502,11 +502,11 @@
     (check-deps! backend)
 
     ;; Main menu
-    (reset-terminal!)
+    (clear-below!)
     (println)
     (let [action (wiz/choose "What would you like to do?"
                              ["Create VM" "Manage VMs"])]
-      (reset-terminal!)
+      (clear-below!)
     (println)
       (case action
         "Create VM"  (action-create-vm! backend pve-env)
