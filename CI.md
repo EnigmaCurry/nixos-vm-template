@@ -103,21 +103,93 @@ just ci-secrets
 
 The recipe will prompt for the S3 secret access key interactively.
 
-## 5. Pipeline
+## 5. Deploy Keys
+
+The CI pipeline can push `flake.lock` updates back to the repository
+after a successful build. This requires SSH deploy keys so the
+Woodpecker agent can authenticate with the git remote.
+
+### Setup
+
+Generate a keypair for each repository the agent needs write access to:
+
+```bash
+ssh-keygen -t ed25519 -N "" -f nixos-vm-template
+```
+
+On the VM, place the files in `/var/identity/deploy_keys/`:
+
+```
+/var/identity/deploy_keys/nixos-vm-template        # private key
+/var/identity/deploy_keys/nixos-vm-template.pub     # public key (optional, unused)
+/var/identity/deploy_keys/nixos-vm-template.conf    # connection config
+```
+
+The `.conf` file maps the key to a specific remote:
+
+```ini
+host=git.example.com
+port=2222
+owner=youruser
+repo=nixos-vm-template
+```
+
+For GitHub (standard SSH port 22), `port` can be omitted.
+
+Add the public key as a deploy key on the repository with **write
+access** enabled.
+
+### How it works
+
+At boot, the `woodpecker-deploy-keys` systemd service reads all
+`*.conf` files from `/var/identity/deploy_keys/` and generates:
+
+- **`~woodpecker/.ssh/config`** — an SSH host alias per key with the
+  correct hostname, port, and identity file
+- **`~woodpecker/.gitconfig`** — `url.<alias>.insteadOf` rules that
+  transparently rewrite git remote URLs to use the correct alias
+
+This means pipeline scripts use normal git remote URLs and the right
+deploy key is selected automatically.
+
+### Verify
+
+After setup (or after an upgrade that adds the service), verify:
+
+```bash
+sudo systemctl restart woodpecker-deploy-keys
+journalctl -u woodpecker-deploy-keys
+sudo -u woodpecker -H sh -c 'cd ~ && git ls-remote ssh://git@git.example.com:2222/youruser/nixos-vm-template.git'
+```
+
+### Managing keys
+
+Keys can be managed either from the workstation (in
+`machines/<vm>/deploy_keys/`, synced via `just upgrade`) or directly
+on the VM (in `/var/identity/deploy_keys/`). Pick one approach per VM
+and stick with it to avoid drift.
+
+## 6. Pipeline
 
 The pipeline is defined in `.woodpecker.yml`. By default it:
 
-1. **Builds** the `core` profile image using `nix build`
-2. **Exports** it with a release filename
+1. **Updates** flake inputs (`nix flake update`) to track the latest
+   nixpkgs and other upstream dependencies
+2. **Builds** profile images using `nix build`
+3. **Exports** them with release filenames
    (e.g., `nixos-core-20260609-abc1234.qcow2`)
-3. **Uploads** to S3, replacing any previous image for the same profile
-4. **Updates** `manifest.json` in the bucket root with URLs and sha256
+4. **Uploads** to S3, replacing any previous image for the same profile
+5. **Updates** `manifest.json` in the bucket root with URLs and sha256
    checksums for all available images
+6. **Pushes** the updated `flake.lock` back to the repository (only if
+   the build and upload succeeded, and only if `flake.lock` changed)
 
-The pipeline triggers on push to `master` and can be run manually from
-the Woodpecker UI on any branch.
+The pipeline triggers on push to `dev`, on manual runs, and on cron
+events. To set up automatic rolling releases, configure a cron
+schedule in the Woodpecker UI (e.g., daily or weekly) for the `dev`
+branch.
 
-### Adding more profiles
+### Adding more profile builds
 
 Edit `.woodpecker.yml` to build additional profiles:
 
@@ -132,7 +204,7 @@ steps:
       - source backends/common.sh && export_profile core,docker
 ```
 
-## 6. Upgrading the Agent
+## 7. Upgrading the Agent
 
 To update the agent VM with a new base image:
 
