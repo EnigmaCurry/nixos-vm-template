@@ -40,7 +40,9 @@ steps:
         jq() { nix run nixpkgs#jq -- "$@"; }
         # Delete old images for the same profile
         for f in output/export/nixos-*.qcow2; do
-          profile_prefix=$(basename "$f" | sed -E 's/-[0-9]{8}-[a-f0-9]+\.qcow2$//')
+          fname=$(basename "$f" .qcow2)
+          profile_prefix="${fname%-*}"    # strip -SHA
+          profile_prefix="${profile_prefix%-*}"  # strip -YYYYMMDD
           rclone delete "remote:$S3_BUCKET/" --include "${profile_prefix}-*.qcow2" -v
         done
         # Upload new images
@@ -62,8 +64,11 @@ steps:
         # Add entries for newly uploaded images
         for f in output/export/nixos-*.qcow2; do
           filename=$(basename "$f")
-          profile_slug=$(echo "$filename" | sed 's/^nixos-//; s/-[0-9]\{8\}-[a-f0-9]*.qcow2$//')
-          profile_key=$(echo "$profile_slug" | tr '-' ',')
+          slug="${filename%.qcow2}"
+          slug="${slug%-*}"    # strip -SHA
+          slug="${slug%-*}"    # strip -YYYYMMDD
+          slug="${slug#nixos-}" # strip nixos- prefix
+          profile_key=$(echo "$slug" | tr '-' ',')
           date_stamp=$(echo "$filename" | grep -o '[0-9]\{8\}')
           git_sha=$(echo "$filename" | sed 's/.*-\([a-f0-9]*\)\.qcow2$/\1/')
           sha256=$(sha256sum "$f" | cut -d' ' -f1)
