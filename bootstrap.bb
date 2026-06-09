@@ -99,6 +99,12 @@
   (let [cmd (str/join " " args)]
     (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
+(defn clear-screen!
+  "Clear the terminal screen."
+  []
+  (print "\033[2J\033[H")
+  (flush))
+
 (defn- env-vars
   "Strip non-string keys from an env map (keeps only real env vars)."
   [env]
@@ -371,7 +377,7 @@
             vm-name (:name (nth machines (.indexOf choices choice)))]
 
         ;; Action submenu
-        (println)
+        (clear-screen!)
         (let [action (wiz/choose (format "Action for '%s':" vm-name)
                                  ["Upgrade (new image, preserve /var data)"
                                   "Destroy (delete VM and disks, keep config)"
@@ -495,10 +501,10 @@
     (check-deps! backend)
 
     ;; Main menu
-    (println)
+    (clear-screen!)
     (let [action (wiz/choose "What would you like to do?"
                              ["Create VM" "Manage VMs"])]
-      (println)
+      (clear-screen!)
       (case action
         "Create VM"  (action-create-vm! backend pve-env)
         "Manage VMs" (action-manage-vms! backend pve-env)))))
