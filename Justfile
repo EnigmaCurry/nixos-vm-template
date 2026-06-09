@@ -200,6 +200,7 @@ ci-secrets repo:
     read -rsp "Secret access key: " rclone_secret_access_key; echo ""
     echo ""
     wcli() { nix run nixpkgs#woodpecker-cli -- "$@"; }
+    wcli repo add "{{repo}}" 2>/dev/null || true
     wcli repo secret add --repo "{{repo}}" --name s3_bucket --value "$s3_bucket" 2>/dev/null || \
         wcli repo secret update --repo "{{repo}}" --name s3_bucket --value "$s3_bucket"
     wcli repo secret add --repo "{{repo}}" --name rclone_type --value "$rclone_type" 2>/dev/null || \
