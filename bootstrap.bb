@@ -378,7 +378,6 @@
             vm-name (:name (nth machines (.indexOf choices choice)))]
 
         ;; Action submenu
-        (clear-below!)
         (println)
         (let [action (wiz/choose (format "Action for '%s':" vm-name)
                                  ["Upgrade (new image, preserve /var data)"
@@ -514,12 +513,10 @@
 
     ;; Main menu loop
     (loop []
-      (clear-below!)
       (println)
       (let [action (try (wiz/choose "What would you like to do?"
                                     ["Create VM" "Manage VMs" "Exit"])
                         (catch Exception _ "Exit"))]
-        (clear-below!)
         (println)
         (case action
           "Create VM"  (do (action-create-vm! backend pve-env) (recur))
