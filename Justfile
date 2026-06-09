@@ -205,6 +205,8 @@ ci-secrets:
         echo "Activating repo in Woodpecker..."
         sync_output=$(wcli repo sync 2>&1)
         echo "$sync_output"
+        echo "DEBUG: looking for line starting with '$repo '"
+        echo "$sync_output" | cat -A | grep "$repo" || echo "DEBUG: no match found"
         forge_id=$(echo "$sync_output" | grep "^${repo} " | sed 's/.*forgeRemoteID: //' | sed 's/,.*//')
         if [ -n "$forge_id" ]; then
             echo "Found forge ID: $forge_id"
