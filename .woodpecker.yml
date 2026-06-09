@@ -65,7 +65,7 @@ steps:
           profile_key=$(echo "$profile_slug" | tr '-' ',')
           date_stamp=$(echo "$filename" | grep -o '[0-9]\{8\}')
           git_sha=$(echo "$filename" | sed 's/.*-\([a-f0-9]*\)\.qcow2$/\1/')
-          sha256=$(sha256sum "$f" | awk '{print $1}')
+          sha256=$(sha256sum "$f" | cut -d' ' -f1)
           url="${S3_PUBLIC_URL%/}/${filename}"
           manifest=$(echo "$manifest" | jq \
             --arg key "$profile_key" \
