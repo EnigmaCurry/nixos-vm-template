@@ -1,6 +1,6 @@
 #!/usr/bin/env bb
 ;; nixos-vm-template bootstrap
-;; Create NixOS VMs from pre-built images — no local image build required.
+;; Create and manage NixOS VMs from pre-built images.
 ;;
 ;; One-liner:
 ;;   bb -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/dev/bootstrap.bb"))'
@@ -99,6 +99,23 @@
   (let [cmd (str/join " " args)]
     (proc/shell {:dir repo-dir} "bash" "-c" cmd)))
 
+(defn backend-sh!
+  "Run a bash command with the backend sourced. Returns process result."
+  [backend env cmd]
+  (let [backend-script (str "backends/" backend ".sh")
+        full-cmd (format "source %s && %s" backend-script cmd)]
+    (proc/shell {:dir repo-dir :extra-env (merge {"SKIP_BUILD" "true"} env)}
+                "bash" "-euo" "pipefail" "-c" full-cmd)))
+
+(defn backend-sh-ok
+  "Run a backend command, return stdout trimmed."
+  [backend env cmd]
+  (let [backend-script (str "backends/" backend ".sh")
+        full-cmd (format "source %s && %s" backend-script cmd)]
+    (str/trim (:out (proc/shell {:dir repo-dir :out :string :err :string
+                                 :extra-env (merge {"SKIP_BUILD" "true"} env)}
+                                "bash" "-euo" "pipefail" "-c" full-cmd)))))
+
 (defn fetch-json
   "Fetch and parse JSON from a URL."
   [url]
@@ -158,14 +175,66 @@
       (println)
       (System/exit 1))))
 
-;; ─── Main ───────────────────────────────────────────────────────────────────
+;; ─── Machine listing ────────────────────────────────────────────────────────
 
-(defn -main []
-  (println)
-  (println "  nixos-vm-template bootstrap")
-  (println "  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-  (println)
+(defn list-machines
+  "Return a vector of {:name :profile} maps for existing machine configs."
+  []
+  (let [machines-dir (io/file repo-dir "machines")]
+    (if (.isDirectory machines-dir)
+      (->> (.listFiles machines-dir)
+           (filter #(.isDirectory %))
+           (mapv (fn [dir]
+                   (let [name (.getName dir)
+                         profile (try (str/trim (slurp (str dir "/profile")))
+                                      (catch Exception _ "unknown"))]
+                     {:name name :profile profile})))
+           (sort-by :name))
+      [])))
 
+;; ─── Image download ─────────────────────────────────────────────────────────
+
+(defn download-profile!
+  "Download a profile image if needed. Returns the local image path."
+  [profile-key profile-info]
+  (let [image-url (:url profile-info)
+        image-sha256 (:sha256 profile-info)
+        profile-dir (str repo-dir "/output/profiles/" profile-key)
+        image-path (str profile-dir "/nixos.qcow2")
+        needs-download? (atom true)]
+
+    (when (.exists (io/file image-path))
+      (print "  Checking existing image... ")
+      (flush)
+      (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
+        (if (= actual image-sha256)
+          (do (println "OK (checksum matches)")
+              (reset! needs-download? false))
+          (println "stale (re-downloading)"))))
+
+    (when @needs-download?
+      (.mkdirs (io/file profile-dir))
+      (println (format "Downloading %s (%s)..."
+                       (:filename profile-info)
+                       (format-size (:size profile-info))))
+      (sh-inherit! (format "curl -fL --progress-bar -o '%s' '%s'" image-path image-url))
+      (print "  Verifying checksum... ")
+      (flush)
+      (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
+        (if (= actual image-sha256)
+          (println "OK")
+          (do (println "FAILED")
+              (println (format "  Expected: %s" image-sha256))
+              (println (format "  Actual:   %s" actual))
+              (io/delete-file image-path true)
+              (System/exit 1)))))
+    image-path))
+
+;; ─── Actions ────────────────────────────────────────────────────────────────
+
+(defn action-create-vm!
+  "Create a new VM from a pre-built image."
+  [backend pve-env]
   ;; Fetch manifest
   (print "Fetching image manifest... ")
   (flush)
@@ -192,89 +261,141 @@
 
     ;; Choose profile
     (let [profile-key (wiz/choose "Create VM from profile combination:" profile-keys)
-          profile-info (get profiles (keyword profile-key))
-          image-url (:url profile-info)
-          image-sha256 (:sha256 profile-info)]
+          profile-info (get profiles (keyword profile-key))]
 
-      ;; Ask for VM name
+      ;; VM name
       (let [vm-name (wiz/ask "VM name:" :default "nixos")]
 
-        ;; Backend selection
+        ;; VM specs
         (println)
-        (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
-              ;; Proxmox-specific settings
-              pve-env (when (= backend "proxmox")
-                        (let [pve-host (wiz/ask "PVE host (SSH alias or IP):")
-                              pve-node (wiz/ask "PVE node name:" :default pve-host)
-                              pve-storage (wiz/ask "PVE storage:" :default "local")
-                              pve-bridge (wiz/ask "PVE bridge:" :default "vmbr0")]
-                          {"PVE_HOST" pve-host
-                           "PVE_NODE" pve-node
-                           "PVE_STORAGE" pve-storage
-                           "PVE_BRIDGE" pve-bridge}))]
+        (let [memory (wiz/ask "Memory (MB):" :default "2048")
+              vcpus (wiz/ask "vCPUs:" :default "2")
+              var-size (wiz/ask "/var disk size:" :default "30G")
+              network (if (= backend "libvirt")
+                        (let [net-choice (wiz/choose "Network:"
+                                                     ["NAT (default libvirt network)"
+                                                      "Bridge (specify name)"])]
+                          (if (str/starts-with? net-choice "NAT")
+                            "nat"
+                            (str "bridge:" (wiz/ask "Bridge name:" :default "virbr0"))))
+                        "nat")]
 
-          ;; Check dependencies before proceeding further
-          (check-deps! backend)
-
-          ;; VM specs
+          ;; Download image
           (println)
-          (let [memory (wiz/ask "Memory (MB):" :default "2048")
-                vcpus (wiz/ask "vCPUs:" :default "2")
-                var-size (wiz/ask "/var disk size:" :default "30G")
-                network (if (= backend "libvirt")
-                          (let [net-choice (wiz/choose "Network:"
-                                                       ["NAT (default libvirt network)"
-                                                        "Bridge (specify name)"])]
-                            (if (str/starts-with? net-choice "NAT")
-                              "nat"
-                              (str "bridge:" (wiz/ask "Bridge name:" :default "virbr0"))))
-                          "nat")]
+          (download-profile! profile-key profile-info)
 
-            ;; Download image
-            (println)
-            (let [profile-dir (str repo-dir "/output/profiles/" profile-key)
-                  image-path (str profile-dir "/nixos.qcow2")
-                  needs-download? (atom true)]
+          ;; Create VM
+          (println)
+          (println (format "Creating VM '%s' with profile '%s' on %s..." vm-name profile-key backend))
+          (println)
+          (let [cmd (format "create_vm_batch '%s' '%s' '%s' '%s' '%s' '%s'"
+                            vm-name profile-key memory vcpus var-size network)
+                result (backend-sh! backend pve-env cmd)]
+            (when (not= 0 (:exit result))
+              (System/exit (:exit result)))))))))
 
-              ;; Check if image already exists with correct checksum
-              (when (.exists (io/file image-path))
-                (print "  Checking existing image... ")
-                (flush)
-                (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
-                  (if (= actual image-sha256)
-                    (do (println "OK (checksum matches)")
-                        (reset! needs-download? false))
-                    (println "stale (re-downloading)"))))
+(defn action-manage-vms!
+  "Manage existing VMs — upgrade or destroy."
+  [backend pve-env]
+  (let [machines (list-machines)]
+    (if (empty? machines)
+      (do (println "No existing VMs found.")
+          (println "Use 'Create VM' to create one."))
 
-              (when @needs-download?
-                (.mkdirs (io/file profile-dir))
-                (println (format "Downloading %s (%s)..."
-                                 (:filename profile-info)
-                                 (format-size (:size profile-info))))
-                (sh-inherit! (format "curl -fL --progress-bar -o '%s' '%s'" image-path image-url))
-                (print "  Verifying checksum... ")
-                (flush)
-                (let [actual (first (str/split (sh-ok (format "sha256sum '%s'" image-path)) #"\s+"))]
-                  (if (= actual image-sha256)
-                    (println "OK")
-                    (do (println "FAILED")
-                        (println (format "  Expected: %s" image-sha256))
-                        (println (format "  Actual:   %s" actual))
-                        (io/delete-file image-path true)
-                        (System/exit 1))))))
+      ;; Show machines and pick one
+      (let [choices (mapv (fn [m] (format "%s (profile: %s)" (:name m) (:profile m))) machines)
+            choice (wiz/choose "Select VM:" choices)
+            vm-name (:name (nth machines (.indexOf choices choice)))]
 
-            ;; Create VM by sourcing the backend scripts directly (no just dependency)
-            (println)
-            (println (format "Creating VM '%s' with profile '%s' on %s..." vm-name profile-key backend))
-            (println)
-            (let [backend-script (str "backends/" backend ".sh")
-                  env (merge {"SKIP_BUILD" "true"} pve-env)
-                  cmd (format "source %s && create_vm_batch '%s' '%s' '%s' '%s' '%s' '%s'"
-                              backend-script vm-name profile-key
-                              memory vcpus var-size network)
-                  result (proc/shell {:dir repo-dir :extra-env env}
-                                     "bash" "-euo" "pipefail" "-c" cmd)]
-              (when (not= 0 (:exit result))
-                (System/exit (:exit result))))))))))
+        ;; Action submenu
+        (println)
+        (let [action (wiz/choose (format "Action for '%s':" vm-name)
+                                 ["Upgrade (new image, preserve /var data)"
+                                  "Destroy (delete VM and disks, keep config)"
+                                  "Purge (delete VM, disks, and config)"])]
+
+          (cond
+            ;; ── Upgrade ──
+            (str/starts-with? action "Upgrade")
+            (do
+              ;; Fetch manifest for the latest image
+              (print "\nFetching image manifest... ")
+              (flush)
+              (let [manifest (try (fetch-json manifest-url)
+                                  (catch Exception e
+                                    (println "FAILED")
+                                    (println (format "  %s" (.getMessage e)))
+                                    (System/exit 1)))
+                    _ (println "OK")
+                    ;; Read the VM's current profile
+                    profile (str/trim (slurp (str repo-dir "/machines/" vm-name "/profile")))
+                    profile-info (get (:profiles manifest) (keyword profile))]
+                (if (nil? profile-info)
+                  (do (println (format "No pre-built image available for profile '%s'." profile))
+                      (println "Available profiles in manifest:")
+                      (doseq [k (sort (map name (keys (:profiles manifest))))]
+                        (println (format "  %s" k))))
+
+                  (do
+                    (println (format "\nUpgrading '%s' to latest '%s' image..." vm-name profile))
+                    (download-profile! profile profile-info)
+                    (println)
+                    (let [cmd (format "upgrade_vm '%s'" vm-name)
+                          result (backend-sh! backend pve-env cmd)]
+                      (when (not= 0 (:exit result))
+                        (System/exit (:exit result))))))))
+
+            ;; ── Destroy ──
+            (str/starts-with? action "Destroy")
+            (when (wiz/confirm (format "Destroy VM '%s'? All disk data will be lost." vm-name)
+                               :default :no)
+              (println)
+              ;; Use yes to auto-confirm the bash prompt
+              (let [cmd (format "yes | destroy_vm '%s'" vm-name)
+                    result (backend-sh! backend pve-env cmd)]
+                (when (not= 0 (:exit result))
+                  (System/exit (:exit result)))))
+
+            ;; ── Purge ──
+            (str/starts-with? action "Purge")
+            (when (wiz/confirm (format "Purge VM '%s'? All data AND config will be permanently deleted." vm-name)
+                               :default :no)
+              (println)
+              (let [cmd (format "yes | purge_vm '%s'" vm-name)
+                    result (backend-sh! backend pve-env cmd)]
+                (when (not= 0 (:exit result))
+                  (System/exit (:exit result)))))))))))
+
+;; ─── Main ───────────────────────────────────────────────────────────────────
+
+(defn -main []
+  (println)
+  (println "  nixos-vm-template")
+  (println "  ~~~~~~~~~~~~~~~~~~")
+  (println)
+
+  ;; Backend selection (first, since deps depend on it)
+  (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
+        pve-env (when (= backend "proxmox")
+                  (let [pve-host (wiz/ask "PVE host (SSH alias or IP):")
+                        pve-node (wiz/ask "PVE node name:" :default pve-host)
+                        pve-storage (wiz/ask "PVE storage:" :default "local")
+                        pve-bridge (wiz/ask "PVE bridge:" :default "vmbr0")]
+                    {"PVE_HOST" pve-host
+                     "PVE_NODE" pve-node
+                     "PVE_STORAGE" pve-storage
+                     "PVE_BRIDGE" pve-bridge}))]
+
+    ;; Check dependencies
+    (check-deps! backend)
+
+    ;; Main menu
+    (println)
+    (let [action (wiz/choose "What would you like to do?"
+                             ["Create VM" "Manage VMs"])]
+      (println)
+      (case action
+        "Create VM"  (action-create-vm! backend pve-env)
+        "Manage VMs" (action-manage-vms! backend pve-env)))))
 
 (-main)
