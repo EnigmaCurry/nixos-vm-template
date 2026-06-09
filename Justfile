@@ -36,6 +36,10 @@ config name="" profile="":
 config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
     @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
+# Create a VM from a pre-built image (no local image build required)
+bootstrap:
+    @nix run nixpkgs#babashka -- bootstrap.bb
+
 # Create a new VM interactively (prompts for all settings)
 create name:
     @source {{backend_script}} && create_vm "{{name}}"

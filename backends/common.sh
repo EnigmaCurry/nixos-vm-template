@@ -165,6 +165,17 @@ build_profile() {
     local profile_key
     profile_key=$(normalize_profiles "$profiles")
 
+    # Skip build if SKIP_BUILD=true and image already exists (used by bootstrap)
+    if [ "${SKIP_BUILD:-}" = "true" ]; then
+        local skip_image="$OUTPUT_DIR/profiles/$profile_key/nixos.qcow2"
+        if [ -f "$skip_image" ]; then
+            echo "Skipping build: image already exists at $skip_image"
+            return 0
+        fi
+        echo "Error: SKIP_BUILD=true but image not found: $skip_image"
+        exit 1
+    fi
+
     # Add suffix for mutable/semi-mutable images
     local output_key="$profile_key"
     if [ "$mutable" = "true" ]; then
