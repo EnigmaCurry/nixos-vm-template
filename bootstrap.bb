@@ -408,7 +408,7 @@
                         pve-node (wiz/ask "PVE node name:" :default pve-node-detected)
                         ;; Discover storage backends that support VM images
                         pve-storages (try
-                                      (let [out (pve-ssh "pvesm status --content images 2>/dev/null | awk 'NR>1 && $2==\"active\" {print $1}'")]
+                                      (let [out (pve-ssh "pvesm status --content images 2>/dev/null | awk 'NR>1 && $3==\"active\" {print $1}'")]
                                         (vec (remove str/blank? (str/split-lines out))))
                                       (catch Exception _ []))
                         pve-storage (if (= 1 (count pve-storages))
