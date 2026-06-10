@@ -68,9 +68,56 @@
 
 ;; ─── From here on, we are always running from within a repo checkout ───────
 
-(require '[babashka.pods :as pods])
-(pods/load-pod 'enigmacurry/script-wizard "0.3.0")
-(require '[pod.enigmacurry.script-wizard :as wiz])
+;; ─── script-wizard (direct CLI, no pod) ─────────────────────────────────────
+;; Call the script-wizard binary directly to avoid terminal I/O issues with pods.
+
+(def ^:private sw-bin
+  "Resolve script-wizard binary: check PATH first, then try nix profile."
+  (let [which (fn [cmd]
+                (try (let [r (proc/shell {:out :string :err :string} "which" cmd)]
+                       (when (= 0 (:exit r)) (str/trim (:out r))))
+                     (catch Exception _ nil)))
+        nix-profile (str (System/getenv "HOME") "/.nix-profile/bin/script-wizard")]
+    (or (which "script-wizard")
+        (when (.exists (io/file nix-profile)) nix-profile)
+        (do (println "Error: script-wizard not found.")
+            (println "Install: nix profile install github:EnigmaCurry/script-wizard")
+            (System/exit 1)))))
+
+(defn- sw-run
+  "Run script-wizard with args, return stdout trimmed. Throws on cancel/error."
+  [& args]
+  (let [cmd (into [sw-bin] (map str args))
+        result (apply proc/shell {:out :string :err :inherit :in :inherit} cmd)
+        code (:exit result)]
+    (when (= code 2) (throw (ex-info "canceled" {})))
+    (when (not= code 0) (throw (ex-info (format "script-wizard exited with code %d" code) {})))
+    (str/trim (:out result))))
+
+(def wiz-ns
+  {:choose (fn [question options & {:keys [default]}]
+             (let [args (concat ["choose" question] options
+                                (when default ["--default" default])
+                                ["--cancel-code" "2"])]
+               (apply sw-run args)))
+   :ask    (fn [question & {:keys [default suggestions]}]
+             (let [args (concat ["ask" question]
+                                (when default [default])
+                                (when suggestions
+                                  ["--suggestions" (json/generate-string suggestions)])
+                                ["--cancel-code" "2"])]
+               (apply sw-run args)))
+   :confirm (fn [question & {:keys [default]}]
+              (let [args (concat ["confirm" question]
+                                 (when default [(name default)])
+                                 ["--cancel-code" "2"])]
+                (try (apply sw-run args) true
+                     (catch Exception e
+                       (if (= "canceled" (.getMessage e)) (throw e) false)))))})
+
+(def wiz-choose (:choose wiz-ns))
+(def wiz-ask (:ask wiz-ns))
+(def wiz-confirm (:confirm wiz-ns))
 
 (def repo-dir
   (-> (io/file *file*) .getCanonicalFile .getParentFile .getPath))
@@ -262,9 +309,9 @@
                           (:name (first storage-info)))
                       (if (seq storage-info)
                         (let [choices (mapv #(format "%s (%s)" (:name %) (:type %)) storage-info)
-                              choice (wiz/choose "PVE storage:" choices)]
+                              choice (wiz-choose "PVE storage:" choices)]
                           (:name (nth storage-info (.indexOf choices choice))))
-                        (wiz/ask "PVE storage:" :default "local")))
+                        (wiz-ask "PVE storage:" :default "local")))
         ;; Detect disk format from storage type
         storage-type (:type (first (filter #(= (:name %) pve-storage) storage-info)))
         pve-disk-format (if (or (= storage-type "lvmthin") (= storage-type "lvm"))
@@ -274,8 +321,8 @@
                      (do (println (format "  Bridge: %s" (first bridges)))
                          (first bridges))
                      (if (seq bridges)
-                       (wiz/choose "PVE bridge:" bridges)
-                       (wiz/ask "PVE bridge:" :default "vmbr0")))]
+                       (wiz-choose "PVE bridge:" bridges)
+                       (wiz-ask "PVE bridge:" :default "vmbr0")))]
     (merge pve-env
            {"PVE_STORAGE" pve-storage
             "PVE_BRIDGE" pve-bridge
@@ -311,24 +358,24 @@
     (println)
 
     ;; Choose profile
-    (let [profile-key (wiz/choose "Create VM from profile combination:" profile-keys)
+    (let [profile-key (wiz-choose "Create VM from profile combination:" profile-keys)
           profile-info (get profiles (keyword profile-key))]
 
       ;; VM name
-      (let [vm-name (wiz/ask "VM name:" :default "nixos")]
+      (let [vm-name (wiz-ask "VM name:" :default "nixos")]
 
         ;; VM specs
         (println)
-        (let [memory (wiz/ask "Memory (MB):" :default "2048")
-              vcpus (wiz/ask "vCPUs:" :default "2")
-              var-size (wiz/ask "/var disk size:" :default "30G")
+        (let [memory (wiz-ask "Memory (MB):" :default "2048")
+              vcpus (wiz-ask "vCPUs:" :default "2")
+              var-size (wiz-ask "/var disk size:" :default "30G")
               network (if (= backend "libvirt")
-                        (let [net-choice (wiz/choose "Network:"
+                        (let [net-choice (wiz-choose "Network:"
                                                      ["NAT (default libvirt network)"
                                                       "Bridge (specify name)"])]
                           (if (str/starts-with? net-choice "NAT")
                             "nat"
-                            (str "bridge:" (wiz/ask "Bridge name:" :default "virbr0"))))
+                            (str "bridge:" (wiz-ask "Bridge name:" :default "virbr0"))))
                         "nat")]
 
           ;; PVE per-VM config (storage, bridge, VMID)
@@ -341,7 +388,7 @@
                              (let [next-id (try (pve-ssh "pvesh get /cluster/nextid")
                                                 (catch Exception _ "100"))
                                    vmid (loop []
-                                          (let [id (wiz/ask "VMID:" :default next-id)
+                                          (let [id (wiz-ask "VMID:" :default next-id)
                                                 existing (try
                                                            (pve-ssh (format "qm config %s --current 2>/dev/null | grep '^name:' | sed 's/^name: //'" id))
                                                            (catch Exception _ ""))]
@@ -379,12 +426,12 @@
 
       ;; Show machines and pick one
       (let [choices (mapv (fn [m] (format "%s (profile: %s)" (:name m) (:profile m))) machines)
-            choice (wiz/choose "Select VM:" choices)
+            choice (wiz-choose "Select VM:" choices)
             vm-name (:name (nth machines (.indexOf choices choice)))]
 
         ;; Action submenu
         (section-break!)
-        (let [action (wiz/choose (format "Action for '%s':" vm-name)
+        (let [action (wiz-choose (format "Action for '%s':" vm-name)
                                  ["Upgrade (new image, preserve /var data)"
                                   "Destroy (delete VM and disks, keep config)"
                                   "Purge (delete VM, disks, and config)"])]
@@ -422,7 +469,7 @@
 
             ;; ── Destroy ──
             (str/starts-with? action "Destroy")
-            (when (wiz/confirm (format "Destroy VM '%s'? All disk data will be lost." vm-name)
+            (when (wiz-confirm (format "Destroy VM '%s'? All disk data will be lost." vm-name)
                                :default :no)
               (println)
               (let [cmd (format "echo y | destroy_vm '%s'" vm-name)
@@ -432,7 +479,7 @@
 
             ;; ── Purge ──
             (str/starts-with? action "Purge")
-            (when (wiz/confirm (format "Purge VM '%s'? All data AND config will be permanently deleted." vm-name)
+            (when (wiz-confirm (format "Purge VM '%s'? All data AND config will be permanently deleted." vm-name)
                                :default :no)
               (println)
               (let [cmd (format "echo y | purge_vm '%s'" vm-name)
@@ -449,7 +496,7 @@
   (println)
 
   ;; Backend selection (first, since deps depend on it)
-  (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
+  (let [backend (wiz-choose "Backend:" ["libvirt" "proxmox"])
         pve-env (when (= backend "proxmox")
                   (let [ssh-hosts (try
                                    (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
@@ -461,11 +508,11 @@
                                    (catch Exception _ []))
                         pve-host (if (seq ssh-hosts)
                                   (let [options (conj ssh-hosts "Other (enter manually)")
-                                        choice (wiz/choose "PVE host:" options)]
+                                        choice (wiz-choose "PVE host:" options)]
                                     (if (= choice "Other (enter manually)")
-                                      (wiz/ask "PVE host (hostname or IP):")
+                                      (wiz-ask "PVE host (hostname or IP):")
                                       choice))
-                                  (wiz/ask "PVE host (hostname or IP):"))
+                                  (wiz-ask "PVE host (hostname or IP):"))
                         _ (do (print (format "  Connecting to %s ... " pve-host))
                               (flush))
                         pve-ssh (fn [cmd]
@@ -519,7 +566,7 @@
     ;; Main menu loop
     (loop []
       (section-break!)
-      (let [action (try (wiz/choose "What would you like to do?"
+      (let [action (try (wiz-choose "What would you like to do?"
                                     ["Create VM" "Manage VMs" "Exit"])
                         (catch Exception _ "Exit"))]
         (section-break!)
