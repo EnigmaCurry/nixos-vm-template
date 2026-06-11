@@ -5,6 +5,8 @@ set dotenv-load
 set export
 
 BACKEND := env_var_or_default("BACKEND", "libvirt")
+HOST := if BACKEND == "proxmox" { env_var_or_default("PVE_NODE", env_var_or_default("HOST", `hostname -s`)) } else { env_var_or_default("HOST", `hostname -s`) }
+MACHINES_DIR := env_var_or_default("MACHINES_DIR", "machines/" + BACKEND + "/" + HOST)
 backend_script := if BACKEND == "common" { error("BACKEND cannot be 'common'") } else { "backends/" + BACKEND + ".sh" }
 
 # Default recipe - show available commands
@@ -113,12 +115,12 @@ mutable name:
 profile name +profiles:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ ! -d "machines/{{name}}" ]; then
+    if [ ! -d "{{MACHINES_DIR}}/{{name}}" ]; then
         echo "Error: Machine '{{name}}' does not exist" >&2
         exit 1
     fi
     profiles_csv=$(echo "{{profiles}}" | tr ' ' ',')
-    echo "$profiles_csv" > "machines/{{name}}/profile"
+    echo "$profiles_csv" > "{{MACHINES_DIR}}/{{name}}/profile"
     echo "Set profile for {{name}}: $profiles_csv"
     echo "Run 'just upgrade {{name}}' to apply the new profile."
 
@@ -268,4 +270,4 @@ _completion_network:
     @printf "nat\nbridge\n"
 
 _completion_name:
-    @shopt -s nullglob; for f in machines/*; do basename $f; done
+    @shopt -s nullglob; for f in {{MACHINES_DIR}}/*; do basename $f; done

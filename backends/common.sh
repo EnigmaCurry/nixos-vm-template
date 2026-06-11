@@ -26,6 +26,11 @@ READLINK="${READLINK:-${HOST_CMD:+$HOST_CMD }readlink}"
 CP="${CP:-${HOST_CMD:+$HOST_CMD }cp}"
 OUTPUT_DIR="${OUTPUT_DIR:-output}"
 MACHINES_DIR="${MACHINES_DIR:-machines}"
+# Auto-detect nested structure if BACKEND is set but MACHINES_DIR wasn't explicitly overridden
+if [ "$MACHINES_DIR" = "machines" ] && [ -n "${BACKEND:-}" ]; then
+    _host="${HOST:-$(hostname -s)}"
+    MACHINES_DIR="machines/${BACKEND}/${_host}"
+fi
 
 # Normalize profile list: sort, dedupe, ensure core is included
 # Input: comma-separated profiles (e.g., "docker,python,rust")

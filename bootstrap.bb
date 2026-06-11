@@ -167,17 +167,25 @@
   "Run a bash command with the backend sourced. Returns process result."
   [backend env cmd]
   (let [backend-script (str "backends/" backend ".sh")
-        full-cmd (format "source %s && %s" backend-script cmd)]
-    (proc/shell {:dir repo-dir :extra-env (merge {"SKIP_BUILD" "true"} (env-vars env))}
+        full-cmd (format "source %s && %s" backend-script cmd)
+        machines-dir (get env :machines-dir)]
+    (proc/shell {:dir repo-dir :extra-env (merge {"SKIP_BUILD" "true"
+                                                   "BACKEND" backend
+                                                   "MACHINES_DIR" machines-dir}
+                                                  (env-vars env))}
                 "bash" "-euo" "pipefail" "-c" full-cmd)))
 
 (defn backend-sh-ok
   "Run a backend command, return stdout trimmed."
   [backend env cmd]
   (let [backend-script (str "backends/" backend ".sh")
-        full-cmd (format "source %s && %s" backend-script cmd)]
+        full-cmd (format "source %s && %s" backend-script cmd)
+        machines-dir (get env :machines-dir)]
     (str/trim (:out (proc/shell {:dir repo-dir :out :string :err :string
-                                 :extra-env (merge {"SKIP_BUILD" "true"} (env-vars env))}
+                                 :extra-env (merge {"SKIP_BUILD" "true"
+                                                    "BACKEND" backend
+                                                    "MACHINES_DIR" machines-dir}
+                                                   (env-vars env))}
                                 "bash" "-euo" "pipefail" "-c" full-cmd)))))
 
 (defn fetch-json
@@ -243,14 +251,14 @@
 
 (defn list-machines
   "Return a vector of {:name :profile} maps for existing machine configs."
-  []
-  (let [machines-dir (io/file repo-dir "machines")]
-    (if (.isDirectory machines-dir)
-      (->> (.listFiles machines-dir)
+  [machines-dir]
+  (let [dir (io/file machines-dir)]
+    (if (.isDirectory dir)
+      (->> (.listFiles dir)
            (filter #(.isDirectory %))
-           (mapv (fn [dir]
-                   (let [name (.getName dir)
-                         profile (try (str/trim (slurp (str dir "/profile")))
+           (mapv (fn [d]
+                   (let [name (.getName d)
+                         profile (try (str/trim (slurp (str d "/profile")))
                                       (catch Exception _ "unknown"))]
                      {:name name :profile profile})))
            (sort-by :name))
@@ -332,7 +340,7 @@
 
 (defn action-create-vm!
   "Create a new VM from a pre-built image."
-  [backend pve-env]
+  [backend pve-env machines-dir]
   ;; Fetch manifest
   (print "Fetching image manifest... ")
   (flush)
@@ -382,7 +390,7 @@
           (let [vm-env (if (= backend "proxmox")
                          (let [env (pve-prompt-storage-bridge pve-env)
                                pve-ssh (:pve-ssh pve-env)
-                               machine-dir (str repo-dir "/machines/" vm-name)]
+                               machine-dir (str machines-dir "/" vm-name)]
                            ;; Pre-allocate VMID
                            (when (and pve-ssh (not (.exists (io/file machine-dir "vmid"))))
                              (let [next-id (try (pve-ssh "pvesh get /cluster/nextid")
@@ -418,8 +426,8 @@
 
 (defn action-manage-vms!
   "Manage existing VMs — upgrade or destroy."
-  [backend pve-env]
-  (let [machines (list-machines)]
+  [backend pve-env machines-dir]
+  (let [machines (list-machines machines-dir)]
     (if (empty? machines)
       (do (println "No existing VMs found.")
           (println "Use 'Create VM' to create one."))
@@ -450,7 +458,7 @@
                                     (System/exit 1)))
                     _ (println "OK")
                     ;; Read the VM's current profile
-                    profile (str/trim (slurp (str repo-dir "/machines/" vm-name "/profile")))
+                    profile (str/trim (slurp (str machines-dir "/" vm-name "/profile")))
                     profile-info (get (:profiles manifest) (keyword profile))]
                 (if (nil? profile-info)
                   (do (println (format "No pre-built image available for profile '%s'." profile))
@@ -560,19 +568,26 @@
                      :pve-storage-info pve-storage-info
                      :pve-bridges pve-bridges}))]
 
-    ;; Check dependencies
-    (check-deps! backend)
+    ;; Compute host and machines-dir
+    (let [host (if (= backend "proxmox")
+                 (get pve-env "PVE_NODE")
+                 (str/trim (:out (proc/shell {:out :string :err :string} "hostname" "-s"))))
+          machines-dir (str repo-dir "/machines/" backend "/" host)
+          env (merge (or pve-env {}) {:machines-dir (str "machines/" backend "/" host)})]
 
-    ;; Main menu loop
-    (loop []
-      (section-break!)
-      (let [action (try (wiz-choose "What would you like to do?"
-                                    ["Create VM" "Manage VMs" "Exit"])
-                        (catch Exception _ "Exit"))]
+      ;; Check dependencies
+      (check-deps! backend)
+
+      ;; Main menu loop
+      (loop []
         (section-break!)
-        (case action
-          "Create VM"  (do (action-create-vm! backend pve-env) (recur))
-          "Manage VMs" (do (action-manage-vms! backend pve-env) (recur))
-          "Exit"       (println "Bye."))))))
+        (let [action (try (wiz-choose "What would you like to do?"
+                                      ["Create VM" "Manage VMs" "Exit"])
+                          (catch Exception _ "Exit"))]
+          (section-break!)
+          (case action
+            "Create VM"  (do (action-create-vm! backend env machines-dir) (recur))
+            "Manage VMs" (do (action-manage-vms! backend env machines-dir) (recur))
+            "Exit"       (println "Bye.")))))))
 
 (-main)
