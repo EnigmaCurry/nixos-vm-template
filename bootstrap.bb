@@ -473,7 +473,7 @@
                     (let [cmd (format "upgrade_vm '%s'" vm-name)
                           result (backend-sh! backend pve-env cmd)]
                       (when (not= 0 (:exit result))
-                        (System/exit (:exit result)))))))
+                        (System/exit (:exit result))))))))
 
             ;; ── Destroy ──
             (str/starts-with? action "Destroy")
@@ -493,7 +493,7 @@
               (let [cmd (format "echo y | purge_vm '%s'" vm-name)
                     result (backend-sh! backend pve-env cmd)]
                 (when (not= 0 (:exit result))
-                  (System/exit (:exit result))))))))))))
+                  (System/exit (:exit result)))))))))))
 
 ;; ─── Main ───────────────────────────────────────────────────────────────────
 
