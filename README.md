@@ -149,11 +149,12 @@ builds the images and publishes them to S3-compatible storage.
 
 - Linux build machine with KVM support
 - `nix` package manager (with flakes enabled)
-- `just` (command runner)
-- `bb` ([babashka](https://github.com/babashka/babashka)) — the VM-management
-  commands are implemented in Babashka, so every `just` recipe runs `bb`
-  (install via your package manager or `nix profile add nixpkgs#babashka`)
-- `qemu-img` and `guestfish` (for disk creation)
+
+That's the only prerequisite you install by hand. Every other build tool —
+`just` (command runner), `bb` ([babashka](https://github.com/babashka/babashka),
+which runs the VM-management commands), `qemu-img`, and `guestfish` — is
+provided by this flake's development shell (`nix develop`), so there's no need
+to install them through your distro's package manager.
 
 ## Installation
 
@@ -190,19 +191,23 @@ echo "experimental-features = nix-command flakes" \
     >> ~/.config/nix/nix.conf
 ```
 
-### Install just
+### Enter the development shell
+
+With Nix installed, the build tools come from the flake's development shell.
+From a clone of this repo, run:
 
 ```bash
-# With your package manager
-sudo dnf install just      # Fedora
-sudo apt install just      # Debian/Ubuntu
-sudo pacman -S just        # Arch Linux
+nix develop
+```
 
-# Or with Nix (works on any distro)
-nix profile install nixpkgs#just
+This drops you into a shell with `just`, `bb`, `qemu-img`, `guestfish`, and the
+other build tools on `PATH`. Run the `just` commands shown throughout this guide
+from inside that shell — no per-distro package installs required.
 
-# Or with cargo
-cargo install just
+If you'd prefer `just` on your `PATH` globally instead, install it with Nix:
+
+```bash
+nix profile add nixpkgs#just
 ```
 
 ## Libvirt Backend

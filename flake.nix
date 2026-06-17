@@ -175,6 +175,7 @@
           default = pkgs.mkShell {
             packages = with pkgs; [
               just
+              babashka  # bb - runs the VM-management CLI (src/vm/)
               qemu
               libvirt
               libguestfs-with-appliance
