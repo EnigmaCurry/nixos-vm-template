@@ -454,11 +454,13 @@
             _ (when (seq running-names) (print "  Querying image versions... ") (flush))
             versions (get-vm-versions backend pve-env running-names)
             _ (when (seq running-names) (println "OK"))
+            name-width (apply max 0 (map #(count (:name %)) machines))
             choices (mapv (fn [m]
                            (let [state (get states (:name m) "unknown")
                                  ver (get versions (:name m))
                                  ver-str (when (and ver (not= ver "unknown")) (str " " ver))]
-                             (format "%s [%s] (profile: %s%s)" (:name m) state (:profile m) (or ver-str ""))))
+                             (format (str "%-" name-width "s [%s] (profile: %s%s)")
+                                     (:name m) state (:profile m) (or ver-str ""))))
                           machines)
             choice (wiz/choose "Select VM:" choices)
             vm-name (:name (nth machines (.indexOf choices choice)))]
