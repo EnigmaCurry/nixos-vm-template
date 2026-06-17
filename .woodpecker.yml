@@ -26,18 +26,18 @@ steps:
       # Output lives outside the ephemeral workspace (which is on a small
       # /tmp tmpfs), so clean stale qcow2s from prior runs before exporting.
       - rm -rf "$OUTPUT_DIR/export"
-      - source backends/common.sh && build_profile core
-      - source backends/common.sh && export_profile core
-      - source backends/common.sh && build_profile step-ca
-      - source backends/common.sh && export_profile step-ca
-      - source backends/common.sh && build_profile woodpecker,docker
-      - source backends/common.sh && export_profile woodpecker,docker
-      - source backends/common.sh && build_profile semi-mutable,woodpecker
-      - source backends/common.sh && export_profile semi-mutable,woodpecker
-      - source backends/common.sh && build_profile mutable
-      - source backends/common.sh && export_profile mutable
-      - source backends/common.sh && build_profile podman,nifty-services
-      - source backends/common.sh && export_profile podman,nifty-services
+      - nix run nixpkgs#babashka -- -m vm.cli build core
+      - nix run nixpkgs#babashka -- -m vm.cli export core
+      - nix run nixpkgs#babashka -- -m vm.cli build step-ca
+      - nix run nixpkgs#babashka -- -m vm.cli export step-ca
+      - nix run nixpkgs#babashka -- -m vm.cli build woodpecker,docker
+      - nix run nixpkgs#babashka -- -m vm.cli export woodpecker,docker
+      - nix run nixpkgs#babashka -- -m vm.cli build semi-mutable,woodpecker
+      - nix run nixpkgs#babashka -- -m vm.cli export semi-mutable,woodpecker
+      - nix run nixpkgs#babashka -- -m vm.cli build mutable
+      - nix run nixpkgs#babashka -- -m vm.cli export mutable
+      - nix run nixpkgs#babashka -- -m vm.cli build podman,nifty-services
+      - nix run nixpkgs#babashka -- -m vm.cli export podman,nifty-services
       - ls -lh "$OUTPUT_DIR/export/"
 
   - name: upload

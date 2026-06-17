@@ -198,10 +198,10 @@ steps:
   - name: build
     image: bash
     commands:
-      - source backends/common.sh && build_profile core
-      - source backends/common.sh && export_profile core
-      - source backends/common.sh && build_profile core,docker
-      - source backends/common.sh && export_profile core,docker
+      - nix run nixpkgs#babashka -- -m vm.cli build core
+      - nix run nixpkgs#babashka -- -m vm.cli export core
+      - nix run nixpkgs#babashka -- -m vm.cli build core,docker
+      - nix run nixpkgs#babashka -- -m vm.cli export core,docker
 ```
 
 ## 7. Upgrading the Agent

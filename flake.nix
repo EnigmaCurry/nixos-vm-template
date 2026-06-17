@@ -58,7 +58,7 @@
         # self.shortRev is only populated for git/clean-tree flake refs. The
         # image build evaluates this flake via `getFlake <bare-path>` (to include
         # the full working tree), which drops git metadata, so fall back to the
-        # IMAGE_COMMIT env var (set by build_profile, read here under --impure).
+        # IMAGE_COMMIT env var (set by the image build in vm.profile, read here under --impure).
         envRev = builtins.getEnv "IMAGE_COMMIT";
         rev = self.shortRev or self.dirtyShortRev or
               (if envRev != "" then envRev else "unknown");

@@ -95,7 +95,24 @@ The base image remains untouched. Each VM's boot disk stores only the delta from
 .
 ├── flake.nix           # Main flake defining VM image builds
 ├── flake.lock
-├── Justfile            # Command wrapper for all build operations
+├── Justfile            # Stable user interface; recipes call `bb -m vm.cli ...`
+├── bb.edn              # Babashka project (:paths ["src"])
+├── bootstrap.bb        # Create/manage VMs from pre-built images (no local build)
+├── src/vm/             # VM-management logic (Babashka/Clojure)
+│   ├── cli.clj         # Entrypoint: parse command, build config, dispatch
+│   ├── config.clj      # Env-var surface -> config map (HOST_CMD/SUDO/paths/...)
+│   ├── proc.clj        # Process helpers (argv vectors, set-e semantics)
+│   ├── prompt.clj      # script-wizard pod wrappers (lazy) + password read
+│   ├── machine.clj     # The machine-dir reader/writer (persisted state)
+│   ├── profile.clj     # normalize-profiles + nix build/export/clean
+│   ├── identity.clj    # Identity-file table + guestfish/rsync builders
+│   ├── net.clj         # Network config (nat / bridge / bridge:NAME)
+│   ├── mutable.clj     # Shared mutable-disk prep (/etc + nixos-rebuild flake)
+│   ├── wizard.clj      # Interactive config_vm wizard
+│   ├── backend.clj     # defprotocol Backend + shared composites/helpers
+│   └── backend/
+│       ├── libvirt.clj # virsh / qemu-img / guestfish / OVMF / XML
+│       └── proxmox.clj # pve-ssh / rsync / qm / pvesh / qemu-nbd / firewall
 ├── modules/            # Shared NixOS modules
 │   ├── base.nix        # Core system configuration
 │   ├── filesystem.nix  # Read-only root, /var mount, /home bind mount
@@ -107,16 +124,25 @@ The base image remains untouched. Each VM's boot disk stores only the delta from
 │   └── default/        # Default VM configuration
 │       ├── meta.nix    # Machine metadata (system architecture)
 │       └── default.nix # Selects modules, defines machine identity
-└── libvirt/            # Generated libvirt XML definitions
+└── libvirt/            # libvirt XML templates + generated VM definitions
 ```
+
+VM-management logic is implemented in **Babashka** under `src/vm/`, behind a
+`defprotocol Backend` with two `defrecord` implementations (libvirt, proxmox).
+`Justfile` recipes are thin wrappers around `bb -m vm.cli <command>`; the
+`.claude/skills/*` only ever call `just`. The backend is selected by the
+`BACKEND` env var. (The previous `backends/*.sh` implementation was removed once
+this port was verified on both backends.)
 
 ## Technology Stack
 
 - **Nix Flakes** - Experimental flakes support enabled throughout
 - **nixos-generators** - For building libvirt-compatible VM images
+- **Babashka (`bb`)** - All VM-management logic (`src/vm/`, entry `bb -m vm.cli`)
 - **libvirt/QEMU/KVM** - Virtualization platform
+- **Proxmox VE** - Alternate remote backend (over SSH: qm/pvesh/qemu-nbd)
 - **UEFI + systemd-boot** - Boot configuration (no legacy BIOS)
-- **Justfile** - Task runner for build commands
+- **Justfile** - Stable user-facing task runner (wraps the bb CLI)
 
 ## Machine Configuration
 
