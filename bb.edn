@@ -1,0 +1,4 @@
+{:paths ["src"]
+ :deps {}}
+;; Pods (script-wizard) are loaded lazily at runtime in vm.prompt so that
+;; non-interactive commands (build, list, status) don't pull the pod binary.
