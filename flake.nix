@@ -36,7 +36,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "nifty-services" "step-ca" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "nifty-services" "step-ca" "woodpecker" "semi-mutable" "mutable" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
@@ -53,6 +53,25 @@
       # Build a combined VM image for a given system and list of profiles
       # mutable: if true, builds a standard read-write NixOS system
       # Uses native nixpkgs image building (qemu-efi format)
+      # Image version string baked into every built image
+      imageVersion = let
+        # self.shortRev is only populated for git/clean-tree flake refs. The
+        # image build evaluates this flake via `getFlake <bare-path>` (to include
+        # the full working tree), which drops git metadata, so fall back to the
+        # IMAGE_COMMIT env var (set by build_profile, read here under --impure).
+        envRev = builtins.getEnv "IMAGE_COMMIT";
+        rev = self.shortRev or self.dirtyShortRev or
+              (if envRev != "" then envRev else "unknown");
+        date = self.lastModifiedDate or "unknown";
+        # Format: YYYYMMDD from the raw date string (e.g. "20260615120000")
+        dateShort = builtins.substring 0 8 date;
+      in builtins.concatStringsSep "\n" [
+        "repo=github:EnigmaCurry/nixos-vm-template"
+        "commit=${rev}"
+        "date=${dateShort}"
+        ""
+      ];
+
       mkCombinedImage = system: profileList: { mutable ? false, nixOverlay ? false }:
         let
           # Always include core, sort for canonical naming, dedupe
@@ -61,7 +80,7 @@
 
           nixosConfig = nixpkgs.lib.nixosSystem {
             specialArgs = {
-              inherit sway-home nix-flatpak opencode nifty-filter;
+              inherit sway-home nix-flatpak opencode nifty-filter imageVersion;
               swayHomeInputs = sway-home.inputs;
             };
             modules = coreModules ++ [
@@ -70,7 +89,7 @@
               home-manager.nixosModules.home-manager
             ] ++ profileModules ++ [
               { nixpkgs.hostPlatform = system; }
-              { vm.mutable = mutable; vm.nixOverlay = nixOverlay; }
+              { vm.mutable = lib.mkDefault mutable; vm.nixOverlay = lib.mkDefault nixOverlay; }
               # Configure image format (qcow2 with EFI/systemd-boot)
               {
                 image.baseName = "nixos";
@@ -91,14 +110,14 @@
       mkNixosConfig = system: profile: { mutable ? false, nixOverlay ? false }:
         nixpkgs.lib.nixosSystem {
           specialArgs = {
-            inherit sway-home nix-flatpak opencode nifty-filter;
+            inherit sway-home nix-flatpak opencode nifty-filter imageVersion;
             swayHomeInputs = sway-home.inputs;
           };
           modules = coreModules ++ [
             home-manager.nixosModules.home-manager
             ./profiles/${profile}.nix
             { nixpkgs.hostPlatform = system; }
-            { vm.mutable = mutable; vm.nixOverlay = nixOverlay; }
+            { vm.mutable = lib.mkDefault mutable; vm.nixOverlay = lib.mkDefault nixOverlay; }
           ];
         };
 

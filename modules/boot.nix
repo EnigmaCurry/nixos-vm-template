@@ -10,7 +10,11 @@
 
   # Console settings
   boot.consoleLogLevel = lib.mkDefault 3;
-  boot.kernelParams = [ "quiet" ];
+  # Serial console (ttyS0) is the production default; ttyS0 is listed last so
+  # it becomes the primary /dev/console and systemd spawns a serial-getty on it.
+  # tty0 (VGA) still gets kernel messages for debugging once the backend is
+  # manually reconfigured for a graphical display.
+  boot.kernelParams = [ "quiet" "console=tty0" "console=ttyS0,115200" ];
 
   # initrd modules for virtio
   boot.initrd.availableKernelModules = [

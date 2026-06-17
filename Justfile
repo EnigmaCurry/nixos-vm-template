@@ -5,6 +5,10 @@ set dotenv-load
 set export
 
 BACKEND := env_var_or_default("BACKEND", "libvirt")
+HOST := if BACKEND == "proxmox" { env_var_or_default("PVE_NODE", env_var_or_default("HOST", `hostname -s`)) } else { env_var_or_default("HOST", `hostname -s`) }
+_XDG_CONFIG_HOME := env_var_or_default("XDG_CONFIG_HOME", env_var("HOME") + "/.config")
+_DEFAULT_MACHINES_DIR := env_var_or_default("NIXOS_VM_MACHINES_DIR", _XDG_CONFIG_HOME + "/nixos-vm-template/machines")
+MACHINES_DIR := env_var_or_default("MACHINES_DIR", _DEFAULT_MACHINES_DIR + "/" + BACKEND + "/" + HOST)
 backend_script := if BACKEND == "common" { error("BACKEND cannot be 'common'") } else { "backends/" + BACKEND + ".sh" }
 
 # Default recipe - show available commands
@@ -35,6 +39,10 @@ config name="" profile="":
 # Configure a VM non-interactively with explicit values
 config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
     @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
+
+# Create a VM from a pre-built image (no local image build required)
+bootstrap:
+    @nix run nixpkgs#babashka -- bootstrap.bb
 
 # Create a new VM interactively (prompts for all settings)
 create name:
@@ -101,20 +109,16 @@ resize-var name size:
 passwd name:
     @source {{backend_script}} && set_password "{{name}}"
 
-# Configure mutable mode for a VM (single read-write disk with full nix toolchain)
-mutable name:
-    @source {{backend_script}} && set_mutable "{{name}}"
-
 # Set the profile(s) for a VM (e.g., just profile myvm docker python)
 profile name +profiles:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [ ! -d "machines/{{name}}" ]; then
+    if [ ! -d "{{MACHINES_DIR}}/{{name}}" ]; then
         echo "Error: Machine '{{name}}' does not exist" >&2
         exit 1
     fi
     profiles_csv=$(echo "{{profiles}}" | tr ' ' ',')
-    echo "$profiles_csv" > "machines/{{name}}/profile"
+    echo "$profiles_csv" > "{{MACHINES_DIR}}/{{name}}/profile"
     echo "Set profile for {{name}}: $profiles_csv"
     echo "Run 'just upgrade {{name}}' to apply the new profile."
 
@@ -176,7 +180,7 @@ test-connection:
 
 # Configure Woodpecker CI secrets for S3 image uploads
 # Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,
-#   S3_BUCKET, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
+#   S3_BUCKET, S3_PUBLIC_URL, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
 # Prompts for: S3_SECRET_ACCESS_KEY
 ci-secrets:
     #!/usr/bin/env bash
@@ -186,6 +190,7 @@ ci-secrets:
     [ -z "${WOODPECKER_TOKEN:-}" ] && missing+=("WOODPECKER_TOKEN")
     [ -z "${CI_REPO:-}" ] && missing+=("CI_REPO")
     [ -z "${S3_BUCKET:-}" ] && missing+=("S3_BUCKET")
+    [ -z "${S3_PUBLIC_URL:-}" ] && missing+=("S3_PUBLIC_URL")
     [ -z "${S3_PROVIDER:-}" ] && missing+=("S3_PROVIDER")
     [ -z "${S3_ENDPOINT:-}" ] && missing+=("S3_ENDPOINT")
     [ -z "${S3_REGION:-}" ] && missing+=("S3_REGION")
@@ -199,6 +204,7 @@ ci-secrets:
         echo "  export WOODPECKER_TOKEN=your-api-token" >&2
         echo "  export CI_REPO=owner/repo" >&2
         echo "  export S3_BUCKET=nixos-vm-template" >&2
+        echo "  export S3_PUBLIC_URL=https://nixos-vm-template.nyc3.cdn.digitaloceanspaces.com" >&2
         echo "  export S3_PROVIDER=DigitalOcean  # or AWS, Minio" >&2
         echo "  export S3_ENDPOINT=nyc3.digitaloceanspaces.com" >&2
         echo "  export S3_REGION=nyc3" >&2
@@ -207,6 +213,7 @@ ci-secrets:
     fi
     repo="$CI_REPO"
     s3_bucket="$S3_BUCKET"
+    s3_public_url="$S3_PUBLIC_URL"
     rclone_type="s3"
     rclone_provider="$S3_PROVIDER"
     rclone_endpoint="$S3_ENDPOINT"
@@ -238,6 +245,8 @@ ci-secrets:
     }
     wcli repo secret add --repo "$repo" --name s3_bucket --value "$s3_bucket" 2>/dev/null || \
         wcli repo secret update --repo "$repo" --name s3_bucket --value "$s3_bucket"
+    wcli repo secret add --repo "$repo" --name s3_public_url --value "$s3_public_url" 2>/dev/null || \
+        wcli repo secret update --repo "$repo" --name s3_public_url --value "$s3_public_url"
     wcli repo secret add --repo "$repo" --name rclone_type --value "$rclone_type" 2>/dev/null || \
         wcli repo secret update --repo "$repo" --name rclone_type --value "$rclone_type"
     wcli repo secret add --repo "$repo" --name rclone_provider --value "$rclone_provider" 2>/dev/null || \
@@ -259,4 +268,4 @@ _completion_network:
     @printf "nat\nbridge\n"
 
 _completion_name:
-    @shopt -s nullglob; for f in machines/*; do basename $f; done
+    @shopt -s nullglob; for f in {{MACHINES_DIR}}/*; do basename $f; done

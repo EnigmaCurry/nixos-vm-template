@@ -22,5 +22,6 @@
     ./guest-agent.nix
     ./ca-cert-identity.nix
     ./zram.nix
+    ./image-version.nix
   ];
 }

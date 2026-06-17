@@ -104,18 +104,11 @@ backend_create_disks() {
     fi
 
     # Immutable or semi-mutable - two disk layout
-    local profile_suffix=""
-    local mode_label="immutable"
-    if is_semi_mutable "$name"; then
-        profile_suffix="-semi-mutable"
-        mode_label="semi-mutable"
-    fi
-
-    echo "Creating VM disks: $name (profile: $profile, $mode_label)"
+    echo "Creating VM disks: $name (profile: $profile)"
     mkdir -p "$OUTPUT_DIR/vms/$name"
 
     local profile_image
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}${profile_suffix}")/nixos.qcow2
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}")/nixos.qcow2
 
     if [ ! -f "$profile_image" ]; then
         echo "Error: Profile image not found: $profile_image"
@@ -215,6 +208,9 @@ backend_create_disks() {
         gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
     fi
 
+    # Copy deploy keys if present
+    gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
+
     # Initialize /var disk
     echo "Initializing /var disk with identity from $machine_dir/"
     eval "$GUESTFISH -a $OUTPUT_DIR/vms/$name/var.qcow2 $gf_cmds"
@@ -239,13 +235,12 @@ backend_create_disks_mutable() {
     echo "Creating VM disk: $name (profile: $profile, mutable)"
     mkdir -p "$OUTPUT_DIR/vms/$name"
 
-    # Use mutable image variant
     local profile_image
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}-mutable")/nixos.qcow2
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile}")/nixos.qcow2
 
     if [ ! -f "$profile_image" ]; then
         echo "Error: Mutable profile image not found: $profile_image"
-        echo "Run 'just build $profile' first (mutable image will be built automatically)"
+        echo "Run 'just build $profile' first"
         exit 1
     fi
 
@@ -495,6 +490,9 @@ backend_sync_identity() {
         gf_cmds="$gf_cmds : chmod 0600 /identity/woodpecker.env"
         gf_cmds="$gf_cmds : chown 0 0 /identity/woodpecker.env"
     fi
+
+    # Update deploy keys
+    gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
 
     eval "$GUESTFISH -a $var_disk $gf_cmds"
     echo "Identity files synced."
@@ -756,6 +754,32 @@ backend_is_running() {
     [[ "$state" == *running* ]]
 }
 
+# Get VM state as a single word (running, stopped, undefined)
+backend_vm_state() {
+    local name="$1"
+    local state
+    state=$($VIRSH -c "$LIBVIRT_URI" domstate "$name" 2>/dev/null) || { echo "undefined"; return; }
+    case "$state" in
+        *running*)  echo "running" ;;
+        *paused*)   echo "paused" ;;
+        *)          echo "stopped" ;;
+    esac
+}
+
+# Get image version from a running VM via guest agent (empty if unavailable)
+backend_vm_version() {
+    local name="$1"
+    local result pid out
+    result=$($VIRSH -c "$LIBVIRT_URI" qemu-agent-command "$name" \
+        '{"execute":"guest-exec","arguments":{"path":"cat","arg":["/etc/nixos-image-version"],"capture-output":true}}' 2>/dev/null) || return
+    pid=$(echo "$result" | jq -r '.return.pid // empty') || return
+    [ -n "$pid" ] || return
+    sleep 0.1
+    out=$($VIRSH -c "$LIBVIRT_URI" qemu-agent-command "$name" \
+        "{\"execute\":\"guest-exec-status\",\"arguments\":{\"pid\":$pid}}" 2>/dev/null) || return
+    echo "$out" | jq -r '.return["out-data"] // empty' | base64 -d 2>/dev/null || true
+}
+
 # Remove backend artifacts (XML) for a VM
 backend_cleanup() {
     local name="$1"
@@ -786,14 +810,7 @@ create_vm() {
     vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "2")
     var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "30G")
 
-    # Build appropriate image variant
-    if is_mutable "$name"; then
-        build_profile "$profile" "true" "false"
-    elif is_semi_mutable "$name"; then
-        build_profile "$profile" "false" "true"
-    else
-        build_profile "$profile" "false" "false"
-    fi
+    build_profile "$profile"
 
     backend_create_disks "$name" "$var_size"
     backend_generate_config "$name" "$memory" "$vcpus"
@@ -849,14 +866,7 @@ create_vm_batch() {
     vcpus=$(cat "$machine_dir/vcpus" 2>/dev/null || echo "$vcpus")
     var_size=$(cat "$machine_dir/var_size" 2>/dev/null || echo "$var_size")
 
-    # Build appropriate image variant
-    if is_mutable "$name"; then
-        build_profile "$profile" "true" "false"
-    elif is_semi_mutable "$name"; then
-        build_profile "$profile" "false" "true"
-    else
-        build_profile "$profile" "false" "false"
-    fi
+    build_profile "$profile"
 
     backend_create_disks "$name" "$var_size"
     backend_generate_config "$name" "$memory" "$vcpus"
@@ -1125,14 +1135,7 @@ recreate_vm() {
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" 2>/dev/null || true
 
-    # Build appropriate image variant
-    if is_mutable "$name"; then
-        build_profile "$profile" "true" "false"
-    elif is_semi_mutable "$name"; then
-        build_profile "$profile" "false" "true"
-    else
-        build_profile "$profile" "false" "false"
-    fi
+    build_profile "$profile"
 
     rm -rf "$OUTPUT_DIR/vms/$name"
     backend_create_disks "$name" "$var_size"
@@ -1199,12 +1202,7 @@ upgrade_vm() {
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" --snapshots-metadata 2>/dev/null || \
         $VIRSH -c "$LIBVIRT_URI" undefine "$name" 2>/dev/null || true
 
-    # Build appropriate image variant
-    if is_semi_mutable "$name"; then
-        FLAKE_UPDATE=true build_profile "$profile" "false" "true"
-    else
-        FLAKE_UPDATE=true build_profile "$profile"
-    fi
+    FLAKE_UPDATE=true build_profile "$profile"
     backend_sync_identity "$name"
 
     # Wipe /nix overlay for semi-mutable VMs (clean slate with new base image)
@@ -1214,12 +1212,9 @@ upgrade_vm() {
     fi
 
     # Replace only the boot disk (keep /var disk intact)
-    local profile_key profile_image profile_suffix=""
+    local profile_key profile_image
     profile_key=$(normalize_profiles "$profile")
-    if is_semi_mutable "$name"; then
-        profile_suffix="-semi-mutable"
-    fi
-    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile_key}${profile_suffix}")/nixos.qcow2
+    profile_image=$($READLINK -f "$OUTPUT_DIR/profiles/${profile_key}")/nixos.qcow2
     rm -f "$OUTPUT_DIR/vms/$name/boot.qcow2"
     rm -f "$OUTPUT_DIR/vms/$name/OVMF_VARS.qcow2"
     $QEMU_IMG create -f qcow2 \

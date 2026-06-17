@@ -25,7 +25,15 @@ SSH="${SSH:-${HOST_CMD:+$HOST_CMD }ssh}"
 READLINK="${READLINK:-${HOST_CMD:+$HOST_CMD }readlink}"
 CP="${CP:-${HOST_CMD:+$HOST_CMD }cp}"
 OUTPUT_DIR="${OUTPUT_DIR:-output}"
-MACHINES_DIR="${MACHINES_DIR:-machines}"
+_DEFAULT_MACHINES_BASE="${NIXOS_VM_MACHINES_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/nixos-vm-template/machines}"
+if [ -z "${MACHINES_DIR:-}" ]; then
+    if [ -n "${BACKEND:-}" ]; then
+        _host="${HOST:-$(hostname -s)}"
+        MACHINES_DIR="${_DEFAULT_MACHINES_BASE}/${BACKEND}/${_host}"
+    else
+        MACHINES_DIR="${_DEFAULT_MACHINES_BASE}"
+    fi
+fi
 
 # Normalize profile list: sort, dedupe, ensure core is included
 # Input: comma-separated profiles (e.g., "docker,python,rust")
@@ -41,31 +49,42 @@ normalize_profiles() {
 }
 
 # Check if a machine is configured for mutable mode
-# Returns 0 (true) if machines/{name}/mutable contains "true"
+# Returns 0 (true) if "mutable" is in the machine's profile list
 is_mutable() {
     local name="$1"
-    local mutable_file="$MACHINES_DIR/$name/mutable"
-    if [ -f "$mutable_file" ]; then
-        local content
-        content=$(cat "$mutable_file" 2>/dev/null | tr -d '[:space:]')
-        [ "$content" = "true" ]
-    else
-        return 1
-    fi
+    local profile
+    profile=$(cat "$MACHINES_DIR/$name/profile" 2>/dev/null || echo "")
+    [[ ",$profile," == *",mutable,"* ]]
 }
 
 # Check if a machine is configured for semi-mutable mode
-# Returns 0 (true) if machines/{name}/mutable contains "semi"
+# Returns 0 (true) if "semi-mutable" is in the machine's profile list
 is_semi_mutable() {
     local name="$1"
-    local mutable_file="$MACHINES_DIR/$name/mutable"
-    if [ -f "$mutable_file" ]; then
-        local content
-        content=$(cat "$mutable_file" 2>/dev/null | tr -d '[:space:]')
-        [ "$content" = "semi" ]
-    else
-        return 1
+    local profile
+    profile=$(cat "$MACHINES_DIR/$name/profile" 2>/dev/null || echo "")
+    [[ ",$profile," == *",semi-mutable,"* ]]
+}
+
+# Generate guestfish commands to copy deploy keys from machine config to /var disk.
+# Keys are stored as pairs: <name> (private key) + <name>.conf (host/port/owner/repo).
+# On the VM they land in /identity/deploy_keys/ with the same naming.
+# Returns guestfish command string fragment (empty if no deploy keys).
+# Usage: gf_cmds="$gf_cmds $(guestfish_deploy_keys_cmds "$machine_dir")"
+guestfish_deploy_keys_cmds() {
+    local machine_dir="$1"
+    local deploy_dir="$machine_dir/deploy_keys"
+    local cmds=""
+    if [ -d "$deploy_dir" ] && [ -n "$(ls -A "$deploy_dir" 2>/dev/null)" ]; then
+        cmds="$cmds : mkdir-p /identity/deploy_keys"
+        for key in "$deploy_dir"/*; do
+            [ -f "$key" ] || continue
+            cmds="$cmds : copy-in $key /identity/deploy_keys/"
+            cmds="$cmds : chmod 0600 /identity/deploy_keys/$(basename "$key")"
+            cmds="$cmds : chown 0 0 /identity/deploy_keys/$(basename "$key")"
+        done
     fi
+    echo "$cmds"
 }
 
 # Get the VM's IP address for display (from static_ip config, or "<ip>" if DHCP)
@@ -131,26 +150,31 @@ is_pipewire() {
 }
 
 # Build a profile's base image (supports comma-separated profile combinations)
-# Usage: build_profile <profiles> [mutable] [nix_overlay]
-# If mutable=true, builds a mutable (read-write) image
-# If nix_overlay=true, builds a semi-mutable (read-only root + writable /nix) image
+# Usage: build_profile <profiles>
+# Mutability is determined by the profile list: include "mutable" or "semi-mutable" profile.
 # Set FLAKE_UPDATE=true to update flake inputs before building (used by upgrade)
 build_profile() {
     local profiles="${1:-core}"
-    local mutable="${2:-false}"
-    local nix_overlay="${3:-false}"
 
     # Normalize to canonical profile key
     local profile_key
     profile_key=$(normalize_profiles "$profiles")
 
-    # Add suffix for mutable/semi-mutable images
-    local output_key="$profile_key"
-    if [ "$mutable" = "true" ]; then
-        output_key="${profile_key}-mutable"
+    # Skip build if SKIP_BUILD=true and image already exists (used by bootstrap)
+    if [ "${SKIP_BUILD:-}" = "true" ]; then
+        local skip_image="$OUTPUT_DIR/profiles/$profile_key/nixos.qcow2"
+        if [ -f "$skip_image" ]; then
+            echo "Latest image already downloaded at $skip_image"
+            return 0
+        fi
+        echo "Error: SKIP_BUILD=true but image not found: $skip_image"
+        exit 1
+    fi
+
+    # Determine build mode from profile list
+    if [[ ",$profile_key," == *",mutable,"* ]]; then
         echo "Building mutable profile: $profile_key"
-    elif [ "$nix_overlay" = "true" ]; then
-        output_key="${profile_key}-semi-mutable"
+    elif [[ ",$profile_key," == *",semi-mutable,"* ]]; then
         echo "Building semi-mutable profile: $profile_key"
     else
         echo "Building immutable profile: $profile_key"
@@ -173,18 +197,27 @@ build_profile() {
         flake_dir="$tmp_flake_dir"
     fi
 
-    $NIX build --impure --expr "
+    # Bake the real git revision into the image. getFlake on a bare path drops
+    # git metadata (so self.shortRev is unavailable); pass it via IMAGE_COMMIT,
+    # which flake.nix reads under --impure. Computed from SCRIPT_DIR's HEAD.
+    local git_sha
+    git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    if [ "$git_sha" != "unknown" ] && ! git -C "$SCRIPT_DIR" diff --quiet HEAD 2>/dev/null; then
+        git_sha="${git_sha}-dirty"
+    fi
+
+    IMAGE_COMMIT="$git_sha" $NIX build --impure --expr "
       let flake = builtins.getFlake \"$flake_dir\";
-      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list { mutable = $mutable; nixOverlay = $nix_overlay; }
-    " --out-link "$OUTPUT_DIR/profiles/$output_key"
+      in flake.lib.mkCombinedImage \"x86_64-linux\" $nix_list {}
+    " --out-link "$OUTPUT_DIR/profiles/$profile_key"
 
     # Clean up temp directory
     if [ -n "$tmp_flake_dir" ]; then
         rm -rf "$tmp_flake_dir"
     fi
 
-    echo "Built: $OUTPUT_DIR/profiles/$output_key"
-    ls -lhL "$OUTPUT_DIR/profiles/$output_key/"
+    echo "Built: $OUTPUT_DIR/profiles/$profile_key"
+    ls -lhL "$OUTPUT_DIR/profiles/$profile_key/"
 }
 
 # Build all base profiles
@@ -200,7 +233,7 @@ build_all() {
 }
 
 # Export a profile image with release metadata in the filename
-# Output: output/export/nixos-{profiles}-{date}-{gitsha}.qcow2
+# Output: output/export/nixos-{profiles joined by --}-{date}-{gitsha}.qcow2
 export_profile() {
     local profiles="${1:-core}"
 
@@ -222,15 +255,15 @@ export_profile() {
     local git_sha
     git_sha=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-    # Replace commas with dashes for the filename
+    # Replace commas with double-dashes for the filename (preserves dashes within profile names)
     local profile_slug
-    profile_slug=$(echo "$profile_key" | tr ',' '-')
+    profile_slug=$(echo "$profile_key" | sed 's/,/--/g')
 
     mkdir -p "$OUTPUT_DIR/export"
     local export_name="nixos-${profile_slug}-${date_stamp}-${git_sha}.qcow2"
     local export_path="$OUTPUT_DIR/export/$export_name"
 
-    cp "$source_image" "$export_path"
+    $NIX shell nixpkgs#qemu-utils -c qemu-img convert -f qcow2 -O qcow2 -c "$source_image" "$export_path"
     echo "Exported: $export_path"
     ls -lh "$export_path"
 }
@@ -423,8 +456,8 @@ init_machine_clone() {
     local dest_dir="$MACHINES_DIR/$dest"
     mkdir -p "$dest_dir"
 
-    # Copy config files from source (including mutable flag)
-    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash profile mutable; do
+    # Copy config files from source
+    for f in admin_authorized_keys user_authorized_keys tcp_ports udp_ports resolv.conf hosts root_password_hash profile; do
         if [ -f "$source_dir/$f" ]; then
             cp "$source_dir/$f" "$dest_dir/$f"
         fi
@@ -589,73 +622,6 @@ set_password() {
     echo "Run 'just upgrade $name' to apply."
 }
 
-# Set or clear the mutable flag for a VM
-set_mutable() {
-    local name="$1"
-    local machine_dir="$MACHINES_DIR/$name"
-
-    if [ ! -d "$machine_dir" ]; then
-        echo "Error: Machine config not found: $machine_dir"
-        exit 1
-    fi
-
-    local current_mode="immutable"
-    if is_mutable "$name"; then
-        current_mode="mutable"
-    elif is_semi_mutable "$name"; then
-        current_mode="semi-mutable"
-    fi
-
-    # Determine how to run script-wizard
-    local SCRIPT_WIZARD=""
-    if command -v script-wizard &>/dev/null; then
-        SCRIPT_WIZARD="script-wizard"
-    elif command -v nix &>/dev/null && nix --version 2>&1 | grep -q "nix"; then
-        if nix flake --help &>/dev/null; then
-            SCRIPT_WIZARD="nix run github:enigmacurry/script-wizard --"
-        fi
-    fi
-    if [ -z "$SCRIPT_WIZARD" ]; then
-        echo "Error: script-wizard is not installed."
-        echo "Install it from: https://github.com/enigmacurry/script-wizard"
-        exit 1
-    fi
-
-    echo "Configure VM mode for '$name'"
-    echo ""
-    echo "Current mode: $current_mode"
-    echo ""
-    local mutable_default_idx="0"
-    if [ "$current_mode" = "semi-mutable" ]; then
-        mutable_default_idx="1"
-    elif [ "$current_mode" = "mutable" ]; then
-        mutable_default_idx="2"
-    fi
-    local mutable_choice
-    mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Semi-mutable (read-only root + writable /nix overlay)" "Mutable (read-write pet VM, use nixos-rebuild)")
-    local new_mode="immutable"
-    if [[ "$mutable_choice" == "Mutable"* ]]; then
-        echo "true" > "$machine_dir/mutable"
-        echo "Mutable mode enabled."
-        new_mode="mutable"
-    elif [[ "$mutable_choice" == "Semi-mutable"* ]]; then
-        echo "semi" > "$machine_dir/mutable"
-        echo "Semi-mutable mode enabled."
-        new_mode="semi-mutable"
-    else
-        rm -f "$machine_dir/mutable"
-        echo "Immutable mode set."
-    fi
-    echo ""
-    # Switching between immutable/semi-mutable only changes the boot image,
-    # so 'upgrade' preserves /var data. Switching to/from mutable changes
-    # the disk layout entirely, requiring 'recreate' (destroys /var).
-    if [ "$current_mode" = "mutable" ] || [ "$new_mode" = "mutable" ]; then
-        echo "Run 'just recreate $name' to apply the change (WARNING: destroys /var data)."
-    else
-        echo "Run 'just upgrade $name' to apply the change (/var data preserved)."
-    fi
-}
 
 # Configure a VM (creates machine config without creating the VM)
 # This is the configuration-only step that can be called separately from create
@@ -768,7 +734,7 @@ config_vm_interactive() {
 
     # Check if machine config already exists and load current values
     local machine_dir="$MACHINES_DIR/$name"
-    local current_profile="" current_memory="" current_vcpus="" current_var_size="" current_network="" current_mutable=""
+    local current_profile="" current_memory="" current_vcpus="" current_var_size="" current_network=""
     local is_reconfigure=false
 
     if [ -d "$machine_dir" ]; then
@@ -792,34 +758,33 @@ config_vm_interactive() {
         current_network=$(cat "$machine_dir/network" 2>/dev/null || true)
         current_network="${current_network%"${current_network##*[![:space:]]}"}"  # trim trailing
         current_network="${current_network#"${current_network%%[![:space:]]*}"}"  # trim leading
-        current_mutable=$(cat "$machine_dir/mutable" 2>/dev/null | tr -d '[:space:]' || true)
     fi
 
     # Mutable mode selection: options are "Immutable" "Semi-mutable" "Mutable" (indices 0-2)
+    # Derive current mode from profile string
     echo ""
     local mutable_choice mutable_default_idx="0"
-    if [ "$current_mutable" = "semi" ]; then
+    if [[ ",$current_profile," == *",semi-mutable,"* ]]; then
         mutable_default_idx="1"
-    elif [ "$current_mutable" = "true" ]; then
+    elif [[ ",$current_profile," == *",mutable,"* ]]; then
         mutable_default_idx="2"
     fi
     mutable_choice=$($SCRIPT_WIZARD choose -d "$mutable_default_idx" "Select VM mode:" "Immutable (read-only root, upgradeable, recommended)" "Semi-mutable (read-only root + writable /nix overlay)" "Mutable (read-write pet VM, use nixos-rebuild)")
-    local is_mutable_vm=false
-    local is_semi_mutable_vm=false
+    local mutable_profile=""
     if [[ "$mutable_choice" == "Mutable"* ]]; then
-        is_mutable_vm=true
+        mutable_profile="mutable"
     elif [[ "$mutable_choice" == "Semi-mutable"* ]]; then
-        is_semi_mutable_vm=true
+        mutable_profile="semi-mutable"
     fi
     echo "Mode: $mutable_choice"
 
-    # Get list of available profiles (excluding core, which is always included)
+    # Get list of available profiles (excluding core, mutable, semi-mutable)
     local available_profiles=()
     shopt -s nullglob
     for f in profiles/*.nix; do
         local pname
         pname=$(basename "$f" .nix)
-        if [ "$pname" != "core" ]; then
+        if [ "$pname" != "core" ] && [ "$pname" != "mutable" ] && [ "$pname" != "semi-mutable" ]; then
             available_profiles+=("$pname")
         fi
     done
@@ -830,11 +795,11 @@ config_vm_interactive() {
         echo ""
         local profile_default_args=()
         if [ -n "$current_profile" ]; then
-            # Convert comma-separated profile to JSON array, excluding core: "core,docker" -> '["docker"]'
-            local profile_without_core profile_json
-            profile_without_core=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | tr '\n' ',' | sed 's/,$//' || true)
-            if [ -n "$profile_without_core" ]; then
-                profile_json=$(echo "$profile_without_core" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
+            # Convert comma-separated profile to JSON array, excluding core/mutable/semi-mutable
+            local profile_without_mode profile_json
+            profile_without_mode=$(echo "$current_profile" | tr ',' '\n' | grep -v '^core$' | grep -v '^mutable$' | grep -v '^semi-mutable$' | tr '\n' ',' | sed 's/,$//' || true)
+            if [ -n "$profile_without_mode" ]; then
+                profile_json=$(echo "$profile_without_mode" | sed 's/,/","/g' | sed 's/^/["/;s/$/"]/')
                 profile_default_args=(--default "$profile_json")
             fi
         fi
@@ -846,6 +811,10 @@ config_vm_interactive() {
             readarray -t selected_profiles <<< "$select_output"
             profile=$(IFS=,; echo "${selected_profiles[*]}")
         fi
+    fi
+    # Inject mutable/semi-mutable profile into the selection
+    if [ -n "$mutable_profile" ]; then
+        profile="$profile,$mutable_profile"
     fi
     echo "Selected profile(s): $profile"
 
@@ -1420,7 +1389,7 @@ config_vm_interactive() {
     if [ -n "$pve_vmid" ]; then
         echo "  VMID:    $pve_vmid"
     fi
-    echo "  Mode:    $([ "$is_mutable_vm" = true ] && echo "mutable" || { [ "$is_semi_mutable_vm" = true ] && echo "semi-mutable" || echo "immutable"; })"
+    echo "  Mode:    $([ -n "$mutable_profile" ] && echo "$mutable_profile" || echo "immutable")"
     echo "  Profile: $profile"
     echo "  Memory:  ${memory}M"
     echo "  vCPUs:   $vcpus"
@@ -1468,18 +1437,6 @@ config_vm_interactive() {
     echo "$normalized_var_size" > "$machine_dir/var_size"
     echo "Created: $machine_dir/var_size ($normalized_var_size)"
 
-    # Save mutable mode
-    if [ "$is_mutable_vm" = true ]; then
-        echo "true" > "$machine_dir/mutable"
-        echo "Created: $machine_dir/mutable (true)"
-    elif [ "$is_semi_mutable_vm" = true ]; then
-        echo "semi" > "$machine_dir/mutable"
-        echo "Created: $machine_dir/mutable (semi)"
-    else
-        rm -f "$machine_dir/mutable"
-        echo "Removed: $machine_dir/mutable (immutable mode)"
-    fi
-
     # Save static IP configuration
     if [ -n "$static_ip_address" ]; then
         printf 'address=%s\n' "$static_ip_address" > "$machine_dir/static_ip"
@@ -1501,10 +1458,8 @@ config_vm_interactive() {
 
     echo ""
     local mode_str="immutable"
-    if [ "$is_mutable_vm" = true ]; then
-        mode_str="mutable"
-    elif [ "$is_semi_mutable_vm" = true ]; then
-        mode_str="semi-mutable"
+    if [ -n "$mutable_profile" ]; then
+        mode_str="$mutable_profile"
     fi
     echo "VM '$name' configured (profile: $(cat "$machine_dir/profile"), mode: $mode_str, memory: ${memory}M, vcpus: $vcpus, var: $normalized_var_size)"
     if [ "$from_create" != "true" ]; then

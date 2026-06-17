@@ -80,7 +80,72 @@ repeating it:
 echo "BACKEND=proxmox" >> .env
 ```
 
-## Requirements (Common)
+## Two Ways to Use This
+
+There are two distinct workflows, depending on whether you want to *run*
+the published VM images or *build your own*:
+
+| | Production deployment | Development |
+|---|---|---|
+| **Goal** | Deploy the official, pre-built images | Customize the system and build your own images |
+| **Entry point** | `bootstrap.bb` (the `bb` one-liner below) | `just` recipes in a cloned repo |
+| **Where images come from** | Downloaded from the binary image repository | Built locally with Nix |
+| **Requires Nix?** | **No** | **Yes** |
+| **Tools needed** | `bb` + a few standard CLI tools (see below) | `nix`, `just`, `qemu-img`, `guestfish`, … |
+
+### Production: Binary Image Repository (no Nix)
+
+For production deployments you don't need Nix, the `just` build toolchain,
+or even a local clone. The `bootstrap.bb` script downloads pre-built images
+from the public binary image repository and creates VMs from them. It runs
+on [babashka (`bb`)](https://github.com/babashka/babashka), a fast-starting
+Clojure interpreter.
+
+Run it straight from the web (it clones/updates a private working copy under
+`~/.cache/nixos-vm-template` and re-execs the latest version):
+
+```bash
+bb -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/master/bootstrap.bb"))'
+```
+
+The wizard walks you through selecting a backend, downloading a profile
+image, and creating or managing VMs. Machine configs are stored under
+`~/.config/nixos-vm-template/machines`.
+
+**Requirements (production):**
+
+- `bb` ([babashka](https://github.com/babashka/babashka)) — must be installed first; it runs the one-liner
+- `curl` — download images
+- `qemu-img` — create the boot and `/var` disks
+- `guestfish` (libguestfs-tools) — inject per-VM identity into the disks
+- `readlink` (coreutils)
+- **libvirt backend:** `virsh` (libvirt-clients)
+- **proxmox backend:** `ssh` + `rsync` (the Proxmox node runs `qm`/`pvesh`)
+
+The script checks for these on startup and, on Debian/Ubuntu, prints the
+exact `apt-get install` line for anything missing. Notably, **`nix` is not
+required** — image building happens upstream in CI, and you only consume the
+results.
+
+### Development: Local Builds (requires Nix)
+
+To customize the images — add packages, change configuration, create new
+profiles — you build them yourself from a cloned repo with Nix and `just`.
+This is the workflow the rest of this README documents, starting with the
+requirements below.
+
+If you want to publish your *own* binary image repository from your fork —
+so your own deployments can use the Nix-free `bootstrap.bb` workflow above —
+see [CI.md](CI.md). It walks through setting up a Woodpecker CI pipeline that
+builds the images and publishes them to S3-compatible storage.
+
+## Requirements (Common, for local builds)
+
+> [!NOTE]
+> These requirements are for the **development / local-build** workflow. If
+> you only want to deploy the pre-built images, see
+> [Production: Binary Image Repository](#production-binary-image-repository-no-nix)
+> above — it does not need Nix or `just`.
 
 - Linux build machine with KVM support
 - `nix` package manager (with flakes enabled)

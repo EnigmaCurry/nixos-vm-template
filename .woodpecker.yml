@@ -3,16 +3,42 @@ labels:
 
 when:
   - event: push
-    branch: dev
+    branch: master
   - event: manual
+  - event: cron
 
 steps:
-  - name: build
+  - name: gc
     image: bash
     commands:
+      - bash ci/nix-gc.sh
+
+  - name: update
+    image: bash
+    commands:
+      - bash ci/flake-update.sh
+
+  - name: build
+    image: bash
+    environment:
+      OUTPUT_DIR: /var/lib/woodpecker/output
+    commands:
+      # Output lives outside the ephemeral workspace (which is on a small
+      # /tmp tmpfs), so clean stale qcow2s from prior runs before exporting.
+      - rm -rf "$OUTPUT_DIR/export"
       - source backends/common.sh && build_profile core
       - source backends/common.sh && export_profile core
-      - ls -lh output/export/
+      - source backends/common.sh && build_profile step-ca
+      - source backends/common.sh && export_profile step-ca
+      - source backends/common.sh && build_profile woodpecker,docker
+      - source backends/common.sh && export_profile woodpecker,docker
+      - source backends/common.sh && build_profile semi-mutable,woodpecker
+      - source backends/common.sh && export_profile semi-mutable,woodpecker
+      - source backends/common.sh && build_profile mutable
+      - source backends/common.sh && export_profile mutable
+      - source backends/common.sh && build_profile podman,nifty-services
+      - source backends/common.sh && export_profile podman,nifty-services
+      - ls -lh "$OUTPUT_DIR/export/"
 
   - name: upload
     image: bash
@@ -29,15 +55,16 @@ steps:
         from_secret: rclone_endpoint
       RCLONE_CONFIG_REMOTE_REGION:
         from_secret: rclone_region
+      RCLONE_CONFIG_REMOTE_ACL: public-read
+      OUTPUT_DIR: /var/lib/woodpecker/output
       S3_BUCKET:
         from_secret: s3_bucket
+      S3_PUBLIC_URL:
+        from_secret: s3_public_url
     commands:
-      - |
-        rclone() { nix run nixpkgs#rclone -- "$@"; }
-        # Delete old images for the same profile
-        for f in output/export/nixos-*.qcow2; do
-          profile_prefix=$(basename "$f" | sed 's/-[0-9]\{8\}-[a-f0-9]*.qcow2$//')
-          rclone delete "remote:$S3_BUCKET/" --include "${profile_prefix}-*.qcow2" -v
-        done
-        # Upload new images
-        rclone copy output/export/ "remote:$S3_BUCKET/" --include '*.qcow2' -v
+      - bash ci/upload.sh
+
+  - name: push
+    image: bash
+    commands:
+      - bash ci/push-if-changed.sh
