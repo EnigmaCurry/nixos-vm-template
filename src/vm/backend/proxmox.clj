@@ -464,9 +464,13 @@
 
   (running? [_ cfg name]
     (validate! cfg)
-    (let [vmid (get-vmid cfg name)
-          status (try (pve-ssh cfg (format "qm status %s" vmid)) (catch Exception _ ""))]
-      (str/includes? status "running")))
+    ;; Speculative check (e.g. at the top of create): a VM with no vmid file
+    ;; simply isn't running — never hard-exit here.
+    (let [f (vmid-file cfg name)]
+      (if-not (fs/exists? f)
+        false
+        (let [status (try (pve-ssh cfg (format "qm status %s" (str/trim (slurp f)))) (catch Exception _ ""))]
+          (str/includes? status "running")))))
 
   (vm-state [_ cfg name]
     (validate! cfg)
