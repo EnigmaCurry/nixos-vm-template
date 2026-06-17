@@ -4,7 +4,7 @@ set -euo pipefail
 rclone() { nix run nixpkgs#rclone -- "$@"; }
 jq() { nix run nixpkgs#jq -- "$@"; }
 
-OUTPUT_DIR="${OUTPUT_DIR:-output}"
+OUTPUT_DIR="${OUTPUT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/nixos-vm-template}"
 
 echo "Upload images:"
 ls -lh "$OUTPUT_DIR/export/"

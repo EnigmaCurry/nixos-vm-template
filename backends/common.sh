@@ -24,7 +24,11 @@ NIX="${NIX:-${HOST_CMD:+$HOST_CMD }nix}"
 SSH="${SSH:-${HOST_CMD:+$HOST_CMD }ssh}"
 READLINK="${READLINK:-${HOST_CMD:+$HOST_CMD }readlink}"
 CP="${CP:-${HOST_CMD:+$HOST_CMD }cp}"
-OUTPUT_DIR="${OUTPUT_DIR:-output}"
+# VM disks and built profile images live in the XDG data home by default so the
+# location is stable regardless of the current working directory. This mirrors
+# the XDG conventions already used for MACHINES_DIR (~/.config) and the bootstrap
+# repo cache (~/.cache). CI overrides OUTPUT_DIR explicitly.
+OUTPUT_DIR="${OUTPUT_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/nixos-vm-template}"
 _DEFAULT_MACHINES_BASE="${NIXOS_VM_MACHINES_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/nixos-vm-template/machines}"
 if [ -z "${MACHINES_DIR:-}" ]; then
     if [ -n "${BACKEND:-}" ]; then
