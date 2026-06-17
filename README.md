@@ -214,6 +214,37 @@ moment while Nix realises the dev shell; subsequent runs are cached.
 > enter the shell once with `nix develop` (which puts every tool on `PATH`) and
 > set `VM_CLI="bb -m vm.cli"` to make the recipes call `bb` directly.
 
+### Run from anywhere (a `vm` alias)
+
+`just` has flags to point it at a `Justfile` (`-f`), a working directory
+(`-d`), and an env file (`-E`) regardless of your current directory. Wrapping
+those in a shell alias lets you run `vm <command>` from anywhere, and keeps your
+backend config (`BACKEND`, `PVE_HOST`, …) in `~/.config` instead of inside the
+clone:
+
+```bash
+# Add to ~/.bashrc (or ~/.zshrc)
+NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"   # wherever you cloned the repo
+alias vm="just -f '$NIXOS_VM_TEMPLATE/Justfile' -d '$NIXOS_VM_TEMPLATE' -E '$HOME/.config/nixos-vm-template/env'"
+```
+
+The outer double quotes expand the variables when the alias is defined; the
+inner single quotes keep the resulting paths intact at call time. Now any recipe
+in this guide works as `vm <recipe>`:
+
+```bash
+vm create myvm
+vm status myvm
+vm ssh myvm
+```
+
+> [!TIP]
+> Because the env file is passed explicitly with `-E`, you can keep several —
+> one per backend or host — and define an alias for each (`vm-lab`,
+> `vm-prod`, …), each pointing at its own env file. The default machine configs
+> already live under `~/.config/nixos-vm-template/`, so this keeps everything
+> for a context in one place.
+
 ## Libvirt Backend
 
 ### Additional Requirements
