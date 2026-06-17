@@ -114,7 +114,7 @@ image, and creating or managing VMs. Machine configs are stored under
 
 **Requirements (production):**
 
-- `bb` ([babashka](https://github.com/babashka/babashka)) — must be installed first; it runs the one-liner
+- `bb` ([babashka](https://github.com/babashka/babashka)) — install this first; it's the runtime for the whole tool (the one-liner re-execs into the `bb -m vm.cli` VM-management code)
 - `curl` — download images
 - `qemu-img` — create the boot and `/var` disks
 - `guestfish` (libguestfs-tools) — inject per-VM identity into the disks
