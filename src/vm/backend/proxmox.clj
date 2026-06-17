@@ -147,7 +147,7 @@
 
 ;; ─── disk creation helpers ───────────────────────────────────────────────────
 
-(defn- vm-dir [cfg name] (str (:output-dir cfg) "/vms/" name))
+(defn- vm-dir [cfg name] (str (:vms-dir cfg) "/" name))
 (defn- gf-env [cfg] {:extra-env {"LIBGUESTFS_BACKEND" (:libguestfs-backend cfg)}})
 
 (defn- profile-image [cfg prof]

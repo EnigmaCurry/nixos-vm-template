@@ -78,9 +78,9 @@
      (System/exit 1))))
 
 (defn remove-disks
-  "rm -rf $OUTPUT_DIR/vms/<name> (the per-VM local disk directory)."
+  "rm -rf the per-VM local disk directory (backend/host-scoped)."
   [cfg name]
-  (fs/delete-tree (str (:output-dir cfg) "/vms/" name)))
+  (fs/delete-tree (str (:vms-dir cfg) "/" name)))
 
 (defn wait-for-vm-ip
   "Static IP (immediately) or poll get-ip until an address appears or timeout."

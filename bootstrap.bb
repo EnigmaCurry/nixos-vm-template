@@ -128,7 +128,9 @@
 
 (defn- backend-env
   [backend env]
-  (merge {"SKIP_BUILD" "true" "BACKEND" backend "MACHINES_DIR" (get env :machines-dir)}
+  (merge {"SKIP_BUILD" "true" "BACKEND" backend
+          "MACHINES_DIR" (get env :machines-dir)
+          "HOST" (get env :host)}
          (env-vars env)))
 
 (defn backend-cli!
@@ -592,7 +594,7 @@
                  (get pve-env "PVE_NODE")
                  (str/trim (:out (proc/shell {:out :string :err :string} "hostname" "-s"))))
           machines-dir (str default-machines-base "/" backend "/" host)
-          env (merge (or pve-env {}) {:machines-dir machines-dir})]
+          env (merge (or pve-env {}) {:machines-dir machines-dir :host host})]
 
       ;; Check dependencies
       (check-deps! backend)

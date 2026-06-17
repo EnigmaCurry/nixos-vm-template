@@ -14,7 +14,7 @@
 
 ;; ─── helpers ─────────────────────────────────────────────────────────────────
 
-(defn- vm-dir [cfg name] (str (:output-dir cfg) "/vms/" name))
+(defn- vm-dir [cfg name] (str (:vms-dir cfg) "/" name))
 (defn- virsh [cfg args] (concat (:virsh cfg) ["-c" (:libvirt-uri cfg)] args))
 (defn- gf-env [cfg] {:extra-env {"LIBGUESTFS_BACKEND" (:libguestfs-backend cfg)}})
 
