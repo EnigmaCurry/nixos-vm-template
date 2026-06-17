@@ -152,7 +152,7 @@ builds the images and publishes them to S3-compatible storage.
 - `just` (command runner)
 - `bb` ([babashka](https://github.com/babashka/babashka)) — the VM-management
   commands are implemented in Babashka, so every `just` recipe runs `bb`
-  (install via your package manager or `nix profile install nixpkgs#babashka`)
+  (install via your package manager or `nix profile add nixpkgs#babashka`)
 - `qemu-img` and `guestfish` (for disk creation)
 
 ## Installation
