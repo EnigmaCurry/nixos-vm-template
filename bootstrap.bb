@@ -53,8 +53,21 @@
   (when-not (in-repo? file-dir)
     ;; Not running from a repo checkout — clone/update, then hand off
     (let [dir default-repo-dir
-          branch (or (System/getenv "NIXOS_VM_BRANCH") default-branch)]
-      (if (in-repo? dir)
+          branch (or (System/getenv "NIXOS_VM_BRANCH") default-branch)
+          dir-file (io/file dir)
+          git-repo? (.exists (io/file dir ".git"))
+          ;; A directory that exists and isn't empty but isn't a git
+          ;; checkout (e.g. a stale/partial clone) would make `git clone`
+          ;; fail with "destination path already exists". Bail clearly.
+          stale? (and (.exists dir-file)
+                      (not git-repo?)
+                      (seq (.list dir-file)))]
+      (when stale?
+        (println (format "error: %s exists but is not a git checkout." dir))
+        (println "Remove it and re-run, or set NIXOS_VM_BRANCH/HOME to a clean path:")
+        (println (format "  rm -rf %s" dir))
+        (System/exit 1))
+      (if git-repo?
         (do
           (proc/shell {:dir dir :out :string :err :string}
                       "git" "fetch" "origin" branch)
@@ -63,7 +76,7 @@
           (proc/shell {:dir dir :out :string :err :string}
                       "git" "reset" "--hard" (str "origin/" branch)))
         (do
-          (.mkdirs (.getParentFile (io/file dir)))
+          (.mkdirs (.getParentFile dir-file))
           (proc/shell {:out :string :err :string}
                       "git" "clone" "--branch" branch repo-url dir)))
       (let [sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
