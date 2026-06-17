@@ -11,24 +11,24 @@
 #     export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"   # your clone
 #     source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
 #
-#     # vm_register <alias> <env-file> [repo-root]
-#     vm_register vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
-#     vm_register pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
+#     # nixos-vm-template-alias <alias> <env-file> [repo-root]
+#     nixos-vm-template-alias vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
+#     nixos-vm-template-alias pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
 #
-# Each vm_register call defines the alias AND wires its completion to the same
-# env file, so you can run e.g. `vm create web` and `pve create db` and both
-# tab-complete against their own backend.
+# Each call defines the alias AND wires its completion to the same env file, so
+# you can run e.g. `vm create web` and `pve create db` and both tab-complete
+# against their own backend.
 
 # alias name -> (repo root, env file)
 declare -gA _VM_ROOTS _VM_ENVS
 
-# vm_register <alias> <env-file> [repo-root]
+# nixos-vm-template-alias <alias> <env-file> [repo-root]
 # Defines the alias and registers its completion against the given env file.
-vm_register() {
+nixos-vm-template-alias() {
     local name="$1" env="$2"
     local root="${3:-${NIXOS_VM_TEMPLATE:-$HOME/nixos-vm-template}}"
     if [[ -z "$name" || -z "$env" ]]; then
-        echo "usage: vm_register <alias> <env-file> [repo-root]" >&2
+        echo "usage: nixos-vm-template-alias <alias> <env-file> [repo-root]" >&2
         return 2
     fi
     _VM_ROOTS["$name"]="$root"
@@ -53,7 +53,7 @@ _vm() {
     cmd="${COMP_WORDS[0]}"
 
     # Resolve this alias's root/env, falling back to the env vars (so a plain
-    # `complete -F _vm vm` without vm_register still works).
+    # `complete -F _vm vm` without nixos-vm-template-alias still works).
     root="${_VM_ROOTS[$cmd]:-${NIXOS_VM_TEMPLATE:-}}"
     env="${_VM_ENVS[$cmd]:-${VM_ENV:-$HOME/.config/nixos-vm-template/env}}"
 
@@ -101,5 +101,5 @@ _vm() {
     esac
 }
 
-# If you'd rather define aliases by hand instead of using vm_register, register
-# completion for each one explicitly, e.g.:  complete -F _vm vm pve
+# If you'd rather define aliases by hand instead of using the helper above,
+# register completion for each one explicitly, e.g.:  complete -F _vm vm pve

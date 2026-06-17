@@ -241,7 +241,7 @@ vm ssh myvm
 #### Tab completion and per-backend aliases
 
 The completion script in [`completions/vm.bash`](completions/vm.bash) provides a
-`vm_register <alias> <env-file> [repo-root]` helper that defines an alias **and**
+`nixos-vm-template-alias <alias> <env-file> [repo-root]` helper that defines an alias **and**
 wires up its completion in one step. Because each alias carries its own env file,
 this is also how you give each backend its own command — e.g. `vm` for libvirt
 and `pve` for proxmox, each completing against its own VMs:
@@ -251,8 +251,8 @@ and `pve` for proxmox, each completing against its own VMs:
 export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"
 source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
 
-vm_register vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
-vm_register pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
+nixos-vm-template-alias vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
+nixos-vm-template-alias pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
 ```
 
 Put `BACKEND=libvirt` in `env` and `BACKEND=proxmox` (plus `PVE_HOST=…`) in
@@ -260,7 +260,7 @@ Put `BACKEND=libvirt` in `env` and `BACKEND=proxmox` (plus `PVE_HOST=…`) in
 arguments complete to the right values — VM names, profiles (comma-separated
 lists included), and network modes — each querying its own backend.
 
-You can name the aliases anything (`vm_register lab "$HOME/.config/.../lab.env"`),
+You can name the aliases anything (`nixos-vm-template-alias lab "$HOME/.config/.../lab.env"`),
 and register as many backends/hosts as you like. If you prefer to define aliases
 by hand, register completion for them explicitly instead: `complete -F _vm vm pve`.
 
