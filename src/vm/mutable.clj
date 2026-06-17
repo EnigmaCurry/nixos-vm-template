@@ -79,7 +79,7 @@
         img (str (proc/capture (concat (:readlink cfg) ["-f" (str (:output-dir cfg) "/profiles/" prof)]))
                  "/nixos.qcow2")]
     (println (format "Creating VM disk: %s (profile: %s, mutable)" name prof))
-    (fs/create-dirs (str (:output-dir cfg) "/vms/" name))
+    (fs/create-dirs (fs/parent disk-path))
     (when-not (fs/regular-file? img)
       (println (format "Error: Mutable profile image not found: %s" img))
       (println (format "Run 'just build %s' first" prof))
