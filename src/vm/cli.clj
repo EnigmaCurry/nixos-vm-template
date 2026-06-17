@@ -1,10 +1,43 @@
 (ns vm.cli
   "Entry point: parse [command & args], build config from the BACKEND env var,
-  and dispatch. Invoked by the Justfile as `bb -m vm.cli <command> [args...]`."
+  resolve the backend record, and dispatch. Invoked by the Justfile as
+  `bb -m vm.cli <command> [args...]`."
   (:require [clojure.string :as str]
             [vm.config :as config]
             [vm.machine :as machine]
-            [vm.proc :as proc]))
+            [vm.profile :as profile]
+            [vm.net :as net]
+            [vm.wizard :as wizard]
+            [vm.proc :as proc]
+            [vm.backend :as b]
+            [vm.backend.libvirt :as lv]
+            [vm.backend.proxmox :as px]))
+
+(defn- mk-backend [cfg]
+  (case (:backend cfg)
+    "libvirt" (lv/->Libvirt)
+    "proxmox" (px/->Proxmox)
+    (do (println (format "Error: unknown backend '%s'" (:backend cfg)))
+        (System/exit 1))))
+
+;; Per-backend composites (same names/arities in both backend namespaces).
+(def ^:private composite-fns
+  {"libvirt" {:create-vm lv/create-vm :create-vm-batch lv/create-vm-batch :clone-vm lv/clone-vm
+              :upgrade-vm lv/upgrade-vm :resize-var lv/resize-var :resize-vm lv/resize-vm
+              :backup-vm lv/backup-vm :restore-backup-vm lv/restore-backup-vm
+              :ssh-vm lv/ssh-vm :list-backups lv/list-backups}
+   "proxmox" {:create-vm px/create-vm :create-vm-batch px/create-vm-batch :clone-vm px/clone-vm
+              :upgrade-vm px/upgrade-vm :resize-var px/resize-var :resize-vm px/resize-vm
+              :backup-vm px/backup-vm :restore-backup-vm px/restore-backup-vm
+              :ssh-vm px/ssh-vm :list-backups px/list-backups}})
+
+(defn- cf [cfg k] (get-in composite-fns [(:backend cfg) k]))
+
+(defn- arg
+  "nth arg with a blank-or-missing -> default fallback."
+  [args i default]
+  (let [v (nth (vec args) i nil)]
+    (if (str/blank? v) default v)))
 
 ;; ─── list-machines ───────────────────────────────────────────────────────────
 
@@ -101,11 +134,64 @@
 ;; ─── dispatch ────────────────────────────────────────────────────────────────
 
 (defn -main [& args]
-  (let [[command & _args] args
+  (let [[command & rest] args
+        a (vec rest)
         backend (or (System/getenv "BACKEND") "libvirt")
-        cfg (config/load-config backend)]
+        cfg (config/load-config backend)
+        B (delay (mk-backend cfg))]
     (case command
+      ;; image building
+      "build"         (profile/build-profile cfg (arg a 0 "core"))
+      "build-all"     (profile/build-all cfg)
+      "export"        (profile/export-profile cfg (arg a 0 "core"))
+      "list-profiles" (profile/list-profiles cfg)
+      "clean"         (profile/clean cfg)
+      "shell"         (profile/dev-shell cfg)
+      ;; configuration
+      "config"        (wizard/config-vm-interactive cfg (arg a 0 "") (arg a 1 "") false)
+      "config-batch"  (machine/config-vm cfg (arg a 0 nil)
+                                         {:profile (arg a 1 "core") :memory (arg a 2 "2048")
+                                          :vcpus (arg a 3 "2") :var-size (arg a 4 "30G")
+                                          :network (arg a 5 "nat") :static-ip (arg a 6 "")})
+      "network-config" (net/network-config-interactive cfg (arg a 0 nil) (arg a 1 ""))
+      "passwd"        (machine/set-password cfg (arg a 0 nil))
+      "set-profile"   (machine/set-profile cfg (arg a 0 nil) (str/join "," (rest a)))
       "list-machines" (cmd-list-machines cfg)
+      ;; lifecycle (per-backend composites)
+      "create"        ((cf cfg :create-vm) @B cfg (arg a 0 nil))
+      "create-batch"  ((cf cfg :create-vm-batch) @B cfg (arg a 0 nil) (arg a 1 "core")
+                       (arg a 2 "2048") (arg a 3 "2") (arg a 4 "30G") (arg a 5 "nat") (arg a 6 ""))
+      "clone"         ((cf cfg :clone-vm) @B cfg (arg a 0 nil) (arg a 1 nil)
+                       (arg a 2 "") (arg a 3 "") (arg a 4 ""))
+      "upgrade"       ((cf cfg :upgrade-vm) @B cfg (arg a 0 nil))
+      "resize"        ((cf cfg :resize-vm) @B cfg (arg a 0 nil))
+      "resize-var"    ((cf cfg :resize-var) @B cfg (arg a 0 nil) (arg a 1 nil))
+      "backup"        ((cf cfg :backup-vm) @B cfg (arg a 0 nil))
+      "restore-backup" ((cf cfg :restore-backup-vm) @B cfg (arg a 0 nil) (arg a 1 ""))
+      "backups"       ((cf cfg :list-backups) cfg)
+      "ssh"           ((cf cfg :ssh-vm) cfg (arg a 0 nil))
+      ;; shared composites
+      "destroy"       (b/destroy-vm @B cfg (arg a 0 nil))
+      "purge"         (b/purge-vm @B cfg (arg a 0 nil))
+      "recreate"      (b/recreate-vm @B cfg (arg a 0 nil) (arg a 1 "30G") (arg a 2 ""))
+      ;; primitives
+      "start"         (b/start @B cfg (arg a 0 nil))
+      "stop"          (b/stop @B cfg (arg a 0 nil))
+      "reboot"        (b/reboot @B cfg (arg a 0 nil))
+      "force-stop"    (b/force-stop @B cfg (arg a 0 nil))
+      "status"        (b/status @B cfg (arg a 0 nil))
+      "list"          (b/list-vms @B cfg)
+      "console"       (b/console @B cfg (arg a 0 nil))
+      "snapshot"      (b/snapshot @B cfg (arg a 0 nil) (arg a 1 nil))
+      "restore-snapshot" (b/restore-snapshot @B cfg (arg a 0 nil) (arg a 1 nil))
+      "snapshots"     (b/list-snapshots @B cfg (arg a 0 nil))
+      ;; machine-readable status queries (used by bootstrap.bb)
+      "vm-states"     (doseq [n a] (println (format "%s:%s" n (b/vm-state @B cfg n))))
+      "vm-versions"   (doseq [n a]
+                        (let [v (b/vm-version @B cfg n)
+                              commit (some->> (str/split-lines (or v ""))
+                                              (keep #(second (re-find #"^commit=(.*)" %))) first)]
+                          (println (format "%s:%s" n (if (str/blank? commit) "unknown" commit)))))
       "test-connection" (cmd-test-connection cfg)
       (do (println (format "Error: unknown command '%s'" command))
           (System/exit 1)))))

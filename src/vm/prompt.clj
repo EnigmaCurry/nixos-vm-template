@@ -29,15 +29,15 @@
   ([msg default] (wiz "confirm" msg :default default)))
 
 (defn choose
-  "Single choice from `choices`. Optional `default-idx` (0-based) preselects."
-  ([msg choices] (apply wiz "choose" msg choices))
-  ([msg default-idx choices]
-   (apply wiz "choose" msg :default-index default-idx choices)))
+  "Single choice from `choices`. Optional `default` value preselects it."
+  ([msg choices] (wiz "choose" msg (vec choices)))
+  ([msg choices default] (wiz "choose" msg (vec choices) :default default)))
 
 (defn select
-  "Multi-select from `choices`; returns a vector of selected strings."
-  [msg choices]
-  (apply wiz "select" msg choices))
+  "Multi-select from `choices`; returns a vector of selected strings. Optional
+  `default` is a vector of pre-selected values."
+  ([msg choices] (wiz "select" msg (vec choices)))
+  ([msg choices default] (wiz "select" msg (vec choices) :default default)))
 
 (defn read-password
   "Read a password from the TTY without echo. Returns the entered string."

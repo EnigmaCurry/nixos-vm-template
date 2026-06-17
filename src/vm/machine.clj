@@ -301,6 +301,17 @@
                        name (read-field cfg name "profile") memory vcpus var-size))
       (println (format "To create the VM, run: just create %s" name)))))
 
+(defn set-profile
+  "Set the profile(s) for an existing VM (the `just profile` recipe). `profiles`
+  is a comma-separated string."
+  [cfg name profiles]
+  (when-not (exists? cfg name)
+    (println (format "Error: Machine '%s' does not exist" name))
+    (System/exit 1))
+  (spit (str (machine-dir cfg name) "/profile") (str profiles "\n"))
+  (println (format "Set profile for %s: %s" name profiles))
+  (println (format "Run 'just upgrade %s' to apply the new profile." name)))
+
 (defn set-password
   "Set or clear the root password hash for a VM (interactive prompt)."
   [cfg name]

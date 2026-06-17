@@ -100,6 +100,17 @@
     (build-profile cfg p))
   (println "All base profiles built."))
 
+(defn clean
+  "Remove all built images and VM disks (keeps machine configs)."
+  [cfg]
+  (fs/delete-tree (:output-dir cfg))
+  (println (format "Cleaned %s/" (:output-dir cfg))))
+
+(defn dev-shell
+  "Enter the project's nix develop shell."
+  [cfg]
+  (proc/run! (concat (:nix cfg) ["develop"])))
+
 (defn export-profile
   "Export a built profile image with release metadata in the filename:
   output/export/nixos-{slug}-{date}-{gitsha}.qcow2."

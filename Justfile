@@ -9,7 +9,9 @@ HOST := if BACKEND == "proxmox" { env_var_or_default("PVE_NODE", env_var_or_defa
 _XDG_CONFIG_HOME := env_var_or_default("XDG_CONFIG_HOME", env_var("HOME") + "/.config")
 _DEFAULT_MACHINES_DIR := env_var_or_default("NIXOS_VM_MACHINES_DIR", _XDG_CONFIG_HOME + "/nixos-vm-template/machines")
 MACHINES_DIR := env_var_or_default("MACHINES_DIR", _DEFAULT_MACHINES_DIR + "/" + BACKEND + "/" + HOST)
-backend_script := if BACKEND == "common" { error("BACKEND cannot be 'common'") } else { "backends/" + BACKEND + ".sh" }
+
+# All VM management logic lives in Babashka (src/vm/, entrypoint bb -m vm.cli).
+# BACKEND/MACHINES_DIR are exported above and read by vm.config.
 
 # Default recipe - show available commands
 [private]
@@ -18,27 +20,27 @@ default:
 
 # Build a profile image (supports comma-separated profiles, e.g., docker,python)
 build profiles="core":
-    @source {{backend_script}} && build_profile "{{profiles}}"
+    @bb -m vm.cli build "{{profiles}}"
 
 # Build all profiles
 build-all:
-    @source {{backend_script}} && build_all
+    @bb -m vm.cli build-all
 
 # Export a profile image with release metadata filename
 export profiles="core":
-    @source {{backend_script}} && export_profile "{{profiles}}"
+    @bb -m vm.cli export "{{profiles}}"
 
 # List available profiles
 list-profiles:
-    @source {{backend_script}} && list_profiles
+    @bb -m vm.cli list-profiles
 
 # Configure a VM interactively using script-wizard (or non-interactively with all args)
 config name="" profile="":
-    @source {{backend_script}} && config_vm_interactive "{{name}}" "{{profile}}"
+    @bb -m vm.cli config "{{name}}" "{{profile}}"
 
 # Configure a VM non-interactively with explicit values
 config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
-    @source {{backend_script}} && config_vm "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
+    @bb -m vm.cli config-batch "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
 # Create a VM from a pre-built image (no local image build required)
 bootstrap:
@@ -46,48 +48,48 @@ bootstrap:
 
 # Create a new VM interactively (prompts for all settings)
 create name:
-    @source {{backend_script}} && create_vm "{{name}}"
+    @bb -m vm.cli create "{{name}}"
 
 # Create a new VM non-interactively with explicit values
 create-batch name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
-    @source {{backend_script}} && create_vm_batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
+    @bb -m vm.cli create-batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
 # Memory/vcpus default to source VM's values if not specified
 clone source dest memory="" vcpus="" network="":
-    @source {{backend_script}} && clone_vm "{{source}}" "{{dest}}" "{{memory}}" "{{vcpus}}" "{{network}}"
+    @bb -m vm.cli clone "{{source}}" "{{dest}}" "{{memory}}" "{{vcpus}}" "{{network}}"
 
 # Configure network mode for a VM (nat or bridge)
 network-config name network="":
-    @source {{backend_script}} && network_config_interactive "{{name}}" "{{network}}"
+    @bb -m vm.cli network-config "{{name}}" "{{network}}"
 
 # Start a VM
 start name:
-    @source {{backend_script}} && backend_start "{{name}}"
+    @bb -m vm.cli start "{{name}}"
 
 # Stop a VM
 stop name:
-    @source {{backend_script}} && backend_stop "{{name}}"
+    @bb -m vm.cli stop "{{name}}"
 
 # Reboot a VM (ACPI reboot)
 reboot name:
-    @source {{backend_script}} && backend_reboot "{{name}}"
+    @bb -m vm.cli reboot "{{name}}"
 
 # Force stop a VM
 force-stop name:
-    @source {{backend_script}} && backend_force_stop "{{name}}"
+    @bb -m vm.cli force-stop "{{name}}"
 
 # Fully destroy a VM: force stop, undefine, remove disk files (keeps machine config)
 destroy name:
-    @source {{backend_script}} && destroy_vm "{{name}}"
+    @bb -m vm.cli destroy "{{name}}"
 
 # Completely remove a VM including its machine config
 purge name:
-    @source {{backend_script}} && purge_vm "{{name}}"
+    @bb -m vm.cli purge "{{name}}"
 
 # Recreate a VM from its existing machine config (force stop, replace disks, start)
 recreate name var_size="30G" network="":
-    @source {{backend_script}} && recreate_vm "{{name}}" "{{var_size}}" "{{network}}"
+    @bb -m vm.cli recreate "{{name}}" "{{var_size}}" "{{network}}"
 
 # Update nix flake.lock
 update:
@@ -95,88 +97,79 @@ update:
 
 # Upgrade a VM to a new image (preserves /var data)
 upgrade name:
-    @source {{backend_script}} && upgrade_vm "{{name}}"
+    @bb -m vm.cli upgrade "{{name}}"
 
 # Resize VM resources interactively (memory, vcpus, /var disk)
 resize name:
-    @source {{backend_script}} && resize_vm "{{name}}"
+    @bb -m vm.cli resize "{{name}}"
 
 # Resize just the /var disk for a VM (VM must be stopped)
 resize-var name size:
-    @source {{backend_script}} && resize_var "{{name}}" "{{size}}"
+    @bb -m vm.cli resize-var "{{name}}" "{{size}}"
 
 # Set or clear the root password for a VM
 passwd name:
-    @source {{backend_script}} && set_password "{{name}}"
+    @bb -m vm.cli passwd "{{name}}"
 
 # Set the profile(s) for a VM (e.g., just profile myvm docker python)
 profile name +profiles:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ ! -d "{{MACHINES_DIR}}/{{name}}" ]; then
-        echo "Error: Machine '{{name}}' does not exist" >&2
-        exit 1
-    fi
-    profiles_csv=$(echo "{{profiles}}" | tr ' ' ',')
-    echo "$profiles_csv" > "{{MACHINES_DIR}}/{{name}}/profile"
-    echo "Set profile for {{name}}: $profiles_csv"
-    echo "Run 'just upgrade {{name}}' to apply the new profile."
+    @bb -m vm.cli set-profile "{{name}}" {{profiles}}
 
 # List all machine configs
 list-machines:
-    @source {{backend_script}} && list_machines
+    @bb -m vm.cli list-machines
 
 # Show VM console
 console name:
-    @source {{backend_script}} && backend_console "{{name}}"
+    @bb -m vm.cli console "{{name}}"
 
 # SSH into a VM (accepts [user@]name, defaults to 'user')
 ssh name:
-    @source {{backend_script}} && ssh_vm "{{name}}"
+    @bb -m vm.cli ssh "{{name}}"
 
 # Show VM status
 status name:
-    @source {{backend_script}} && backend_status "{{name}}"
+    @bb -m vm.cli status "{{name}}"
 
 # List all VMs
 list:
-    @source {{backend_script}} && backend_list
+    @bb -m vm.cli list
 
 # Create a snapshot of a VM
 snapshot name snapshot_name:
-    @source {{backend_script}} && backend_snapshot "{{name}}" "{{snapshot_name}}"
+    @bb -m vm.cli snapshot "{{name}}" "{{snapshot_name}}"
 
 # Restore a VM to a snapshot
 restore-snapshot name snapshot_name:
-    @source {{backend_script}} && backend_restore_snapshot "{{name}}" "{{snapshot_name}}"
+    @bb -m vm.cli restore-snapshot "{{name}}" "{{snapshot_name}}"
 
 # List snapshots for a VM
 snapshots name:
-    @source {{backend_script}} && backend_list_snapshots "{{name}}"
+    @bb -m vm.cli snapshots "{{name}}"
 
 # Backup a VM (suspend, copy disks, compress)
 backup name:
-    @source {{backend_script}} && backup_vm "{{name}}"
+    @bb -m vm.cli backup "{{name}}"
 
 # Restore a VM from backup (interactive selection if no file specified)
 restore-backup name backup_file="":
-    @source {{backend_script}} && restore_backup_vm "{{name}}" "{{backup_file}}"
+    @bb -m vm.cli restore-backup "{{name}}" "{{backup_file}}"
 
 # List available backups
 backups:
-    @source {{backend_script}} && list_backups
+    @bb -m vm.cli backups
 
 # Clean built images and VM disks (keeps machine configs)
 clean:
-    @source {{backend_script}} && clean
+    @bb -m vm.cli clean
 
 # Enter development shell
 shell:
-    @source {{backend_script}} && dev_shell
+    @bb -m vm.cli shell
 
 # Test connection to the backend (libvirt or proxmox)
 test-connection:
-    @source {{backend_script}} && test_connection
+    @bb -m vm.cli test-connection
 
 # Configure Woodpecker CI secrets for S3 image uploads
 # Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,

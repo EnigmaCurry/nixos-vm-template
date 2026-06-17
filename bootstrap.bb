@@ -41,7 +41,7 @@
   [dir]
   (and dir
        (.exists (io/file dir "Justfile"))
-       (.exists (io/file dir "backends" "common.sh"))
+       (.exists (io/file dir "bb.edn"))
        (.exists (io/file dir "bootstrap.bb"))))
 
 (let [file-dir (when-not (= *file* "NO_SOURCE_PATH")
@@ -126,30 +126,29 @@
   [env]
   (into {} (filter (fn [[k _]] (string? k)) env)))
 
-(defn backend-sh!
-  "Run a bash command with the backend sourced. Returns process result."
-  [backend env cmd]
-  (let [backend-script (str "backends/" backend ".sh")
-        full-cmd (format "source %s && %s" backend-script cmd)
-        machines-dir (get env :machines-dir)]
-    (proc/shell {:dir repo-dir :extra-env (merge {"SKIP_BUILD" "true"
-                                                   "BACKEND" backend
-                                                   "MACHINES_DIR" machines-dir}
-                                                 (env-vars env))}
-                "bash" "-euo" "pipefail" "-c" full-cmd)))
+(defn- backend-env
+  [backend env]
+  (merge {"SKIP_BUILD" "true" "BACKEND" backend "MACHINES_DIR" (get env :machines-dir)}
+         (env-vars env)))
 
-(defn backend-sh-ok
-  "Run a backend command, return stdout trimmed."
-  [backend env cmd]
-  (let [backend-script (str "backends/" backend ".sh")
-        full-cmd (format "source %s && %s" backend-script cmd)
-        machines-dir (get env :machines-dir)]
-    (str/trim (:out (proc/shell {:dir repo-dir :out :string :err :string
-                                 :extra-env (merge {"SKIP_BUILD" "true"
-                                                    "BACKEND" backend
-                                                    "MACHINES_DIR" machines-dir}
-                                                   (env-vars env))}
-                                "bash" "-euo" "pipefail" "-c" full-cmd)))))
+(defn backend-cli!
+  "Run `bb -m vm.cli <args...>` with backend env (inherited stdio). An optional
+  trailing opts map may supply :in (stdin). Returns the process result."
+  [backend env & args]
+  (let [opts (when (map? (last args)) (last args))
+        cmd-args (if opts (butlast args) args)]
+    (apply proc/shell
+           (merge {:dir repo-dir :extra-env (backend-env backend env)}
+                  (select-keys opts [:in]))
+           "bb" "-m" "vm.cli" cmd-args)))
+
+(defn backend-cli-ok
+  "Run `bb -m vm.cli <args...>` with backend env, return stdout trimmed."
+  [backend env & args]
+  (str/trim (:out (apply proc/shell
+                         {:dir repo-dir :out :string :err :string
+                          :extra-env (backend-env backend env)}
+                         "bb" "-m" "vm.cli" args))))
 
 (defn fetch-json
   "Fetch and parse JSON from a URL."
@@ -255,8 +254,7 @@
   [backend env vm-names]
   (if (empty? vm-names)
     {}
-    (let [cmd (str/join "; " (map #(format "echo \"%s:$(backend_vm_state '%s')\"" % %) vm-names))
-          output (try (backend-sh-ok backend env cmd)
+    (let [output (try (apply backend-cli-ok backend env "vm-states" vm-names)
                       (catch Exception _ ""))]
       (into {}
             (for [line (str/split-lines output)
@@ -269,10 +267,7 @@
   [backend env running-names]
   (if (empty? running-names)
     {}
-    (let [cmd (str/join "; "
-                (map #(format "v=$(backend_vm_version '%s' 2>/dev/null | grep '^commit=' | cut -d= -f2 || true); echo \"%s:${v:-unknown}\"" % %)
-                     running-names))
-          output (try (backend-sh-ok backend env cmd)
+    (let [output (try (apply backend-cli-ok backend env "vm-versions" running-names)
                       (catch Exception _ ""))]
       (into {}
             (for [line (str/split-lines output)
@@ -434,9 +429,8 @@
             (println)
             (println (format "Creating VM '%s' with profile '%s' on %s..." vm-name profile-key backend))
             (println)
-            (let [cmd (format "create_vm_batch '%s' '%s' '%s' '%s' '%s' '%s'"
-                              vm-name profile-key memory vcpus var-size network)
-                  result (backend-sh! backend vm-env cmd)]
+            (let [result (backend-cli! backend vm-env "create-batch"
+                                       vm-name profile-key memory vcpus var-size network)]
               (when (not= 0 (:exit result))
                 (System/exit (:exit result))))))))))
 
@@ -498,8 +492,7 @@
                     (println (format "\nUpgrading '%s' to latest '%s' image..." vm-name matched-key))
                     (download-profile! matched-key profile-info)
                     (println)
-                    (let [cmd (format "upgrade_vm '%s'" vm-name)
-                          result (backend-sh! backend pve-env cmd)]
+                    (let [result (backend-cli! backend pve-env "upgrade" vm-name)]
                       (when (not= 0 (:exit result))
                         (System/exit (:exit result))))))))
 
@@ -508,8 +501,7 @@
             (when (wiz/confirm (format "Destroy VM '%s'? All disk data will be lost." vm-name)
                                :default :no)
               (println)
-              (let [cmd (format "echo y | destroy_vm '%s'" vm-name)
-                    result (backend-sh! backend pve-env cmd)]
+              (let [result (backend-cli! backend pve-env "destroy" vm-name {:in "y\n"})]
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))
 
@@ -518,8 +510,7 @@
             (when (wiz/confirm (format "Purge VM '%s'? All data AND config will be permanently deleted." vm-name)
                                :default :no)
               (println)
-              (let [cmd (format "echo y | purge_vm '%s'" vm-name)
-                    result (backend-sh! backend pve-env cmd)]
+              (let [result (backend-cli! backend pve-env "purge" vm-name {:in "y\n"})]
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))))))))
 
