@@ -133,7 +133,7 @@
 
 ;; ─── dispatch ────────────────────────────────────────────────────────────────
 
-(defn -main [& args]
+(defn- run [args]
   (let [[command & rest] args
         a (vec rest)
         backend (or (System/getenv "BACKEND") "libvirt")
@@ -195,3 +195,14 @@
       "test-connection" (cmd-test-connection cfg)
       (do (println (format "Error: unknown command '%s'" command))
           (System/exit 1)))))
+
+(defn -main [& args]
+  (try
+    (run args)
+    (catch clojure.lang.ExceptionInfo e
+      ;; A backend tool exited non-zero: its stderr already printed, so exit
+      ;; cleanly with its code instead of dumping a Clojure stack trace. Other
+      ;; exceptions (genuine logic bugs) still propagate with a trace.
+      (if (= :babashka.process/error (:type (ex-data e)))
+        (System/exit (or (:exit (ex-data e)) 1))
+        (throw e)))))
