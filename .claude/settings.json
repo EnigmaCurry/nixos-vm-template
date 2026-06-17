@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bb \"$CLAUDE_PROJECT_DIR/.claude/hooks/parinfer-fix.bb\" 2>/dev/null || true",
+            "statusMessage": "parinfer: reconciling parens"
+          }
+        ]
+      }
+    ]
+  }
+}

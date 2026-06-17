@@ -5,6 +5,25 @@
 - Always run `git pull` before making any changes to ensure you have the latest code.
 - When working on a branch other than `master`, automatically commit and push changes when done with a task.
 
+## Editing Lisp (Clojure, Babashka, EDN)
+
+When writing or editing any Lisp file (`.clj`, `.cljs`, `.cljc`, `.bb`, `.edn`):
+
+- **Indent first, like Python.** Get the *indentation* right and treat it as the source of truth.
+  Do not hand-balance trailing close-parens — a PostToolUse hook (`.claude/hooks/parinfer-fix.bb`)
+  runs `parinfer-rust` in indent mode after every Write/Edit and reconciles the closing delimiters
+  from your indentation automatically.
+- **Parinfer only fixes *closing* delimiters from indentation.** It will NOT add missing opening
+  parens/brackets or rescue genuinely malformed code, and wrong indentation yields
+  balanced-but-wrong code — so the opening delimiters and the indentation must be correct.
+- **Verify it parses** after editing (reads every form, no eval; nonzero exit on imbalance):
+
+  ```bash
+  bb -e '(read-string (str "[" (slurp "FILE") "]")) (println "OK")'
+  ```
+
+  For deeper static analysis use `nix run nixpkgs#clj-kondo -- --lint FILE`.
+
 ## Project Overview
 
 This project builds NixOS virtual machine images for libvirt with an immutable (read-only) root filesystem design. The architecture enables multiple VMs to share a single read-only base image while maintaining separate writable state.
