@@ -12,6 +12,12 @@ MACHINES_DIR := env_var_or_default("MACHINES_DIR", _DEFAULT_MACHINES_DIR + "/" +
 
 # All VM management logic lives in Babashka (src/vm/, entrypoint bb -m vm.cli).
 # BACKEND/MACHINES_DIR are exported above and read by vm.config.
+#
+# Recipes run the CLI inside the flake's dev shell (`nix develop --command`) so
+# bb and the disk tools (qemu-img, guestfish, virsh, …) are on PATH without
+# manually entering the shell. Override with VM_CLI="bb -m vm.cli" when those
+# tools are already on PATH (e.g. you're inside `nix develop`, or in CI).
+VM_CLI := env_var_or_default("VM_CLI", "nix develop --command bb -m vm.cli")
 
 # Default recipe - show available commands
 [private]
@@ -20,27 +26,27 @@ default:
 
 # Build a profile image (supports comma-separated profiles, e.g., docker,python)
 build profiles="core":
-    @bb -m vm.cli build "{{profiles}}"
+    @{{VM_CLI}} build "{{profiles}}"
 
 # Build all profiles
 build-all:
-    @bb -m vm.cli build-all
+    @{{VM_CLI}} build-all
 
 # Export a profile image with release metadata filename
 export profiles="core":
-    @bb -m vm.cli export "{{profiles}}"
+    @{{VM_CLI}} export "{{profiles}}"
 
 # List available profiles
 list-profiles:
-    @bb -m vm.cli list-profiles
+    @{{VM_CLI}} list-profiles
 
 # Configure a VM interactively using script-wizard (or non-interactively with all args)
 config name="" profile="":
-    @bb -m vm.cli config "{{name}}" "{{profile}}"
+    @{{VM_CLI}} config "{{name}}" "{{profile}}"
 
 # Configure a VM non-interactively with explicit values
 config-batch new_name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
-    @bb -m vm.cli config-batch "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
+    @{{VM_CLI}} config-batch "{{new_name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
 # Create a VM from a pre-built image (no local image build required)
 bootstrap:
@@ -48,48 +54,48 @@ bootstrap:
 
 # Create a new VM interactively (prompts for all settings)
 create name:
-    @bb -m vm.cli create "{{name}}"
+    @{{VM_CLI}} create "{{name}}"
 
 # Create a new VM non-interactively with explicit values
 create-batch name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
-    @bb -m vm.cli create-batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
+    @{{VM_CLI}} create-batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
 # Memory/vcpus default to source VM's values if not specified
 clone source dest memory="" vcpus="" network="":
-    @bb -m vm.cli clone "{{source}}" "{{dest}}" "{{memory}}" "{{vcpus}}" "{{network}}"
+    @{{VM_CLI}} clone "{{source}}" "{{dest}}" "{{memory}}" "{{vcpus}}" "{{network}}"
 
 # Configure network mode for a VM (nat or bridge)
 network-config name network="":
-    @bb -m vm.cli network-config "{{name}}" "{{network}}"
+    @{{VM_CLI}} network-config "{{name}}" "{{network}}"
 
 # Start a VM
 start name:
-    @bb -m vm.cli start "{{name}}"
+    @{{VM_CLI}} start "{{name}}"
 
 # Stop a VM
 stop name:
-    @bb -m vm.cli stop "{{name}}"
+    @{{VM_CLI}} stop "{{name}}"
 
 # Reboot a VM (ACPI reboot)
 reboot name:
-    @bb -m vm.cli reboot "{{name}}"
+    @{{VM_CLI}} reboot "{{name}}"
 
 # Force stop a VM
 force-stop name:
-    @bb -m vm.cli force-stop "{{name}}"
+    @{{VM_CLI}} force-stop "{{name}}"
 
 # Fully destroy a VM: force stop, undefine, remove disk files (keeps machine config)
 destroy name:
-    @bb -m vm.cli destroy "{{name}}"
+    @{{VM_CLI}} destroy "{{name}}"
 
 # Completely remove a VM including its machine config
 purge name:
-    @bb -m vm.cli purge "{{name}}"
+    @{{VM_CLI}} purge "{{name}}"
 
 # Recreate a VM from its existing machine config (force stop, replace disks, start)
 recreate name var_size="30G" network="":
-    @bb -m vm.cli recreate "{{name}}" "{{var_size}}" "{{network}}"
+    @{{VM_CLI}} recreate "{{name}}" "{{var_size}}" "{{network}}"
 
 # Update nix flake.lock
 update:
@@ -97,79 +103,79 @@ update:
 
 # Upgrade a VM to a new image (preserves /var data)
 upgrade name:
-    @bb -m vm.cli upgrade "{{name}}"
+    @{{VM_CLI}} upgrade "{{name}}"
 
 # Resize VM resources interactively (memory, vcpus, /var disk)
 resize name:
-    @bb -m vm.cli resize "{{name}}"
+    @{{VM_CLI}} resize "{{name}}"
 
 # Resize just the /var disk for a VM (VM must be stopped)
 resize-var name size:
-    @bb -m vm.cli resize-var "{{name}}" "{{size}}"
+    @{{VM_CLI}} resize-var "{{name}}" "{{size}}"
 
 # Set or clear the root password for a VM
 passwd name:
-    @bb -m vm.cli passwd "{{name}}"
+    @{{VM_CLI}} passwd "{{name}}"
 
 # Set the profile(s) for a VM (e.g., just profile myvm docker python)
 profile name +profiles:
-    @bb -m vm.cli set-profile "{{name}}" {{profiles}}
+    @{{VM_CLI}} set-profile "{{name}}" {{profiles}}
 
 # List all machine configs
 list-machines:
-    @bb -m vm.cli list-machines
+    @{{VM_CLI}} list-machines
 
 # Show VM console
 console name:
-    @bb -m vm.cli console "{{name}}"
+    @{{VM_CLI}} console "{{name}}"
 
 # SSH into a VM (accepts [user@]name, defaults to 'user')
 ssh name:
-    @bb -m vm.cli ssh "{{name}}"
+    @{{VM_CLI}} ssh "{{name}}"
 
 # Show VM status
 status name:
-    @bb -m vm.cli status "{{name}}"
+    @{{VM_CLI}} status "{{name}}"
 
 # List all VMs
 list:
-    @bb -m vm.cli list
+    @{{VM_CLI}} list
 
 # Create a snapshot of a VM
 snapshot name snapshot_name:
-    @bb -m vm.cli snapshot "{{name}}" "{{snapshot_name}}"
+    @{{VM_CLI}} snapshot "{{name}}" "{{snapshot_name}}"
 
 # Restore a VM to a snapshot
 restore-snapshot name snapshot_name:
-    @bb -m vm.cli restore-snapshot "{{name}}" "{{snapshot_name}}"
+    @{{VM_CLI}} restore-snapshot "{{name}}" "{{snapshot_name}}"
 
 # List snapshots for a VM
 snapshots name:
-    @bb -m vm.cli snapshots "{{name}}"
+    @{{VM_CLI}} snapshots "{{name}}"
 
 # Backup a VM (suspend, copy disks, compress)
 backup name:
-    @bb -m vm.cli backup "{{name}}"
+    @{{VM_CLI}} backup "{{name}}"
 
 # Restore a VM from backup (interactive selection if no file specified)
 restore-backup name backup_file="":
-    @bb -m vm.cli restore-backup "{{name}}" "{{backup_file}}"
+    @{{VM_CLI}} restore-backup "{{name}}" "{{backup_file}}"
 
 # List available backups
 backups:
-    @bb -m vm.cli backups
+    @{{VM_CLI}} backups
 
 # Clean built images and VM disks (keeps machine configs)
 clean:
-    @bb -m vm.cli clean
+    @{{VM_CLI}} clean
 
 # Enter development shell
 shell:
-    @bb -m vm.cli shell
+    @{{VM_CLI}} shell
 
 # Test connection to the backend (libvirt or proxmox)
 test-connection:
-    @bb -m vm.cli test-connection
+    @{{VM_CLI}} test-connection
 
 # Configure Woodpecker CI secrets for S3 image uploads
 # Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,

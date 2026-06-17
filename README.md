@@ -150,11 +150,15 @@ builds the images and publishes them to S3-compatible storage.
 - Linux build machine with KVM support
 - `nix` package manager (with flakes enabled)
 
-That's the only prerequisite you install by hand. Every other build tool —
-`just` (command runner), `bb` ([babashka](https://github.com/babashka/babashka),
-which runs the VM-management commands), `qemu-img`, and `guestfish` — is
-provided by this flake's development shell (`nix develop`), so there's no need
-to install them through your distro's package manager.
+- `just` (command runner)
+
+Those are the only things you install by hand. Every other build tool —
+`bb` ([babashka](https://github.com/babashka/babashka), which runs the
+VM-management commands), `qemu-img`, and `guestfish` — is provided by this
+flake's development shell, and the `just` recipes run themselves inside it
+(`nix develop --command …`) automatically. So a bare clone plus Nix and `just`
+is enough; there's no need to install the rest through your distro's package
+manager or to enter `nix develop` yourself.
 
 ## Installation
 
@@ -191,24 +195,24 @@ echo "experimental-features = nix-command flakes" \
     >> ~/.config/nix/nix.conf
 ```
 
-### Enter the development shell
+### Install just
 
-With Nix installed, the build tools come from the flake's development shell.
-From a clone of this repo, run:
-
-```bash
-nix develop
-```
-
-This drops you into a shell with `just`, `bb`, `qemu-img`, `guestfish`, and the
-other build tools on `PATH`. Run the `just` commands shown throughout this guide
-from inside that shell — no per-distro package installs required.
-
-If you'd prefer `just` on your `PATH` globally instead, install it with Nix:
+The only build tool you need on your `PATH` is `just`; install it with Nix:
 
 ```bash
 nix profile add nixpkgs#just
 ```
+
+Every `just` recipe runs the VM-management CLI inside the flake's development
+shell automatically (via `nix develop --command`), so `bb`, `qemu-img`,
+`guestfish`, and the other build tools are pulled in on demand — you don't need
+to install them or enter `nix develop` yourself. The first command may take a
+moment while Nix realises the dev shell; subsequent runs are cached.
+
+> [!TIP]
+> If you're iterating and want to skip the per-command `nix develop` wrapper,
+> enter the shell once with `nix develop` (which puts every tool on `PATH`) and
+> set `VM_CLI="bb -m vm.cli"` to make the recipes call `bb` directly.
 
 ## Libvirt Backend
 

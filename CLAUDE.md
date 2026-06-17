@@ -224,6 +224,7 @@ The Justfile supports environment variable overrides for tool commands, useful f
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `VM_CLI` | `nix develop --command bb -m vm.cli` | How recipes invoke the VM CLI; defaults to running inside the flake dev shell. Set to `bb -m vm.cli` when tools are already on `PATH` (inside `nix develop`, or CI) |
 | `HOST_CMD` | `""` | Prefix for all host commands (e.g., `host-spawn`) |
 | `SUDO` | `sudo` | Sudo command (set to `""` to disable) |
 | `JUST` | `just` | Path to just binary (for recursive recipe calls) |
