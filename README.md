@@ -214,13 +214,13 @@ moment while Nix realises the dev shell; subsequent runs are cached.
 > enter the shell once with `nix develop` (which puts every tool on `PATH`) and
 > set `VM_CLI="bb -m vm.cli"` to make the recipes call `bb` directly.
 
-### Run from anywhere (a `vm` alias)
+### Run from anywhere (a shell alias)
 
 `just` has flags to point it at a `Justfile` (`-f`), a working directory
 (`-d`), and an env file (`-E`) regardless of your current directory. Wrapping
-those in a shell alias lets you run `vm <command>` from anywhere, and keeps your
+those in a shell alias lets you run the recipes from anywhere, and keeps your
 backend config (`BACKEND`, `PVE_HOST`, …) in `~/.config` instead of inside the
-clone:
+clone. The alias name is yours to choose — `vm` is just an example:
 
 ```bash
 # Add to ~/.bashrc (or ~/.zshrc)
@@ -238,28 +238,31 @@ vm status myvm
 vm ssh myvm
 ```
 
-> [!TIP]
-> Because the env file is passed explicitly with `-E`, you can keep several —
-> one per backend or host — and define an alias for each (`vm-lab`,
-> `vm-prod`, …), each pointing at its own env file. The default machine configs
-> already live under `~/.config/nixos-vm-template/`, so this keeps everything
-> for a context in one place.
+#### Tab completion and per-backend aliases
 
-#### Tab completion
-
-A bash completion script ships in [`completions/vm.bash`](completions/vm.bash).
-Source it after defining the alias (it reuses `$NIXOS_VM_TEMPLATE` to find the
-Justfile and backend):
+The completion script in [`completions/vm.bash`](completions/vm.bash) provides a
+`vm_register <alias> <env-file> [repo-root]` helper that defines an alias **and**
+wires up its completion in one step. Because each alias carries its own env file,
+this is also how you give each backend its own command — e.g. `vm` for libvirt
+and `pve` for proxmox, each completing against its own VMs:
 
 ```bash
-# Add to ~/.bashrc, below the alias above
+# Add to ~/.bashrc (replaces the manual `alias vm=…` line above)
+export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"
 source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
+
+vm_register vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
+vm_register pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
 ```
 
-Then `vm <Tab>` completes recipe names, and recipe arguments complete to the
-right values — VM names, profiles (comma-separated lists included), and network
-modes — by querying your configured backend. If you defined several aliases,
-register them all: `complete -F _vm vm vm-lab vm-prod`.
+Put `BACKEND=libvirt` in `env` and `BACKEND=proxmox` (plus `PVE_HOST=…`) in
+`pve.env`. Now `vm <Tab>` and `pve <Tab>` complete recipe names, and recipe
+arguments complete to the right values — VM names, profiles (comma-separated
+lists included), and network modes — each querying its own backend.
+
+You can name the aliases anything (`vm_register lab "$HOME/.config/.../lab.env"`),
+and register as many backends/hosts as you like. If you prefer to define aliases
+by hand, register completion for them explicitly instead: `complete -F _vm vm pve`.
 
 On zsh, enable bash-completion compatibility first:
 `autoload -U +X bashcompinit && bashcompinit` before the `source` line.
