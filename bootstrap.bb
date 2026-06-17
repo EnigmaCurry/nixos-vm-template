@@ -1,10 +1,24 @@
 #!/usr/bin/env bb
 ;; nixos-vm-template bootstrap
-;; Create and manage NixOS VMs from pre-built images.
-;; Requires babashka (bb) to be pre-installed.
+;; Create and manage NixOS VMs.
+;; Requires only babashka (bb) to be pre-installed.
 ;;
-;; One-liner:
-;;   bb -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/master/bootstrap.bb"))'
+;; Two modes are offered when `nix` is available on the machine:
+;;   - Production:  download pre-built images from S3 (no build, no nix needed).
+;;   - Development: clone the repo to ~/git/vendor/enigmacurry/nixos-vm-template
+;;                  and build your own images locally from source (a frontend
+;;                  for `just create` / `just upgrade`).
+;; When `nix` is not installed, only Production mode is available. So the
+;; one-liner works from any machine, and from a machine with nix you can
+;; develop and build images for all the rest.
+;;
+;; One-liner (NIXOS_VM_BRANCH selects the branch for BOTH the fetched script and
+;; the checkout it re-execs into; it can't be inferred from the slurp'd URL, so
+;; it must be passed explicitly — defaults to master):
+;;   bb -e '(load-string (slurp (str "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/" (or (System/getenv "NIXOS_VM_BRANCH") "master") "/bootstrap.bb")))'
+;;
+;; To bootstrap from a non-default branch, set NIXOS_VM_BRANCH, e.g.:
+;;   NIXOS_VM_BRANCH=dev bb -e '(load-string (slurp (str "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/" (or (System/getenv "NIXOS_VM_BRANCH") "master") "/bootstrap.bb")))'
 ;;
 ;; Or from a cloned repo:
 ;;   bb bootstrap.bb
@@ -22,6 +36,11 @@
 (def repo-url "https://github.com/EnigmaCurry/nixos-vm-template.git")
 (def default-branch "master")
 (def default-repo-dir (str (System/getenv "HOME") "/.cache/nixos-vm-template"))
+;; Development mode clones to a vendor-neutral, persistent path you can hack on,
+;; rather than the throwaway cache dir used for the production bootstrap.
+(def default-dev-dir
+  (or (System/getenv "NIXOS_VM_DEV_DIR")
+      (str (System/getenv "HOME") "/git/vendor/enigmacurry/nixos-vm-template")))
 (def default-machines-base
   (or (System/getenv "NIXOS_VM_MACHINES_DIR")
       (str (or (System/getenv "XDG_CONFIG_HOME")
@@ -529,15 +548,14 @@
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))))))))
 
-;; ─── Main ───────────────────────────────────────────────────────────────────
+;; ─── Backend discovery ────────────────────────────────────────────────────────
 
-(defn -main []
-  (println)
-  (println "  nixos-vm-template")
-  (println "  ~~~~~~~~~~~~~~~~~~")
-  (println)
-
-  ;; Backend selection (first, since deps depend on it)
+(defn discover-backend!
+  "Prompt for the backend and discover its connection details. For proxmox this
+  SSHes to the node to detect its name, storage and bridges. Returns
+  {:backend <str> :env <map>}, where env carries the string env vars to export
+  to the CLI plus helper keys (:machines-dir :host :pve-ssh ...)."
+  []
   (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
         pve-env (when (= backend "proxmox")
                   (let [ssh-hosts (try
@@ -608,20 +626,181 @@
                  (str/trim (:out (proc/shell {:out :string :err :string} "hostname" "-s"))))
           machines-dir (str default-machines-base "/" backend "/" host)
           env (merge (or pve-env {}) {:machines-dir machines-dir :host host})]
+      {:backend backend :env env})))
 
-      ;; Check dependencies
-      (check-deps! backend)
+;; ─── Production mode ──────────────────────────────────────────────────────────
+;; Create/manage VMs from pre-built images downloaded from S3 (no local build).
 
-      ;; Main menu loop
-      (loop []
+(defn run-production! []
+  (let [{:keys [backend env]} (discover-backend!)
+        machines-dir (:machines-dir env)]
+    ;; Check the host has the disk tools (in dev mode they come from nix instead).
+    (check-deps! backend)
+    (loop []
+      (section-break!)
+      (let [action (try (wiz/choose "What would you like to do?"
+                                    ["Create VM" "Manage VMs" "Exit"])
+                        (catch Exception _ "Exit"))]
         (section-break!)
-        (let [action (try (wiz/choose "What would you like to do?"
-                                      ["Create VM" "Manage VMs" "Exit"])
-                          (catch Exception _ "Exit"))]
-          (section-break!)
-          (case action
-            "Create VM"  (do (action-create-vm! backend env machines-dir) (recur))
-            "Manage VMs" (do (action-manage-vms! backend env machines-dir) (recur))
-            "Exit"       (println "Bye.")))))))
+        (case action
+          "Create VM"  (do (action-create-vm! backend env machines-dir) (recur))
+          "Manage VMs" (do (action-manage-vms! backend env machines-dir) (recur))
+          "Exit"       (println "Bye."))))))
+
+;; ─── Development mode ─────────────────────────────────────────────────────────
+;; Build images locally from source. A thin frontend over `just create` /
+;; `just upgrade`, run inside the flake dev shell so all tooling comes from nix.
+
+(defn ensure-dev-checkout!
+  "Clone the repo to the vendor-neutral development path, or reuse it if already
+  present. Unlike the production bootstrap clone, this never resets the tree —
+  it's your working copy to hack on. Returns the path."
+  []
+  (let [dir default-dev-dir
+        branch (or (System/getenv "NIXOS_VM_BRANCH") default-branch)
+        dir-file (io/file dir)]
+    (cond
+      (.exists (io/file dir ".git"))
+      (let [sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
+                                            "git" "rev-parse" "--short" "HEAD")))]
+        (println (format "Using existing development checkout: %s (commit: %s)" dir sha))
+        (println "  (bootstrap won't touch your tree; run 'git pull' there to update.)")
+        dir)
+
+      (and (.exists dir-file) (seq (.list dir-file)))
+      (do (println (format "error: %s exists but is not a git checkout." dir))
+          (println "Remove it and re-run, or set NIXOS_VM_DEV_DIR to a clean path:")
+          (println (format "  rm -rf %s" dir))
+          (System/exit 1)
+          dir)
+
+      :else
+      (do (println (format "Cloning %s" repo-url))
+          (println (format "     -> %s ..." dir))
+          (.mkdirs (.getParentFile dir-file))
+          (proc/shell {:out :string :err :string} "git" "clone" "--branch" branch repo-url dir)
+          dir))))
+
+(defn resolve-dev-dir!
+  "Return a development checkout to build from. If bootstrap is already running
+  from a real git checkout (not the throwaway production cache clone), use that
+  in place; otherwise clone/reuse the vendor-neutral development path."
+  []
+  (let [cache (.getCanonicalPath (io/file default-repo-dir))]
+    (if (and (.exists (io/file repo-dir ".git"))
+             (not= (.getCanonicalPath (io/file repo-dir)) cache))
+      (do (println (format "Using development checkout: %s" repo-dir)) repo-dir)
+      (ensure-dev-checkout!))))
+
+(defn dev-just!
+  "Run `just <args...>` inside the development checkout, entering the flake dev
+  shell so just and the disk tools (qemu-img, guestfish, virsh, ...) are on PATH
+  without any host install. An optional trailing opts map may supply :in (stdin).
+  Returns the process result."
+  [dev-dir backend env & args]
+  (let [opts (when (map? (last args)) (last args))
+        cmd-args (if opts (butlast args) args)]
+    (apply proc/shell
+           (merge {:dir dev-dir
+                   :extra-env (merge {"BACKEND" backend
+                                      "MACHINES_DIR" (get env :machines-dir)
+                                      "HOST" (get env :host)
+                                      ;; Tools are already on PATH inside the dev
+                                      ;; shell, so run the CLI directly instead of
+                                      ;; a nested `nix develop`.
+                                      "VM_CLI" "bb -m vm.cli"}
+                                     (env-vars env))}
+                  (select-keys opts [:in]))
+           "nix" "develop" "--command" "just" cmd-args)))
+
+(defn dev-create-vm!
+  "Development create: configure + build a VM locally from source via `just create`."
+  [dev-dir backend env]
+  (let [vm-name (wiz/ask "VM name:" :default "nixos")]
+    (println)
+    (println (format "Configuring VM '%s' on %s (building from source)..." vm-name backend))
+    (println "(Entering the flake dev shell; the first build may take a while.)")
+    (println)
+    (let [result (dev-just! dev-dir backend env "create" vm-name)]
+      (when (not= 0 (:exit result))
+        (System/exit (:exit result))))))
+
+(defn dev-manage-vms!
+  "Development manage: upgrade (rebuild from source), destroy, or purge a VM."
+  [dev-dir backend env]
+  (let [machines (list-machines (:machines-dir env))]
+    (if (empty? machines)
+      (do (println "No existing VMs found.")
+          (println "Use 'Create VM' to create one."))
+
+      (let [name-width (apply max 0 (map #(count (:name %)) machines))
+            choices (mapv (fn [m]
+                            (format (str "%-" name-width "s (profile: %s)")
+                                    (:name m) (:profile m)))
+                          machines)
+            choice (wiz/choose "Select VM:" choices)
+            vm-name (:name (nth machines (.indexOf choices choice)))]
+
+        (section-break!)
+        (let [action (wiz/choose (format "Action for '%s':" vm-name)
+                                 ["Upgrade (rebuild image from source, preserve /var data)"
+                                  "Destroy (delete VM and disks, keep config)"
+                                  "Purge (delete VM, disks, and config)"])]
+          (cond
+            (str/starts-with? action "Upgrade")
+            (do (println (format "\nUpgrading '%s' (rebuilding from source)..." vm-name))
+                (println)
+                (let [result (dev-just! dev-dir backend env "upgrade" vm-name)]
+                  (when (not= 0 (:exit result))
+                    (System/exit (:exit result)))))
+
+            (str/starts-with? action "Destroy")
+            (when (wiz/confirm (format "Destroy VM '%s'? All disk data will be lost." vm-name)
+                               :default :no)
+              (println)
+              (let [result (dev-just! dev-dir backend env "destroy" vm-name {:in "y\n"})]
+                (when (not= 0 (:exit result))
+                  (System/exit (:exit result)))))
+
+            (str/starts-with? action "Purge")
+            (when (wiz/confirm (format "Purge VM '%s'? All data AND config will be permanently deleted." vm-name)
+                               :default :no)
+              (println)
+              (let [result (dev-just! dev-dir backend env "purge" vm-name {:in "y\n"})]
+                (when (not= 0 (:exit result))
+                  (System/exit (:exit result)))))))))))
+
+(defn run-development! []
+  (let [dev-dir (resolve-dev-dir!)
+        {:keys [backend env]} (discover-backend!)]
+    (loop []
+      (section-break!)
+      (let [action (try (wiz/choose "What would you like to do?"
+                                    ["Create VM" "Manage VMs" "Exit"])
+                        (catch Exception _ "Exit"))]
+        (section-break!)
+        (case action
+          "Create VM"  (do (dev-create-vm! dev-dir backend env) (recur))
+          "Manage VMs" (do (dev-manage-vms! dev-dir backend env) (recur))
+          "Exit"       (println "Bye."))))))
+
+;; ─── Main ───────────────────────────────────────────────────────────────────
+
+(defn -main []
+  (println)
+  (println "  nixos-vm-template")
+  (println "  ~~~~~~~~~~~~~~~~~~")
+  (println)
+
+  ;; When nix is available, offer to build locally from source (Development);
+  ;; otherwise only the download-pre-built-images path (Production) is possible.
+  (let [mode (if (command-exists? "nix")
+               (wiz/choose "Mode:"
+                           ["Production (download pre-built images, no build)"
+                            "Development (build images locally from source)"])
+               "Production")]
+    (if (str/starts-with? mode "Development")
+      (run-development!)
+      (run-production!))))
 
 (-main)
