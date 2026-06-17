@@ -224,7 +224,7 @@ clone:
 
 ```bash
 # Add to ~/.bashrc (or ~/.zshrc)
-NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"   # wherever you cloned the repo
+export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"   # wherever you cloned the repo
 alias vm="just -f '$NIXOS_VM_TEMPLATE/Justfile' -d '$NIXOS_VM_TEMPLATE' -E '$HOME/.config/nixos-vm-template/env'"
 ```
 
@@ -244,6 +244,25 @@ vm ssh myvm
 > `vm-prod`, …), each pointing at its own env file. The default machine configs
 > already live under `~/.config/nixos-vm-template/`, so this keeps everything
 > for a context in one place.
+
+#### Tab completion
+
+A bash completion script ships in [`completions/vm.bash`](completions/vm.bash).
+Source it after defining the alias (it reuses `$NIXOS_VM_TEMPLATE` to find the
+Justfile and backend):
+
+```bash
+# Add to ~/.bashrc, below the alias above
+source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
+```
+
+Then `vm <Tab>` completes recipe names, and recipe arguments complete to the
+right values — VM names, profiles (comma-separated lists included), and network
+modes — by querying your configured backend. If you defined several aliases,
+register them all: `complete -F _vm vm vm-lab vm-prod`.
+
+On zsh, enable bash-completion compatibility first:
+`autoload -U +X bashcompinit && bashcompinit` before the `source` line.
 
 ## Libvirt Backend
 
