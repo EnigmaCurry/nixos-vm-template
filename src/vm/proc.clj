@@ -3,6 +3,7 @@
   any HOST_CMD/SUDO prefix tokens resolved in vm.config), so local invocations
   avoid shell quoting entirely. babashka.process/shell throws on non-zero exit
   by default, which gives us `set -e` semantics for free."
+  (:refer-clojure :exclude [run!])
   (:require [babashka.process :as p]
             [clojure.string :as str]))
 

@@ -291,8 +291,7 @@
              :or {profile "core" memory "2048" vcpus "2" var-size "30G" network "nat"}}]
   (let [var-size (normalize-size var-size)]
     (init-machine cfg name {:profile profile :network network :ssh-key-mode "agent"})
-    (let [md (machine-dir cfg name)
-          memory (save-resource! cfg name "memory" memory "2048" #(str % "M"))
+    (let [memory (save-resource! cfg name "memory" memory "2048" #(str % "M"))
           vcpus (save-resource! cfg name "vcpus" vcpus "2" str)
           var-size (save-resource! cfg name "var_size" var-size "30G" str)]
       (when-not (str/blank? static-ip)

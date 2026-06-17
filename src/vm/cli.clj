@@ -36,7 +36,7 @@
     (proc/run! (concat virsh ["-c" uri "version"]))
     (println)
     (let [ovmf (:ovmf-code cfg)]
-      (if (and (not (str/blank? ovmf)) (.exists (clojure.java.io/file ovmf)))
+      (if (and (not (str/blank? ovmf)) (.exists (java.io.File. ^String ovmf)))
         (println (format "OVMF firmware: OK (%s)" ovmf))
         (do (println "Warning: OVMF firmware not found.")
             (println "UEFI VMs may not work. Install edk2-ovmf (Fedora) or ovmf (Debian/Ubuntu)."))))
@@ -101,7 +101,7 @@
 ;; ─── dispatch ────────────────────────────────────────────────────────────────
 
 (defn -main [& args]
-  (let [[command & rest] args
+  (let [[command & _args] args
         backend (or (System/getenv "BACKEND") "libvirt")
         cfg (config/load-config backend)]
     (case command

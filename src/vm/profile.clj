@@ -46,9 +46,10 @@
   (str "[" (str/join " " (map pr-str (str/split profile-key #","))) "]"))
 
 (defn build-profile
-  "Build a profile's base image. Honors SKIP_BUILD (bootstrap) and FLAKE_UPDATE
-  (upgrade) env vars. Returns the profile key."
-  [cfg profiles]
+  "Build a profile's base image. Honors SKIP_BUILD (bootstrap). FLAKE_UPDATE is
+  taken from opts {:flake-update? bool} (upgrade) or the env var otherwise.
+  Returns the profile key."
+  [cfg profiles & [opts]]
   (let [profile-key (normalize-profiles (or profiles "core"))
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
@@ -69,7 +70,9 @@
           :else
           (println (format "Building immutable profile: %s" profile-key)))
         (fs/create-dirs profiles-out)
-        (let [flake-update? (= "true" (System/getenv "FLAKE_UPDATE"))
+        (let [flake-update? (if (contains? opts :flake-update?)
+                              (:flake-update? opts)
+                              (= "true" (System/getenv "FLAKE_UPDATE")))
               tmp-flake (when flake-update? (str (fs/create-temp-dir)))
               flake-dir (or tmp-flake repo-dir)]
           (when flake-update?

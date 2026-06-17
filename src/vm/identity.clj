@@ -3,8 +3,7 @@
   The same data table drives the libvirt guestfish command chain
   (backend_create_disks) and the proxmox rsync-staging + remote-chmod plan
   (backend_sync_identity)."
-  (:require [clojure.string :as str]
-            [babashka.fs :as fs]
+  (:require [babashka.fs :as fs]
             [vm.machine :as machine]))
 
 (def identity-files
@@ -79,6 +78,56 @@
       (cmd "write" "/identity/hostname" hostname)
       (cmd "write" "/identity/machine-id" machine-id)
       (mapcat #(identity-file-cmds machine-dir %) identity-files)
+      (when-let [keys (deploy-keys machine-dir)]
+        (concat (cmd "mkdir-p" "/identity/deploy_keys")
+                (mapcat (fn [k]
+                          (let [base (fs/file-name k)
+                                dst (str "/identity/deploy_keys/" base)]
+                            (concat (cmd "copy-in" (str k) "/identity/deploy_keys/")
+                                    (cmd "chmod" "0600" dst)
+                                    (cmd "chown" "0" "0" dst))))
+                        keys)))))))
+
+(defn guestfish-sync-cmds
+  "Build the guestfish token vector (beginning at `run`) that mounts an existing
+  /var partition and re-writes the machine identity into /identity. Unlike the
+  init chain this only copies files that are present (no touch placeholders),
+  removes static_ip when absent (DHCP), and copies root_password_hash whenever
+  the file exists. The caller prepends `-a <var-disk>`."
+  [cfg name]
+  (let [machine-dir (machine/machine-dir cfg name)
+        hostname (or (machine/read-field cfg name "hostname") "")
+        machine-id (or (machine/read-field cfg name "machine-id") "")
+        present (fn [file mode]
+                  (let [src (str machine-dir "/" file)
+                        dst (str "/identity/" file)]
+                    (when (non-empty-file? src)
+                      (concat (cmd "copy-in" src "/identity/")
+                              (cmd "chmod" mode dst)
+                              (cmd "chown" "0" "0" dst)))))]
+    (vec
+     (concat
+      ["run"]
+      (cmd "mount" "/dev/sda1" "/")
+      (cmd "write" "/identity/hostname" hostname)
+      (cmd "write" "/identity/machine-id" machine-id)
+      (present "admin_authorized_keys" "0644")
+      (present "user_authorized_keys" "0644")
+      (present "tcp_ports" "0644")
+      (present "udp_ports" "0644")
+      (present "resolv.conf" "0644")
+      (present "hosts" "0644")
+      (if (non-empty-file? (str machine-dir "/static_ip"))
+        (concat (cmd "copy-in" (str machine-dir "/static_ip") "/identity/")
+                (cmd "chmod" "0644" "/identity/static_ip")
+                (cmd "chown" "0" "0" "/identity/static_ip"))
+        (cmd "rm-f" "/identity/static_ip"))
+      (when (fs/exists? (str machine-dir "/root_password_hash"))
+        (concat (cmd "copy-in" (str machine-dir "/root_password_hash") "/identity/")
+                (cmd "chmod" "0600" "/identity/root_password_hash")
+                (cmd "chown" "0" "0" "/identity/root_password_hash")))
+      (present "allowed_cidrs" "0644")
+      (present "woodpecker.env" "0600")
       (when-let [keys (deploy-keys machine-dir)]
         (concat (cmd "mkdir-p" "/identity/deploy_keys")
                 (mapcat (fn [k]
