@@ -263,6 +263,9 @@ ci-secrets:
 _completion_profile:
     @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done
 
+# Alias for recipes whose parameter is named `profiles` (build, create-batch, …)
+_completion_profiles: _completion_profile
+
 _completion_network:
     @printf "nat\nbridge\n"
 

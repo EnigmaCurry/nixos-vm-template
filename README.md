@@ -260,6 +260,12 @@ Put `BACKEND=libvirt` in `env` and `BACKEND=proxmox` (plus `PVE_HOST=…`) in
 arguments complete to the right values — VM names, profiles (comma-separated
 lists included), and network modes — each querying its own backend.
 
+Argument completion is data-driven: it reads the recipe's parameter name from
+`just --show` and offers the output of the matching `_completion_<param>` recipe
+in the `Justfile` (e.g. a `name` parameter completes from `_completion_name`).
+Nothing hardcodes the recipe list, so it keeps working as recipes change — to
+add completion for a new parameter, add a `_completion_<param>` recipe.
+
 You can name the aliases anything (`nixos-vm-template-alias lab "$HOME/.config/.../lab.env"`),
 and register as many backends/hosts as you like. If you prefer to define aliases
 by hand, register completion for them explicitly instead: `complete -F _vm vm pve`.
