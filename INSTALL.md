@@ -86,20 +86,24 @@ vm ssh myvm
 The completion script in [`completions/vm.bash`](completions/vm.bash) provides a
 `nixos-vm-template-alias <alias> <env-file> [repo-root]` helper that defines an alias **and**
 wires up its completion in one step. Because each alias carries its own env file,
-this is also how you give each backend its own command — e.g. `vm` for libvirt
-and `pve` for proxmox, each completing against its own VMs:
+this is also how you give each backend its own command — e.g. `vm` for libvirt,
+`pve` for proxmox (KVM), and `pve-lxc` for proxmox-lxc, each completing against
+its own guests:
 
 ```bash
 # Add to ~/.bashrc (replaces the manual `alias vm=…` line above)
 export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"
 source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
 
-nixos-vm-template-alias vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
-nixos-vm-template-alias pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
+nixos-vm-template-alias vm      "$HOME/.config/nixos-vm-template/env"      # libvirt
+nixos-vm-template-alias pve     "$HOME/.config/nixos-vm-template/pve.env"  # proxmox (KVM)
+nixos-vm-template-alias pve-lxc "$HOME/.config/nixos-vm-template/lxc.env"  # proxmox-lxc
 ```
 
-Put `BACKEND=libvirt` in `env` and `BACKEND=proxmox` (plus `PVE_HOST=…`) in
-`pve.env`. Now `vm <Tab>` and `pve <Tab>` complete recipe names, and recipe
+Put `BACKEND=libvirt` in `env`, `BACKEND=proxmox` (plus `PVE_HOST=…`) in
+`pve.env`, and `BACKEND=proxmox-lxc` (plus `PVE_HOST=…`) in `lxc.env`. (Avoid
+naming an alias `lxc` — it shadows the LXD/Incus client.) Now `vm <Tab>`,
+`pve <Tab>`, and `pve-lxc <Tab>` complete recipe names, and recipe
 arguments complete to the right values — VM names, profiles (comma-separated
 lists included), and network modes — each querying its own backend.
 
@@ -111,7 +115,7 @@ add completion for a new parameter, add a `_completion_<param>` recipe.
 
 You can name the aliases anything (`nixos-vm-template-alias lab "$HOME/.config/.../lab.env"`),
 and register as many backends/hosts as you like. If you prefer to define aliases
-by hand, register completion for them explicitly instead: `complete -F _vm vm pve`.
+by hand, register completion for them explicitly instead: `complete -F _vm vm pve pve-lxc`.
 
 On zsh, enable bash-completion compatibility first:
 `autoload -U +X bashcompinit && bashcompinit` before the `source` line.

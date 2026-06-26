@@ -8,12 +8,68 @@
             [vm.proc :as proc]
             [vm.prompt :as prompt]
             [vm.machine :as machine]
+            [vm.profile :as profile]
             [vm.net :as net]))
 
 (defn- pve-ssh [cfg cmd]
   (try (proc/capture (concat (:ssh cfg) ["-o" "BatchMode=yes" "-o" "StrictHostKeyChecking=accept-new"
                                          (:pve-host cfg) cmd]))
        (catch Exception _ "")))
+
+(def ^:private nas-passwd-template
+  "Commented NAS users file (mode 0600) seeded for nas containers. Shared by
+  Samba and copyparty."
+  (str/join "\n"
+            ["# NAS users (Samba + copyparty) — one per line: <user> <password>"
+             "# Plaintext (this file is mode 0600). Apply changes with:"
+             "#   just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   alice  s3cret"
+             "#   bob    hunter2"
+             ""]))
+
+(def ^:private nas-acl-template
+  "Commented NAS ACL seeded for nas containers. Shared by Samba and copyparty;
+  deny-by-default (no rule = no access)."
+  (str/join "\n"
+            ["# NAS per-user ACL (Samba + copyparty web/WebDAV)."
+             "#"
+             "# One rule per line:   <user> <share> <access>"
+             "#   access = r | rw   (r = read-only, rw = read-write)"
+             "#   user   = a name (must be defined in nas_passwd), or * for guest/anonymous"
+             "#   share  = a share name (bind-mount basename, e.g. nas), or * for ALL shares"
+             "#"
+             "# DENY BY DEFAULT: a user/guest gets only what an explicit rule grants;"
+             "# no rule means no access (over both Samba and copyparty)."
+             "#"
+             "# Apply changes with:  just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   alice  *      rw     # alice: read-write on every share"
+             "#   bob    nas    r      # bob: read-only on share 'nas'"
+             "#   *      media  r      # guests: read-only on 'media'"
+             ""]))
+
+(def ^:private nfs-clients-template
+  "Commented NFS client allowlist seeded for nas containers. All-commented = no
+  NFS export (deny by default)."
+  (str/join "\n"
+            ["# NFS client allowlist for the nas profile."
+             "# Each line:  <cidr-or-host> [ro]      (default is read-write)"
+             "#"
+             "# NFS has no per-user auth (sec=sys), so access is HOST-based and"
+             "# DENY-BY-DEFAULT: until you add an entry, NFS exports nothing to anyone"
+             "# (Samba is unaffected). All client users map to the shared 'nas' owner"
+             "# (all_squash), so any user on an allowed host can read/write every file —"
+             "# list only hosts you trust."
+             "#"
+             "# Apply changes with:  just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   10.13.0.0/16       # a LAN subnet, read-write"
+             "#   192.168.1.50 ro    # a single host, read-only"
+             ""]))
 
 (defn- choose-d
   "choose with an optional 0-based default index (passed to the pod as the value)."
@@ -240,6 +296,74 @@ done 2>/dev/null"]
               {:network network :addr addr :gw gwv :dns1 d1 :dns2 d2})
             (do (println "IP: DHCP") {:network network})))))))
 
+;; ── lxc: host ZFS bind-mount selection (introspected from the PVE node) ───────
+
+(defn- zfs-pools
+  "ZFS pool names on the PVE node (empty if introspection fails)."
+  [cfg]
+  (->> (str/split-lines (pve-ssh cfg "zpool list -H -o name 2>/dev/null"))
+       (map str/trim) (remove str/blank?) vec))
+
+(defn- zfs-subvols
+  "Datasets under `pool` (excluding the pool root and Proxmox-managed guest
+  volumes like subvol-100-disk-0 / vm-… / base-…)."
+  [cfg pool]
+  (->> (str/split-lines (pve-ssh cfg (format "zfs list -H -o name -r %s 2>/dev/null" pool)))
+       (map str/trim) (remove str/blank?)
+       (remove #(= % pool))
+       (remove #(re-find #"/(subvol|vm|base|basevol)-\d+" %))
+       vec))
+
+(defn- subvol-leaf [dataset] (last (str/split dataset #"/")))
+
+(defn- ask-nonblank [msg]
+  (loop [] (let [v (str/trim (prompt/ask msg))] (if (str/blank? v) (recur) v))))
+
+(defn- choose-dataset
+  "Pool -> existing-or-create -> dataset name. Returns the full dataset name."
+  [cfg pools]
+  (let [pool (prompt/choose "Select a ZFS pool to hold the shared data:" pools)
+        action (prompt/choose "Shared dataset:" ["Use an existing dataset" "Create a new dataset"])]
+    (if (str/starts-with? action "Use an existing")
+      (let [kids (zfs-subvols cfg pool)]
+        (if (empty? kids)
+          (do (println (format "No datasets under '%s' yet — creating a new one." pool))
+              (str pool "/" (ask-nonblank (format "New dataset name under '%s' (e.g. nas):" pool))))
+          (prompt/choose "Select an existing dataset to share:" kids)))
+      (str pool "/" (ask-nonblank (format "New dataset name under '%s' (e.g. nas):" pool))))))
+
+(defn- wizard-lxc-mounts
+  "Build the host ZFS bind-mount list for an LXC container by introspecting the
+  PVE node's pools/datasets. Each volume mounts at /srv/<sub-volume-leaf>.
+  Returns a newline-joined string of `<dataset>:/srv/<leaf>` lines (or \"\")."
+  [cfg nas?]
+  (println)
+  (println "Host data volumes — ZFS datasets on the Proxmox host that get bind-mounted")
+  (println "into this container as shared storage (NFS/Samba). This is NOT the container's")
+  (println "root disk (that lives on PVE_STORAGE).")
+  (let [pools (zfs-pools cfg)]
+    (cond
+      ;; no introspection (not a ZFS host / ssh failed): manual entry
+      (empty? pools)
+      (do (println "Could not list ZFS pools on the Proxmox host — enter mounts manually.")
+          (loop [acc []]
+            (let [spec (prompt/ask "Bind mount as <host-dataset-or-path>:<container-path> (blank to finish):")]
+              (if (str/blank? spec) (str/join "\n" acc) (recur (conj acc spec))))))
+
+      ;; non-nas containers: mounts are optional
+      (and (not nas?) (not (prompt/confirm "Bind-mount a host ZFS dataset into this container?" :no)))
+      ""
+
+      :else
+      (loop [acc []]
+        (let [dataset (choose-dataset cfg pools)
+              ctpath (str "/srv/" (subvol-leaf dataset))
+              acc' (conj acc (str dataset ":" ctpath))]
+          (println (format "  Share: host %s  ->  container %s" dataset ctpath))
+          (if (prompt/confirm "Bind-mount another host dataset?" :no)
+            (recur acc')
+            (str/join "\n" acc')))))))
+
 (defn config-vm-interactive
   "Interactive machine configuration via script-wizard. Mutates the machine dir.
   from-create? skips the trailing 'just create' hint and lets create reuse config."
@@ -264,20 +388,31 @@ done 2>/dev/null"]
           cur-var (or (machine/read-field cfg name "var_size") "")
           cur-net (or (machine/read-field cfg name "network") "")
           ;; ── mutable mode ──
-          _ (println)
+          lxc? (= backend "proxmox-lxc")
+          _ (when-not lxc? (println))
           mode-idx (cond (str/includes? (str "," cur-profile ",") ",semi-mutable,") 1
                          (str/includes? (str "," cur-profile ",") ",mutable,") 2
                          :else 0)
-          mode-choice (choose-d "Select VM mode:"
-                                ["Immutable (read-only root, upgradeable, recommended)"
-                                 "Semi-mutable (read-only root + writable /nix overlay)"
-                                 "Mutable (read-write pet VM, use nixos-rebuild)"]
-                                mode-idx)
-          mutable-profile (cond (str/starts-with? mode-choice "Mutable") "mutable"
+          ;; LXC is mutable-only and the image is made mutable by the builder
+          ;; (vm.container), so there is no mode picker and no "mutable" token.
+          mode-choice (if lxc?
+                        "Mutable (LXC container)"
+                        (choose-d "Select VM mode:"
+                                  ["Immutable (read-only root, upgradeable, recommended)"
+                                   "Semi-mutable (read-only root + writable /nix overlay)"
+                                   "Mutable (read-write pet VM, use nixos-rebuild)"]
+                                  mode-idx))
+          mutable-profile (cond lxc? ""
+                                (str/starts-with? mode-choice "Mutable") "mutable"
                                 (str/starts-with? mode-choice "Semi-mutable") "semi-mutable"
                                 :else "")
-          _ (println (format "Mode: %s" mode-choice))
-          avail (available-profiles cfg)
+          _ (when-not lxc? (println (format "Mode: %s" mode-choice)))
+          ;; lxc-only profiles (nas) are hidden on KVM backends; kernel-bound
+          ;; profiles can't run in a container.
+          avail (let [a (available-profiles cfg)]
+                  (if lxc?
+                    (remove #{"nvidia" "pipewire" "zram"} a)
+                    (remove profile/lxc-only-profiles a)))
           ;; ── profile(s) ──
           profile
           (if-not (str/blank? profile0)
@@ -293,6 +428,13 @@ done 2>/dev/null"]
                   (if (empty? sel) "core" (str/join "," sel)))))
           profile (if (str/blank? mutable-profile) profile (str profile "," mutable-profile))
           _ (println (format "Selected profile(s): %s" profile))
+          ;; ── lxc: privileged + host ZFS bind mounts ──
+          nas? (and lxc? (boolean (some #(= % "nas") (str/split profile #","))))
+          privileged (when lxc?
+                       (if nas?
+                         (do (println "Privileged: yes (required by the nas profile for kernel NFS)") "1")
+                         (if (prompt/confirm "Run as a privileged container? (needed for kernel NFS)" :no) "1" "0")))
+          mounts (when lxc? (wizard-lxc-mounts cfg nas?))
           ;; ── memory ──
           _ (println)
           mem-opts ["1G" "2G" "4G" "8G" "16G" "32G" "Custom"]
@@ -330,7 +472,7 @@ done 2>/dev/null"]
           _ (println (format "Disk size: %s" var-size))
           ;; ── network ──
           _ (println)
-          net-result (if (= backend "proxmox")
+          net-result (if (#{"proxmox" "proxmox-lxc"} backend)
                        (wizard-network-proxmox cfg name md cur-net)
                        (wizard-network-libvirt cfg name md cur-net))
           network (:network net-result)
@@ -388,31 +530,39 @@ done 2>/dev/null"]
                       :else [ak ""]))))
             [nil nil])
           ;; ── proxmox VMID ──
-          pve-vmid (when (= backend "proxmox")
+          pve-vmid (when (#{"proxmox" "proxmox-lxc"} backend)
                      (if (fs/exists? (str md "/vmid"))
                        (str/trim (slurp (str md "/vmid")))
                        (do (println)
                            (println "Allocating VMID from Proxmox...")
-                           (let [default-vmid (pve-ssh cfg "pvesh get /cluster/nextid")]
+                           (let [default-vmid (pve-ssh cfg "pvesh get /cluster/nextid")
+                                 qcmd (if lxc? "pct config" "qm config")]
                              (loop []
                                (let [in (prompt/ask "Enter Proxmox VMID:" default-vmid)
                                      v (if (str/blank? in) default-vmid in)
-                                     existing (-> (pve-ssh cfg (format "qm config %s --current 2>/dev/null | grep '^name:'" v))
-                                                  (str/replace #"^name: " "") str/trim)]
+                                     existing (-> (pve-ssh cfg (format "%s %s 2>/dev/null | grep '^hostname:\\|^name:'" qcmd v))
+                                                  (str/replace #"^(hostname|name): " "") str/trim)]
                                  (if (and (not (str/blank? existing)) (not= existing name))
-                                   (do (println (format "VMID %s is already in use by VM '%s'. Choose a different ID." v existing))
+                                   (do (println (format "VMID %s is already in use by '%s'. Choose a different ID." v existing))
                                        (recur))
                                    (do (println (format "VMID: %s" v)) v))))))))]
       ;; ── summary ──
       (println)
       (println "Configuration summary:")
-      (if (= backend "proxmox")
-        (println (format "  Backend: proxmox (%s)" (or (not-empty (:pve-host cfg)) "unknown")))
-        (println (format "  Backend: libvirt (%s)" (:libvirt-uri cfg))))
+      (cond
+        (= backend "proxmox") (println (format "  Backend: proxmox (%s)" (or (not-empty (:pve-host cfg)) "unknown")))
+        (= backend "proxmox-lxc") (println (format "  Backend: proxmox-lxc (%s)" (or (not-empty (:pve-host cfg)) "unknown")))
+        :else (println (format "  Backend: libvirt (%s)" (:libvirt-uri cfg))))
       (println (format "  Name:    %s" name))
       (when pve-vmid (println (format "  VMID:    %s" pve-vmid)))
-      (println (format "  Mode:    %s" (if (str/blank? mutable-profile) "immutable" mutable-profile)))
+      (println (format "  Mode:    %s" (cond lxc? "mutable (lxc container)"
+                                            (str/blank? mutable-profile) "immutable"
+                                            :else mutable-profile)))
       (println (format "  Profile: %s" profile))
+      (when lxc?
+        (println (format "  Privileged: %s" (if (= privileged "1") "yes" "no")))
+        (when-not (str/blank? mounts)
+          (println (format "  Mounts:  %s" (str/replace mounts "\n" ", ")))))
       (println (format "  Memory:  %sM" memory))
       (println (format "  vCPUs:   %s" vcpus))
       (println (format "  Disk:    %s" var-size))
@@ -438,6 +588,23 @@ done 2>/dev/null"]
       (println (format "Created: %s/memory (%sM)" md memory))
       (spit (str md "/vcpus") (str vcpus "\n"))
       (println (format "Created: %s/vcpus (%s)" md vcpus))
+      (when lxc?
+        (spit (str md "/privileged") (str (or privileged "0") "\n"))
+        (if (str/blank? mounts)
+          (fs/delete-if-exists (str md "/mounts"))
+          (do (spit (str md "/mounts") (str mounts "\n"))
+              (println (format "Created: %s/mounts" md))))
+        ;; nas: seed commented Samba users + ACL templates (all-commented = open).
+        (when (and nas? (not (fs/exists? (str md "/nas_passwd"))))
+          (spit (str md "/nas_passwd") nas-passwd-template)
+          (fs/set-posix-file-permissions (str md "/nas_passwd") "rw-------")
+          (println (format "Created: %s/nas_passwd (NAS users — edit to add credentials)" md)))
+        (when (and nas? (not (fs/exists? (str md "/nas_acl"))))
+          (spit (str md "/nas_acl") nas-acl-template)
+          (println (format "Created: %s/nas_acl (NAS ACL — edit to grant access)" md)))
+        (when (and nas? (not (fs/exists? (str md "/nfs_clients"))))
+          (spit (str md "/nfs_clients") nfs-clients-template)
+          (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md))))
       (let [nvs (machine/normalize-size var-size)]
         (spit (str md "/var_size") (str nvs "\n"))
         (println (format "Created: %s/var_size (%s)" md nvs))

@@ -5,7 +5,11 @@ set dotenv-load
 set export
 
 BACKEND := env_var_or_default("BACKEND", "libvirt")
-HOST := if BACKEND == "proxmox" { env_var_or_default("PVE_NODE", env_var_or_default("HOST", `hostname -s`)) } else { env_var_or_default("HOST", `hostname -s`) }
+# Proxmox backends (KVM and LXC) scope machines by the remote PVE node, not the
+# local workstation hostname — the guests live on the node, and the same node may
+# be managed from several workstations.
+_IS_PVE := if BACKEND == "proxmox" { "yes" } else if BACKEND == "proxmox-lxc" { "yes" } else { "no" }
+HOST := if _IS_PVE == "yes" { env_var_or_default("PVE_NODE", env_var_or_default("HOST", `hostname -s`)) } else { env_var_or_default("HOST", `hostname -s`) }
 _XDG_CONFIG_HOME := env_var_or_default("XDG_CONFIG_HOME", env_var("HOME") + "/.config")
 _DEFAULT_MACHINES_DIR := env_var_or_default("NIXOS_VM_MACHINES_DIR", _XDG_CONFIG_HOME + "/nixos-vm-template/machines")
 MACHINES_DIR := env_var_or_default("MACHINES_DIR", _DEFAULT_MACHINES_DIR + "/" + BACKEND + "/" + HOST)
@@ -261,7 +265,7 @@ ci-secrets:
     echo "All secrets configured for $repo"
 
 _completion_profile:
-    @shopt -s nullglob; for f in profiles/*.nix; do basename "$f" .nix; done
+    @shopt -s nullglob; for f in profiles/*.nix; do n=$(basename "$f" .nix); if [ "$n" = nas ] && [ "{{BACKEND}}" != proxmox-lxc ]; then continue; fi; echo "$n"; done
 
 # Alias for recipes whose parameter is named `profiles` (build, create-batch, …)
 _completion_profiles: _completion_profile

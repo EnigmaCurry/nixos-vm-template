@@ -17,12 +17,17 @@
 #     source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
 #
 #     # nixos-vm-template-alias <alias> <env-file> [repo-root]
-#     nixos-vm-template-alias vm  "$HOME/.config/nixos-vm-template/env"      # libvirt
-#     nixos-vm-template-alias pve "$HOME/.config/nixos-vm-template/pve.env"  # proxmox
+#     nixos-vm-template-alias vm      "$HOME/.config/nixos-vm-template/env"      # libvirt
+#     nixos-vm-template-alias pve     "$HOME/.config/nixos-vm-template/pve.env"  # proxmox (KVM)
+#     nixos-vm-template-alias pve-lxc "$HOME/.config/nixos-vm-template/lxc.env"  # proxmox-lxc
+#
+# (Each env file sets its own BACKEND, e.g. lxc.env contains BACKEND=proxmox-lxc.)
+# Pick an alias name that doesn't shadow an existing command — `lxc` is avoided
+# here because it's the LXD/Incus client; `pve-lxc` sidesteps that collision.
 #
 # Each call defines the alias AND wires its completion to the same env file, so
-# you can run e.g. `vm create web` and `pve create db` and both tab-complete
-# against their own backend.
+# you can run e.g. `vm create web`, `pve create db`, and `pve-lxc create nas`,
+# and each tab-completes against its own backend.
 
 # alias name -> (repo root, env file)
 declare -gA _VM_ROOTS _VM_ENVS
@@ -114,4 +119,4 @@ _vm() {
 }
 
 # If you'd rather define aliases by hand instead of using the helper above,
-# register completion for each one explicitly, e.g.:  complete -F _vm vm pve
+# register completion for each one explicitly, e.g.:  complete -F _vm vm pve pve-lxc

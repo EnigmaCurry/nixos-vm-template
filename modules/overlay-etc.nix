@@ -1,6 +1,7 @@
 { config, lib, pkgs, ... }:
 
-{
+# VM-only: an LXC container has no initrd (boot.isContainer = true).
+lib.mkIf (!config.vm.container) {
   # Use systemd in initrd (required for proper boot sequencing)
   boot.initrd.systemd.enable = true;
 

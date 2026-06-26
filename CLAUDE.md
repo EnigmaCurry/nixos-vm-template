@@ -111,8 +111,10 @@ The base image remains untouched. Each VM's boot disk stores only the delta from
 │   ├── wizard.clj      # Interactive config_vm wizard
 │   ├── backend.clj     # defprotocol Backend + shared composites/helpers
 │   └── backend/
-│       ├── libvirt.clj # virsh / qemu-img / guestfish / OVMF / XML
-│       └── proxmox.clj # pve-ssh / rsync / qm / pvesh / qemu-nbd / firewall
+│       ├── libvirt.clj    # virsh / qemu-img / guestfish / OVMF / XML
+│       ├── proxmox.clj    # pve-ssh / rsync / qm / pvesh / qemu-nbd / firewall
+│       ├── pve_common.clj # shared PVE-over-SSH helpers (proxmox + lxc)
+│       └── lxc.clj        # proxmox-lxc: pct / tarball / pct-mount injection / ZFS mp
 ├── modules/            # Shared NixOS modules
 │   ├── base.nix        # Core system configuration
 │   ├── filesystem.nix  # Read-only root, /var mount, /home bind mount
@@ -128,11 +130,22 @@ The base image remains untouched. Each VM's boot disk stores only the delta from
 ```
 
 VM-management logic is implemented in **Babashka** under `src/vm/`, behind a
-`defprotocol Backend` with two `defrecord` implementations (libvirt, proxmox).
+`defprotocol Backend` with three `defrecord` implementations: `libvirt` and
+`proxmox` (KVM), plus `proxmox-lxc` (Proxmox LXC containers).
 `Justfile` recipes are thin wrappers around `bb -m vm.cli <command>`; the
 `.claude/skills/*` only ever call `just`. The backend is selected by the
 `BACKEND` env var. (The previous `backends/*.sh` implementation was removed once
-this port was verified on both backends.)
+this port was verified on both KVM backends.)
+
+The **`proxmox-lxc`** backend is **mutable-only** (an LXC rootfs is read-write;
+`nixos-rebuild` runs inside — there is no immutable/semi-mutable mode). The image
+is a NixOS rootfs **tarball** (`flake.lib.mkLxcImage`, gated by the `vm.container`
+option which guards off `boot.nix`/disks/initrd); `create` is `pct create` plus
+host ZFS **bind mounts** (`pct set -mpN <dataset>:<ctpath>`, dataset created if
+missing); identity + the `/etc/nixos` flake are injected into the stopped rootfs
+via `pct mount`. The LXC-only **`nas`** profile (NFS + Samba over `/srv/nas`)
+forces a privileged container with apparmor-unconfined for kernel `nfsd`. See
+`spike/README.md` for the proof-of-concept that validated this end to end.
 
 ## Technology Stack
 
@@ -140,7 +153,7 @@ this port was verified on both backends.)
 - **nixos-generators** - For building libvirt-compatible VM images
 - **Babashka (`bb`)** - All VM-management logic (`src/vm/`, entry `bb -m vm.cli`)
 - **libvirt/QEMU/KVM** - Virtualization platform
-- **Proxmox VE** - Alternate remote backend (over SSH: qm/pvesh/qemu-nbd)
+- **Proxmox VE** - Alternate remote backends (over SSH): KVM (qm/pvesh/qemu-nbd) and LXC (pct/pvesh/zfs)
 - **UEFI + systemd-boot** - Boot configuration (no legacy BIOS)
 - **Justfile** - Stable user-facing task runner (wraps the bb CLI)
 

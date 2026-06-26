@@ -45,6 +45,23 @@
   [profile-key]
   (str "[" (str/join " " (map pr-str (str/split profile-key #","))) "]"))
 
+(def lxc-only-profiles
+  "Profiles that only work on the proxmox-lxc backend (they need an LXC container
+  with host ZFS datasets bind-mounted under /srv). Excluded from KVM image builds
+  and from the non-lxc create wizard."
+  #{"nas"})
+
+(defn ensure-not-lxc-only!
+  "Exit with a friendly error if `profile-key` contains an lxc-only profile.
+  Called from the KVM (non-lxc) build path — those profiles can't build there."
+  [profile-key]
+  (when-let [bad (seq (filter lxc-only-profiles (str/split profile-key #",")))]
+    (println (format "Error: the '%s' profile is only available on the proxmox-lxc backend."
+                     (str/join "', '" bad)))
+    (println "It needs an LXC container with host ZFS datasets bind-mounted under /srv.")
+    (println "Use BACKEND=proxmox-lxc (or the `lxc`/`pve-lxc` alias) to build/run it.")
+    (System/exit 1)))
+
 (defn build-profile
   "Build a profile's base image. Honors SKIP_BUILD (bootstrap). FLAKE_UPDATE is
   taken from opts {:flake-update? bool} (upgrade) or the env var otherwise.
@@ -54,6 +71,7 @@
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
         profiles-out (str output-dir "/profiles")]
+    (ensure-not-lxc-only! profile-key)
     (if (= "true" (System/getenv "SKIP_BUILD"))
       (let [skip-image (str profiles-out "/" profile-key "/nixos.qcow2")]
         (if (fs/regular-file? skip-image)
@@ -90,6 +108,35 @@
           (when tmp-flake (fs/delete-tree tmp-flake)))
         (println (format "Built: %s/%s" profiles-out profile-key))
         (proc/run! ["ls" "-lhL" (str profiles-out "/" profile-key "/")])
+        profile-key))))
+
+(defn build-lxc-profile
+  "Build a profile's LXC rootfs tarball via flake.lib.mkLxcImage. Honors
+  SKIP_BUILD. Out-links to <output-dir>/lxc-profiles/<key>; the backend resolves
+  the tar.xz under <out>/tarball/. Returns the profile key."
+  [cfg profiles]
+  (let [profile-key (normalize-profiles (or profiles "core"))
+        repo-dir (:repo-dir cfg)
+        output-dir (:output-dir cfg)
+        lxc-out (str output-dir "/lxc-profiles")]
+    (if (= "true" (System/getenv "SKIP_BUILD"))
+      (let [link (str lxc-out "/" profile-key)]
+        (if (fs/exists? link)
+          (do (println (format "Latest LXC template already built at %s" link)) profile-key)
+          (do (println (format "Error: SKIP_BUILD=true but LXC template not found: %s" link))
+              (System/exit 1))))
+      (do
+        (println (format "Building LXC template: %s" profile-key))
+        (fs/create-dirs lxc-out)
+        (let [sha (git-sha repo-dir)
+              expr (format "\n      let flake = builtins.getFlake \"%s\";\n      in flake.lib.mkLxcImage \"x86_64-linux\" %s\n    "
+                           repo-dir (nix-list profile-key))]
+          (proc/run! (concat (:nix cfg)
+                             ["build" "--impure" "--expr" expr
+                              "--out-link" (str lxc-out "/" profile-key)])
+                     {:dir repo-dir :extra-env {"IMAGE_COMMIT" sha}}))
+        (println (format "Built: %s/%s" lxc-out profile-key))
+        (proc/run! ["ls" "-lhL" (str lxc-out "/" profile-key "/tarball/")])
         profile-key))))
 
 (defn build-all

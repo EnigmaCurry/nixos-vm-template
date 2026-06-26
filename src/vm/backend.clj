@@ -151,16 +151,31 @@
         (println "Overlay is wiped on upgrade (packages must be reinstalled)."))
     nil))
 
+(defn print-table
+  "Print `rows` (a seq of same-length string vectors) under `headers`, left-aligned,
+  with each column auto-sized to the widest value (header or cell) and two spaces
+  between columns. The last column is not padded (no trailing whitespace)."
+  [headers rows]
+  (let [all (cons (vec headers) (map vec rows))
+        widths (mapv (fn [i] (apply max (map #(count (str (nth % i ""))) all)))
+                     (range (count headers)))
+        fmt-row (fn [row]
+                  (str/trimr
+                   (str/join "  " (map-indexed
+                                   (fn [i v] (format (str "%-" (nth widths i) "s") (str v)))
+                                   row))))]
+    (println (fmt-row headers))
+    (doseq [r rows] (println (fmt-row r)))))
+
 (defn- maybe-deprovision!
-  "Force-stop + undefine the VM. On proxmox this is gated on a vmid file (its
-  primitives error without one); on libvirt it runs unconditionally."
+  "Force-stop + undefine the VM, gated on provisioned?. On proxmox/proxmox-lxc
+  that means a vmid file must exist (their primitives error without one, e.g. when
+  recreating after a destroy already removed it); libvirt's provisioned? is always
+  true and its force-stop/undefine are no-ops when the VM is absent."
   [b cfg name]
-  (if (= (:backend cfg) "proxmox")
-    (when (provisioned? b cfg name)
-      (force-stop b cfg name)
-      (undefine b cfg name))
-    (do (force-stop b cfg name)
-        (undefine b cfg name))))
+  (when (provisioned? b cfg name)
+    (force-stop b cfg name)
+    (undefine b cfg name)))
 
 ;; ─── shared composites ───────────────────────────────────────────────────────
 
@@ -210,15 +225,27 @@
     (when-not (str/blank? network)
       (net/network-config cfg name network))
     (let [current-network (or (machine/read-field cfg name "network") "nat")]
-      (println (format "WARNING: This will recreate VM '%s' with a fresh start." name))
-      (println "All data in /var and home directories will be PERMANENTLY LOST.")
+      (let [lxc? (= (:backend cfg) "proxmox-lxc")]
+        (println (format "WARNING: This will recreate %s '%s' with a fresh start."
+                         (if lxc? "container" "VM") name))
+        (if lxc?
+          (println "The container rootfs (including /home) will be wiped. Host ZFS bind mounts (your data) are preserved.")
+          (println "All data in /var and home directories will be PERMANENTLY LOST.")))
       (println (format "(Machine config in %s/ will be preserved)" (machine/machine-dir cfg name)))
       (println (format "Profile: %s" profile))
       (println (format "Network: %s" current-network))
       (confirm-or-abort "Are you sure? [y/N] ")
       (println (format "Recreating VM '%s' with profile: %s" name profile))
-      (maybe-deprovision! b cfg name)
-      (profile/build-profile cfg profile)
+      ;; Preserve the VMID (proxmox/lxc) across deprovision so recreate reuses the
+      ;; same id without re-prompting; libvirt has no vmid file so this is a no-op.
+      (let [vmid-path (str (machine/machine-dir cfg name) "/vmid")
+            saved-vmid (when (fs/exists? vmid-path) (slurp vmid-path))]
+        (maybe-deprovision! b cfg name)
+        (when saved-vmid (spit vmid-path saved-vmid)))
+      ;; proxmox-lxc builds a rootfs tarball, not a qcow2 image.
+      (if (= (:backend cfg) "proxmox-lxc")
+        (profile/build-lxc-profile cfg profile)
+        (profile/build-profile cfg profile))
       (remove-disks cfg name)
       (provision! b cfg name var-size)
       (start b cfg name)

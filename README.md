@@ -2,7 +2,7 @@
 
 [![Documentation](https://img.shields.io/badge/docs-scroll%20down-blue)](#documentation)
 
-Build and manage immutable NixOS virtual machines on libvirt/KVM or Proxmox VE.
+Build and manage immutable NixOS virtual machines on libvirt (KVM) or Proxmox VE (KVM or LXC).
 
 > [!NOTE]
 > This code is written using Claude Code and other AI tools. It is reviewed
@@ -42,7 +42,7 @@ predictably, and can be recreated identically at any time.
 ## Features
 
 - Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
-- **Two backends**: local libvirt/KVM or remote Proxmox VE
+- **Three backends**: local libvirt/KVM, remote Proxmox VE (KVM), or Proxmox LXC containers
 - It is a build script to create your own customized NixOS VM images
 - Immutable, container-like root filesystem (read-only)
 - Even `/etc` is read-only, you need to rebuild the image to reconfigure it
@@ -60,19 +60,23 @@ predictably, and can be recreated identically at any time.
 
 ## Backends
 
-This project supports two backends, selected via the `BACKEND` environment variable:
+This project supports three backends, selected via the `BACKEND` environment variable:
 
-| Backend | Description | Default |
-|---------|-------------|---------|
-| `libvirt` | Local libvirt/KVM with QCOW2 backing files | Yes |
-| `proxmox` | Remote Proxmox VE via SSH | No |
+| Backend | Guest type | Root | Storage / image | Guide |
+|---------|------------|------|-----------------|-------|
+| `libvirt` | KVM VM | immutable (or mutable) | QCOW2 boot disk with backing file | [LIBVIRT.md](LIBVIRT.md) |
+| `proxmox` | KVM VM | immutable (or mutable) | QCOW2 imported over SSH | [PROXMOX.md](PROXMOX.md) |
+| `proxmox-lxc` | LXC container | **mutable only** | rootfs tarball + host **ZFS bind mounts** | [PROXMOX_LXC.md](PROXMOX_LXC.md) |
 
 ```bash
 # Use libvirt (default)
 just create myvm
 
-# Use Proxmox
+# Use Proxmox (KVM)
 BACKEND=proxmox just create myvm
+
+# Use Proxmox LXC (containers)
+BACKEND=proxmox-lxc just create myct
 ```
 
 You can set `BACKEND` in a `.env` file in the project root to avoid
@@ -81,6 +85,15 @@ repeating it:
 ```bash
 echo "BACKEND=proxmox" >> .env
 ```
+
+> [!NOTE]
+> **`proxmox-lxc` is different from the two KVM backends.** A container shares
+> the host kernel, so it has no bootloader and its root is read-write — it is
+> **mutable-only** (`nixos-rebuild` runs inside; there is no immutable or
+> semi-mutable mode). In exchange it can **bind-mount host ZFS datasets directly
+> into the guest** (`pct set -mpN`), which a KVM VM cannot do. That makes it the
+> right backend for a NAS: the LXC-only **`nas`** profile serves a host ZFS
+> dataset over NFS + Samba. See [PROXMOX_LXC.md](PROXMOX_LXC.md).
 
 ## Two Ways to Use This
 
@@ -136,7 +149,8 @@ Detailed setup and usage live in focused guides:
 | [BOOTSTRAP.md](BOOTSTRAP.md) | The `bb` one-liner — production (no Nix) and development (with Nix) roles |
 | [INSTALL.md](INSTALL.md) | Install Nix + `just`, the `vm`/`pve` shell aliases, tab completion |
 | [LIBVIRT.md](LIBVIRT.md) | Libvirt/KVM backend: requirements, host firewall, networking, bridges, storage |
-| [PROXMOX.md](PROXMOX.md) | Proxmox VE backend: SSH setup, env vars, VMIDs, identity sync, disk formats |
+| [PROXMOX.md](PROXMOX.md) | Proxmox VE (KVM) backend: SSH setup, env vars, VMIDs, identity sync, disk formats |
+| [PROXMOX_LXC.md](PROXMOX_LXC.md) | Proxmox LXC backend: containers, host ZFS bind mounts, the `nas` profile, privileged mode |
 | [COMMANDS.md](COMMANDS.md) | Full `just` command reference (lifecycle, clone, resize, snapshot, backup) |
 | [MODES.md](MODES.md) | Immutable vs mutable vs semi-mutable VMs |
 | [PROFILES.md](PROFILES.md) | Available profiles, common combinations, zram compressed swap |

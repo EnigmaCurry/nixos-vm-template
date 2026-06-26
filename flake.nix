@@ -105,6 +105,51 @@
       mkProfileImage = system: profile:
         mkCombinedImage system [ profile ] { mutable = false; };
 
+      # proxmox-lxc backend: build a NixOS LXC template tarball for a list of
+      # profiles. Parallel to mkCombinedImage, but: imports nixpkgs' proxmox-lxc
+      # module, sets vm.container (which guards off boot.nix/disks/initrd) and
+      # vm.mutable (an LXC rootfs is read-write; nixos-rebuild runs inside), and
+      # outputs config.system.build.tarball (a tar.xz for `pct create`). Container
+      # networking matches the validated spike: systemd-networkd DHCP on eth0.
+      lxcProfiles = [ "core" "docker" "nas" ];
+      mkLxcImage = system: profileList:
+        let
+          allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
+          profileModules = map (p: ./profiles/${p}.nix) allProfiles;
+          # The nas profile needs a privileged container (kernel nfsd). The
+          # host-side `pct --unprivileged 0` is set by the backend from the
+          # machine's `privileged` field; this aligns the in-guest config.
+          privileged = builtins.elem "nas" allProfiles;
+        in
+        (nixpkgs.lib.nixosSystem {
+          specialArgs = {
+            inherit sway-home nix-flatpak opencode nifty-filter imageVersion;
+            swayHomeInputs = sway-home.inputs;
+          };
+          modules = coreModules ++ [
+            "${nixpkgs}/nixos/modules/virtualisation/proxmox-lxc.nix"
+            home-manager.nixosModules.home-manager
+          ] ++ profileModules ++ [
+            { nixpkgs.hostPlatform = system; }
+            {
+              vm.mutable = true;
+              vm.container = true;
+              # We own networking (paired with `pct create --ostype unmanaged`).
+              proxmoxLXC = { privileged = lib.mkDefault privileged; manageNetwork = true; manageHostName = true; };
+              networking.useDHCP = lib.mkForce false;
+              networking.useNetworkd = lib.mkForce true;
+              networking.useHostResolvConf = lib.mkForce false;
+              systemd.network.enable = lib.mkForce true;
+              systemd.network.networks."10-eth0" = {
+                matchConfig.Name = "eth0";
+                networkConfig.DHCP = "yes";
+              };
+              systemd.network.wait-online.enable = false;
+              services.resolved.enable = true;
+            }
+          ];
+        }).config.system.build.tarball;
+
       # Build a NixOS configuration for testing/debugging/rebuilding
       # mutable: if true, configures as a mutable system (for nixos-rebuild on mutable VMs)
       mkNixosConfig = system: profile: { mutable ? false, nixOverlay ? false }:
@@ -131,7 +176,15 @@
             name = profile;
             value = mkProfileImage system profile;
           }) availableProfiles
-        ) // {
+        )
+        // builtins.listToAttrs (
+          # proxmox-lxc rootfs tarballs: nix build .#lxc-core / .#lxc-nas / .#lxc-docker
+          map (profile: {
+            name = "lxc-${profile}";
+            value = mkLxcImage system [ profile ];
+          }) lxcProfiles
+        )
+        // {
           default = mkProfileImage system "core";
         }
       );
@@ -163,7 +216,7 @@
 
       # Expose lib functions for backend scripts to build dynamic combinations
       lib = {
-        inherit mkCombinedImage availableProfiles commonCombinations;
+        inherit mkCombinedImage mkLxcImage availableProfiles lxcProfiles commonCombinations;
       };
 
       # Development shell with useful tools

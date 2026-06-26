@@ -114,4 +114,20 @@
         :guestfish (tool (env "GUESTFISH") [host-cmd] "guestfish")
         :libguestfs-backend (env "LIBGUESTFS_BACKEND" "direct")}
 
+       ;; Proxmox LXC backend: shares the PVE-over-SSH surface with "proxmox"
+       ;; (pct/pvesh/zfs over ssh), plus LXC-specific knobs. No qcow/guestfish:
+       ;; the rootfs is a tarball and identity is injected via `pct mount`.
+       "proxmox-lxc"
+       {:pve-host (env "PVE_HOST" "")
+        :pve-node (env "PVE_NODE" (env "PVE_HOST" ""))
+        ;; rootfs storage for the container — MUST be a CT-capable storage
+        ;; (zfspool or dir), e.g. local-zfs / rust; NOT a bare ZFS pool name.
+        :pve-storage (env "PVE_STORAGE" "local")
+        :pve-bridge (env "PVE_BRIDGE" "vmbr0")
+        :pve-firewall (env "PVE_FIREWALL" "1")
+        :pve-backup-storage (env "PVE_BACKUP_STORAGE" "local")
+        :pve-staging-dir (env "PVE_STAGING_DIR" "/tmp/nixos-vm-staging")
+        :pve-template-dir (env "PVE_TEMPLATE_DIR" "/var/lib/vz/template/cache")
+        :lxc-features (env "LXC_FEATURES" "nesting=1")}
+
        {}))))

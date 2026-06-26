@@ -199,19 +199,30 @@
                              (format "# Add one public key per line. Run 'just upgrade %s' to apply changes." name)
                              ""]
                             ssh-key-mode user-keys)
-    ;; tcp_ports
-    (when-not (fs/exists? (str md "/tcp_ports"))
-      (spit (str md "/tcp_ports")
-            (str/join "\n" ["# TCP ports to open in firewall (one per line)"
-                            (format "# Run 'just upgrade %s' to apply changes." name)
-                            "22" "80" "443" ""]))
-      (println (format "Created: %s/tcp_ports (22, 80, 443)" md)))
-    ;; udp_ports
-    (when-not (fs/exists? (str md "/udp_ports"))
-      (spit (str md "/udp_ports")
-            (str/join "\n" ["# UDP ports to open in firewall (one per line)"
-                            (format "# Run 'just upgrade %s' to apply changes." name) ""]))
-      (println (format "Created: %s/udp_ports (empty)" md)))
+    ;; tcp_ports — seeded once at creation; the nas profile adds its service ports
+    ;; here (not in the image) so they stay visible/editable. Remove any you don't
+    ;; want exposed.
+    (let [nas? (boolean (some #(= % "nas") (map str/trim (str/split (or profile "") #","))))]
+      (when-not (fs/exists? (str md "/tcp_ports"))
+        (spit (str md "/tcp_ports")
+              (str/join "\n" (concat ["# TCP ports to open in firewall (one per line)"
+                                      (format "# Run 'just upgrade %s' to apply changes." name)
+                                      "22" "80" "443"]
+                                     (when nas?
+                                       ["# nas profile — SMB (445), NFSv4 (2049), copyparty web+WebDAV (3923), WSD (5357):"
+                                        "445" "2049" "3923" "5357"])
+                                     [""])))
+        (println (format "Created: %s/tcp_ports%s" md (if nas? " (22,80,443 + nas)" " (22, 80, 443)"))))
+      ;; udp_ports
+      (when-not (fs/exists? (str md "/udp_ports"))
+        (spit (str md "/udp_ports")
+              (str/join "\n" (concat ["# UDP ports to open in firewall (one per line)"
+                                      (format "# Run 'just upgrade %s' to apply changes." name)]
+                                     (when nas?
+                                       ["# nas profile — mDNS (5353), WS-Discovery (3702):"
+                                        "5353" "3702"])
+                                     [""])))
+        (println (format "Created: %s/udp_ports%s" md (if nas? " (nas)" " (empty)")))))
     ;; resolv.conf
     (when-not (fs/exists? (str md "/resolv.conf"))
       (spit (str md "/resolv.conf")

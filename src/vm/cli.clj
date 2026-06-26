@@ -11,12 +11,14 @@
             [vm.proc :as proc]
             [vm.backend :as b]
             [vm.backend.libvirt :as lv]
-            [vm.backend.proxmox :as px]))
+            [vm.backend.proxmox :as px]
+            [vm.backend.lxc :as lxc]))
 
 (defn- mk-backend [cfg]
   (case (:backend cfg)
     "libvirt" (lv/->Libvirt)
     "proxmox" (px/->Proxmox)
+    "proxmox-lxc" (lxc/->Lxc)
     (do (println (format "Error: unknown backend '%s'" (:backend cfg)))
         (System/exit 1))))
 
@@ -29,7 +31,11 @@
    "proxmox" {:create-vm px/create-vm :create-vm-batch px/create-vm-batch :clone-vm px/clone-vm
               :upgrade-vm px/upgrade-vm :resize-var px/resize-var :resize-vm px/resize-vm
               :backup-vm px/backup-vm :restore-backup-vm px/restore-backup-vm
-              :ssh-vm px/ssh-vm :list-backups px/list-backups}})
+              :ssh-vm px/ssh-vm :list-backups px/list-backups}
+   "proxmox-lxc" {:create-vm lxc/create-vm :create-vm-batch lxc/create-vm-batch :clone-vm lxc/clone-vm
+                  :upgrade-vm lxc/upgrade-vm :resize-var lxc/resize-var :resize-vm lxc/resize-vm
+                  :backup-vm lxc/backup-vm :restore-backup-vm lxc/restore-backup-vm
+                  :ssh-vm lxc/ssh-vm :list-backups lxc/list-backups}})
 
 (defn- cf [cfg k] (get-in composite-fns [(:backend cfg) k]))
 
@@ -128,6 +134,7 @@
   (case (:backend cfg)
     "libvirt" (test-connection-libvirt cfg)
     "proxmox" (test-connection-proxmox cfg)
+    "proxmox-lxc" (test-connection-proxmox cfg)
     (do (println (format "Error: unknown backend '%s'" (:backend cfg)))
         (System/exit 1))))
 
@@ -141,7 +148,9 @@
         B (delay (mk-backend cfg))]
     (case command
       ;; image building
-      "build"         (profile/build-profile cfg (arg a 0 "core"))
+      "build"         (if (= backend "proxmox-lxc")
+                        (profile/build-lxc-profile cfg (arg a 0 "core"))
+                        (profile/build-profile cfg (arg a 0 "core")))
       "build-all"     (profile/build-all cfg)
       "export"        (profile/export-profile cfg (arg a 0 "core"))
       "list-profiles" (profile/list-profiles cfg)

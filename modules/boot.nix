@@ -1,6 +1,8 @@
 { config, lib, pkgs, ... }:
 
-{
+# VM-only: an LXC container (vm.container = true) shares the host kernel and has
+# no bootloader/UEFI/virtio block devices, so none of this applies there.
+lib.mkIf (!config.vm.container) {
   # UEFI boot with systemd-boot
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = false;  # Read-only root
