@@ -56,6 +56,46 @@
               "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
               src dst]))
 
+;; ─── storage-type-aware disk format ──────────────────────────────────────────
+;;
+;; PVE storages fall into two families:
+;;   * file-based (dir / nfs / cifs / cephfs / btrfs) - support qcow2
+;;   * block-based (zfspool / lvm / lvmthin / rbd / iscsi / ...) - raw only
+;; With PVE_DISK_FORMAT=auto (the default) we query the node once per storage
+;; and pick qcow2 or raw accordingly. Set PVE_DISK_FORMAT=qcow2|raw to override.
+
+(def ^:private qcow-friendly-types
+  #{"dir" "nfs" "cifs" "cephfs" "btrfs"})
+
+(def ^:private storage-type-cache (atom {}))
+
+(defn- pve-storage-type
+  "Query PVE for the type of `storage` (e.g. \"zfspool\", \"dir\", \"lvmthin\").
+  Returns nil on any failure."
+  [cfg storage]
+  (try
+    (let [out (pve-ssh cfg (format "pvesh get /storage/%s --output-format json"
+                                   storage))
+          data (json/parse-string out true)]
+      (:type data))
+    (catch Exception _ nil)))
+
+(defn- resolve-disk-format
+  "Return the disk format to use, honoring PVE_DISK_FORMAT unless it's \"auto\"
+  (or blank), in which case detect from the storage type. Memoized per storage."
+  [cfg]
+  (let [fmt (str/lower-case (or (:pve-disk-format cfg) "auto"))
+        stg (:pve-storage cfg)]
+    (if-not (contains? #{"" "auto"} fmt)
+      fmt
+      (or (get @storage-type-cache stg)
+          (let [t (pve-storage-type cfg stg)
+                detected (if (contains? qcow-friendly-types t) "qcow2" "raw")]
+            (println (format "PVE storage '%s' type=%s -> using %s disks"
+                             stg (or t "unknown") detected))
+            (swap! storage-type-cache assoc stg detected)
+            detected)))))
+
 (defn- pid-suffix [] (.pid (java.lang.ProcessHandle/current)))
 
 (def ^:private find-nbd-cmd
@@ -161,7 +201,7 @@
                              "--efidisk0 %s:1,efitype=4m,pre-enrolled-keys=0,format=%s "
                              "--serial0 socket --vga serial0 "
                              "--net0 virtio=%s,bridge=%s,firewall=%s")
-                        vmid name vcpus memory (:pve-storage cfg) (:pve-disk-format cfg)
+                        vmid name vcpus memory (:pve-storage cfg) (resolve-disk-format cfg)
                         mac bridge (:pve-firewall cfg))))
 
 ;; ─── NBD mount helper ────────────────────────────────────────────────────────
@@ -181,7 +221,7 @@
           (do (println "Warning: No free nbd device found, skipping") nil))
         (do
           (when fatal? (println (format "Using nbd device: %s" nbd)))
-          (pve-ssh cfg (format "qemu-nbd -f %s -c %s '%s'" (:pve-disk-format cfg) nbd disk-path))
+          (pve-ssh cfg (format "qemu-nbd -f %s -c %s '%s'" (resolve-disk-format cfg) nbd disk-path))
           (Thread/sleep 2000)
           (pve-ssh-soft cfg (format "partprobe %s 2>/dev/null || true" nbd))
           (Thread/sleep 1000)
@@ -235,9 +275,9 @@
               (println "Transferring var disk to Proxmox...")
               (pve-rsync! cfg (str vd "/var.qcow2") (format "%s:%s/%s/var.qcow2" (:pve-host cfg) stg name))
               (println "Importing boot disk...")
-              (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (:pve-disk-format cfg)))
+              (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
               (println "Importing var disk...")
-              (pve-ssh! cfg (format "qm importdisk %s %s/%s/var.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (:pve-disk-format cfg)))
+              (pve-ssh! cfg (format "qm importdisk %s %s/%s/var.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
               (println "Attaching disks and configuring boot...")
               (let [cfg-str (pve-ssh cfg (format "qm config %s" vmid))
                     boot-vol (config-line cfg-str "unused0")
@@ -272,7 +312,7 @@
         (println "Transferring disk to Proxmox...")
         (pve-rsync! cfg disk (format "%s:%s/%s/disk.qcow2" (:pve-host cfg) stg name))
         (println "Importing disk...")
-        (pve-ssh! cfg (format "qm importdisk %s %s/%s/disk.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (:pve-disk-format cfg)))
+        (pve-ssh! cfg (format "qm importdisk %s %s/%s/disk.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
         (println "Attaching disk and configuring boot...")
         (let [disk-vol (config-line (pve-ssh cfg (format "qm config %s" vmid)) "unused0")]
           (when (str/blank? disk-vol)
@@ -646,7 +686,7 @@
         (when-not (str/blank? old-disk)
           (pve-ssh-soft cfg (format "pvesh delete /nodes/%s/storage/%s/content/%s" (:pve-node cfg) (:pve-storage cfg) old-disk))))
       (println "Importing new boot disk...")
-      (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (:pve-disk-format cfg)))
+      (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
       (let [new-disk (some-> (->> (str/split-lines (pve-ssh cfg (format "qm config %s" vmid)))
                                   (filter #(str/starts-with? % "unused")) last)
                              (str/replace #"^unused[0-9]*: " ""))]

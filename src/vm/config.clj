@@ -120,7 +120,10 @@
         :pve-node (strip-user (env "PVE_NODE" (env "PVE_HOST" "")))
         :pve-storage (env "PVE_STORAGE" "local")
         :pve-bridge (env "PVE_BRIDGE" "vmbr0")
-        :pve-disk-format (env "PVE_DISK_FORMAT" "qcow2")
+        ;; "auto" -> detected at first use from the PVE storage type
+        ;; (see vm.backend.proxmox/resolve-disk-format). Set explicitly to
+        ;; "qcow2" or "raw" to override.
+        :pve-disk-format (env "PVE_DISK_FORMAT" "auto")
         :pve-firewall (env "PVE_FIREWALL" "1")
         :pve-backup-storage (env "PVE_BACKUP_STORAGE" "local")
         :pve-staging-dir (env "PVE_STAGING_DIR" "/tmp/nixos-vm-staging")

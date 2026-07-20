@@ -47,7 +47,7 @@ Set these in your `.env` file or as environment variables:
 | `PVE_NODE` | Yes | `$PVE_HOST` | PVE node name (must match Proxmox hostname) |
 | `PVE_STORAGE` | No | `local` | Target storage for VM disks |
 | `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |
-| `PVE_DISK_FORMAT` | No | `qcow2` | Disk format for import (qcow2 or raw) |
+| `PVE_DISK_FORMAT` | No | `auto` | Disk format for import (`auto`, `qcow2`, or `raw`). `auto` detects from the PVE storage type. |
 | `PVE_BACKUP_STORAGE` | No | `local` | Storage for vzdump backups |
 
 Example `.env`:
@@ -116,14 +116,15 @@ This works regardless of var disk size.
 
 ## Disk Format
 
-Set `PVE_DISK_FORMAT` based on your storage backend:
+`PVE_DISK_FORMAT=auto` (the default) queries the PVE storage type over SSH
+and picks the right format. Set it to `qcow2` or `raw` to override.
 
-| Storage Type | Recommended Format | Why |
-|--------------|-------------------|-----|
-| Directory/NFS | `qcow2` | Thin provisioning, snapshot support |
-| ZFS | `raw` | ZFS handles thin provisioning natively |
-| LVM-thin | `raw` | Storage layer provides thin + snapshots |
-| Ceph/RBD | `raw` | Ceph handles it natively |
+| Storage Type | Auto-detected Format | Why |
+|--------------|---------------------|-----|
+| `dir` / `nfs` / `cifs` / `cephfs` / `btrfs` | `qcow2` | File-backed; qcow2 gives thin + snapshots |
+| `zfspool` | `raw` | zvol; ZFS handles thin + snapshots natively |
+| `lvm` / `lvmthin` | `raw` | Storage layer provides thin + snapshots |
+| `rbd` (Ceph) / `iscsi` | `raw` | Block storage; qcow2 unsupported |
 
 ## Proxmox Networking
 
