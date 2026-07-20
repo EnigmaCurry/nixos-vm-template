@@ -185,6 +185,80 @@
     (pve-ssh! cfg (format "pvesh create /nodes/%s/qemu/%s/firewall/rules --type in --action ACCEPT --proto icmp --enable 1" node vmid))
     (println "Proxmox firewall configured.")))
 
+;; ─── PCI passthrough ─────────────────────────────────────────────────────────
+
+(defn- pci-device-lines
+  "Read machines/<name>/pci_devices — one --hostpciN spec per line. Blank lines
+  and `#` comments (including trailing) are ignored."
+  [path]
+  (when (fs/exists? path)
+    (->> (str/split-lines (slurp path))
+         (map #(str/trim (str/replace % #"#.*" "")))
+         (remove str/blank?)
+         vec)))
+
+(defn- existing-hostpci-indices
+  "Indices N present as `hostpciN:` in the current `qm config` output."
+  [config-str]
+  (->> (str/split-lines config-str)
+       (keep #(second (re-find #"^hostpci(\d+):" %)))
+       (map parse-long)
+       (remove nil?)
+       sort
+       vec))
+
+(defn- apply-pci-passthrough!
+  "Sync `machines/<name>/pci_devices` to the VM's `--hostpciN` config. Drops any
+  existing hostpciN entries first, then re-adds from the file (starting at 0).
+  A no-op when the file is missing or contains no entries and none were
+  previously set."
+  [cfg name]
+  (let [vmid (get-vmid cfg name)
+        md (machine/machine-dir cfg name)
+        entries (or (pci-device-lines (str md "/pci_devices")) [])
+        current (try (pve-ssh cfg (format "qm config %s" vmid)) (catch Exception _ ""))
+        old-idx (existing-hostpci-indices current)]
+    (when (or (seq entries) (seq old-idx))
+      (println (format "Configuring PCI passthrough for VM '%s' (VMID: %s)..." name vmid))
+      (when (seq old-idx)
+        (let [keys (str/join "," (map #(str "hostpci" %) old-idx))]
+          (pve-ssh-soft cfg (format "qm set %s --delete %s" vmid keys))))
+      (doseq [[i spec] (map-indexed vector entries)]
+        (pve-ssh! cfg (format "qm set %s --hostpci%d %s" vmid i spec)))
+      (println (format "Configured %d PCI passthrough device(s)." (count entries))))))
+
+(defn list-display-pci
+  "Query PVE for PCI devices whose class starts with 0x03 (display: VGA / 3D /
+  Other) OR whose bus:slot matches a display device (to pick up the sibling
+  audio function, class 0x0403). Returns a vector of
+  {:id \"0000:BB:SS.F\" :vendor \"…\" :device \"…\" :class \"…\"}, sorted by id.
+  Returns [] on any failure or non-proxmox setup."
+  [cfg]
+  (try
+    (let [node (:pve-node cfg)
+          out (pve-ssh cfg (format "pvesh get /nodes/%s/hardware/pci --pci-class-blacklist \"\" --output-format json" node))
+          all (json/parse-string out true)
+          ;; PVE ids come as "0000:BB:SS.F". Group siblings by "BB:SS".
+          slot (fn [d] (second (re-find #"^[0-9a-fA-F]+:([0-9a-fA-F]+:[0-9a-fA-F]+)\." (or (:id d) ""))))
+          display-classes #{"0x030000" "0x030200" "0x038000"}  ;; VGA / 3D / other display
+          display-slots (->> all
+                             (filter #(contains? display-classes (:class %)))
+                             (keep slot)
+                             set)
+          matches (fn [d] (or (contains? display-classes (:class d))
+                              (and (str/starts-with? (or (:class d) "") "0x04")  ;; multimedia
+                                   (contains? display-slots (slot d)))))]
+      (->> all
+           (filter matches)
+           (map #(select-keys % [:id :vendor_name :device_name :class]))
+           (map #(-> {:id (:id %)
+                      :vendor (or (:vendor_name %) "")
+                      :device (or (:device_name %) "")
+                      :class (or (:class %) "")}))
+           (sort-by :id)
+           vec))
+    (catch Exception _ [])))
+
 ;; ─── disk creation helpers ───────────────────────────────────────────────────
 
 (defn- vm-dir [cfg name] (str (:vms-dir cfg) "/" name))
@@ -291,6 +365,7 @@
               (pve-ssh cfg (format "rm -rf %s/%s" stg name))
               (fs/delete-if-exists (str vd "/boot-flat.qcow2"))
               (sync-firewall! cfg name)
+              (apply-pci-passthrough! cfg name)
               (println (format "Created VM '%s' on Proxmox (VMID: %s)" name vmid))
               (println (format "  Boot disk imported to %s" (:pve-storage cfg)))
               (println (format "  Var disk imported to %s (%s)" (:pve-storage cfg) var-size))
@@ -323,6 +398,7 @@
         (println "Cleaning up staging files...")
         (pve-ssh cfg (format "rm -rf %s/%s" stg name))
         (sync-firewall! cfg name)
+        (apply-pci-passthrough! cfg name)
         (println (format "Created mutable VM '%s' on Proxmox (VMID: %s)" name vmid))
         (println (format "  Disk imported to %s (%s)" (:pve-storage cfg) disk-size))
         (println (format "  Hostname: %s" (machine/read-field cfg name "hostname")))
@@ -365,6 +441,7 @@
                 (finally (fs/delete-tree tmp))))))
         (println "Identity files synced.")
         (sync-firewall! cfg name)
+        (apply-pci-passthrough! cfg name)
         (when was-running
           (println "Restarting VM...")
           (b/start this cfg name)))))
@@ -378,6 +455,7 @@
       (spit (str (machine/machine-dir cfg name) "/vcpus") (str vcpus "\n"))
       (println (format "Updating VM config on Proxmox (VMID: %s)..." vmid))
       (pve-ssh! cfg (format "qm set %s --memory %s --cores %s" vmid memory vcpus))
+      (apply-pci-passthrough! cfg name)
       (println (format "VM config updated: memory=%sMB, vcpus=%s" memory vcpus))))
 
   (define [_ cfg name]

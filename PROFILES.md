@@ -23,6 +23,7 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
 | **open-code** | Open Code CLI (open-source AI coding assistant) |
+| **moonshine-nvidia** | [Moonshine](https://github.com/hgaiser/moonshine) headless game-streaming server. Requires `pipewire` + a Proxmox VM with NVIDIA GPU passthrough (see [PROXMOX.md](PROXMOX.md#gpu-passthrough)). |
 
 > **Tip for agentic use:** Consider enabling
 > [semi-mutable mode](MODES.md#semi-mutable-vms) for `claude` or `open-code` VMs

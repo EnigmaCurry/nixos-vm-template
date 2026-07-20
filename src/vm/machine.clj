@@ -199,10 +199,12 @@
                              (format "# Add one public key per line. Run 'just upgrade %s' to apply changes." name)
                              ""]
                             ssh-key-mode user-keys)
-    ;; tcp_ports — seeded once at creation; the nas profile adds its service ports
-    ;; here (not in the image) so they stay visible/editable. Remove any you don't
-    ;; want exposed.
-    (let [nas? (boolean (some #(= % "nas") (map str/trim (str/split (or profile "") #","))))]
+    ;; tcp_ports — seeded once at creation; the nas / moonshine-nvidia profiles add
+    ;; their service ports here (not in the image) so they stay visible/editable.
+    ;; Remove any you don't want exposed.
+    (let [profs (set (map str/trim (str/split (or profile "") #",")))
+          nas? (contains? profs "nas")
+          moonshine? (contains? profs "moonshine-nvidia")]
       (when-not (fs/exists? (str md "/tcp_ports"))
         (spit (str md "/tcp_ports")
               (str/join "\n" (concat ["# TCP ports to open in firewall (one per line)"
@@ -211,8 +213,12 @@
                                      (when nas?
                                        ["# nas profile — SMB (445), NFSv4 (2049), copyparty web+WebDAV (3923), WSD (5357):"
                                         "445" "2049" "3923" "5357"])
+                                     (when moonshine?
+                                       ["# moonshine — Moonlight HTTPS (47984), HTTP (47989), RTSP (48010):"
+                                        "47984" "47989" "48010"])
                                      [""])))
-        (println (format "Created: %s/tcp_ports%s" md (if nas? " (22,80,443 + nas)" " (22, 80, 443)"))))
+        (println (format "Created: %s/tcp_ports%s" md
+                         (str/join "" [(when nas? " + nas") (when moonshine? " + moonshine")]))))
       ;; udp_ports
       (when-not (fs/exists? (str md "/udp_ports"))
         (spit (str md "/udp_ports")
@@ -221,8 +227,29 @@
                                      (when nas?
                                        ["# nas profile — mDNS (5353), WS-Discovery (3702):"
                                         "5353" "3702"])
+                                     (when moonshine?
+                                       ["# moonshine — Moonlight video (47998), control (47999), audio (48000):"
+                                        "47998" "47999" "48000"])
                                      [""])))
-        (println (format "Created: %s/udp_ports%s" md (if nas? " (nas)" " (empty)")))))
+        (println (format "Created: %s/udp_ports%s" md
+                         (str/join "" [(when nas? " (nas)") (when moonshine? " (moonshine)")]))))
+      ;; pci_devices — seeded for moonshine-nvidia (Proxmox GPU passthrough).
+      ;; Users can also add this file for any Proxmox VM to pass through PCI
+      ;; devices without moonshine.
+      (when (and moonshine? (not (fs/exists? (str md "/pci_devices"))))
+        (spit (str md "/pci_devices")
+              (str/join "\n" ["# Proxmox PCI passthrough — one --hostpciN entry per line."
+                              "# See `man qm` for the full hostpci syntax."
+                              "#"
+                              "# Common forms:"
+                              "#   0000:01:00.0"
+                              "#   0000:01:00,pcie=1,x-vga=1"
+                              "#"
+                              "# For NVIDIA GPUs, pass BOTH the VGA function (00.0) AND the audio"
+                              "# function (00.1) so HDMI audio works. `just create` should have"
+                              "# offered a picker; edit here and run `just upgrade` to change."
+                              ""]))
+        (println (format "Created: %s/pci_devices (edit to pass PCI devices through)" md))))
     ;; resolv.conf
     (when-not (fs/exists? (str md "/resolv.conf"))
       (spit (str md "/resolv.conf")

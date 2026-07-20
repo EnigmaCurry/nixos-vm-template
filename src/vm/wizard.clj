@@ -5,6 +5,7 @@
   (which requires this ns), avoiding a cycle."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
+            [cheshire.core :as json]
             [vm.proc :as proc]
             [vm.prompt :as prompt]
             [vm.machine :as machine]
@@ -15,6 +16,39 @@
   (try (proc/capture (concat (:ssh cfg) ["-o" "BatchMode=yes" "-o" "StrictHostKeyChecking=accept-new"
                                          (:pve-host cfg) cmd]))
        (catch Exception _ "")))
+
+(defn- pve-list-display-pci
+  "Query PVE for PCI devices in display classes (0x03xx) plus any multimedia
+  device (0x04xx) sharing the same BB:SS slot — for NVIDIA GPUs that's the
+  HDMI audio function. Returns [{:id :label :group} ...] sorted by id.
+  Returns [] on any failure (no PVE, no lspci output, network error)."
+  [cfg]
+  (let [out (pve-ssh cfg (format "pvesh get /nodes/%s/hardware/pci --pci-class-blacklist \"\" --output-format json"
+                                 (:pve-node cfg)))]
+    (if (str/blank? out)
+      []
+      (try
+        (let [all (json/parse-string out true)
+              slot (fn [d] (second (re-find #"^[0-9a-fA-F]+:([0-9a-fA-F]+:[0-9a-fA-F]+)\." (or (:id d) ""))))
+              display-class? #(str/starts-with? (or (:class %) "") "0x03")
+              multimedia?    #(str/starts-with? (or (:class %) "") "0x04")
+              display-slots  (->> all (filter display-class?) (keep slot) set)
+              matches?       #(or (display-class? %)
+                                  (and (multimedia? %) (contains? display-slots (slot %))))]
+          (->> all
+               (filter matches?)
+               (map (fn [d]
+                      (let [vendor (or (:vendor_name d) "")
+                            device (or (:device_name d) "")
+                            group  (or (:iommugroup d) "")
+                            label  (str (:id d)
+                                        (when-not (str/blank? group) (format "  [iommu %s]" group))
+                                        (when (or (seq vendor) (seq device))
+                                          (format "  %s %s" vendor device)))]
+                        {:id (:id d) :label label :group group})))
+               (sort-by :id)
+               vec))
+        (catch Exception _ [])))))
 
 (def ^:private nas-passwd-template
   "Commented NAS users file (mode 0600) seeded for nas containers. Shared by
@@ -470,6 +504,39 @@ done 2>/dev/null"]
                                 (if (str/blank? v) "30G" v))
                      "30G")
           _ (println (format "Disk size: %s" var-size))
+          ;; ── PCI passthrough (moonshine-nvidia only, proxmox KVM only) ──
+          moonshine? (boolean (some #(= % "moonshine-nvidia")
+                                    (map str/trim (str/split (or profile "") #","))))
+          pci-selected
+          (when (and moonshine? (= backend "proxmox"))
+            (println)
+            (println "PCI passthrough (moonshine-nvidia requires a discrete NVIDIA GPU):")
+            (let [devs (pve-list-display-pci cfg)]
+              (cond
+                (empty? devs)
+                (do (println (str "  No display-class PCI devices found on " (or (:pve-node cfg) "PVE")
+                                  " (or query failed)."))
+                    (println (format "  Edit %s/pci_devices by hand after creation." md))
+                    nil)
+                :else
+                (let [labels (mapv :label devs)
+                      ;; Default-preselect display-class devices only; users can
+                      ;; add or remove the audio sibling(s) themselves.
+                      default (->> devs
+                                   (filter #(seq (:group %)))  ;; always allowed to preselect
+                                   (mapv :label))
+                      picks (if (seq default)
+                              (prompt/select "Select PCI devices to pass through:" labels default)
+                              (prompt/select "Select PCI devices to pass through:" labels))
+                      ids (->> picks
+                               (map (fn [lbl]
+                                      (some #(when (= (:label %) lbl) (:id %)) devs)))
+                               (remove nil?)
+                               vec)]
+                  (println (if (seq ids)
+                             (format "PCI passthrough: %s" (str/join ", " ids))
+                             "PCI passthrough: (none — edit pci_devices to add later)"))
+                  ids))))
           ;; ── network ──
           _ (println)
           net-result (if (#{"proxmox" "proxmox-lxc"} backend)
@@ -567,6 +634,8 @@ done 2>/dev/null"]
       (println (format "  vCPUs:   %s" vcpus))
       (println (format "  Disk:    %s" var-size))
       (println (format "  Network: %s" network))
+      (when (seq pci-selected)
+        (println (format "  PCI:     %s" (str/join ", " pci-selected))))
       (if-not (str/blank? sip-addr)
         (do (println (format "  IP:      %s (gateway: %s)" sip-addr (if (str/blank? sip-gw) "none" sip-gw)))
             (println (format "  DNS:     %s, %s" sip-dns1 sip-dns2)))
@@ -605,6 +674,17 @@ done 2>/dev/null"]
         (when (and nas? (not (fs/exists? (str md "/nfs_clients"))))
           (spit (str md "/nfs_clients") nfs-clients-template)
           (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md))))
+      ;; PCI passthrough — overwrite the placeholder init-machine seeded when
+      ;; the moonshine wizard picker actually chose devices.
+      (when (and moonshine? (= backend "proxmox") (seq pci-selected))
+        (spit (str md "/pci_devices")
+              (str/join "\n" (concat
+                              ["# Proxmox PCI passthrough — one --hostpciN entry per line."
+                               "# Selected via wizard from PVE hardware/pci at create time."
+                               "# Edit and `just upgrade` to change."]
+                              pci-selected
+                              [""])))
+        (println (format "Created: %s/pci_devices (%d device(s))" md (count pci-selected))))
       (let [nvs (machine/normalize-size var-size)]
         (spit (str md "/var_size") (str nvs "\n"))
         (println (format "Created: %s/var_size (%s)" md nvs))

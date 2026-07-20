@@ -19,6 +19,7 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `static_ip` - Static IP config (`address=` and `gateway=` lines); absent = DHCP
 - `hosts` - Extra /etc/hosts entries (optional)
 - `vmid` - Proxmox VMID (proxmox backend only)
+- `pci_devices` - Proxmox PCI passthrough (proxmox backend only); one `--hostpciN` spec per line. See [PROXMOX.md](PROXMOX.md#gpu-passthrough).
 
 These files are generated during `just create` and preserved across
 `just upgrade` and `just recreate`.

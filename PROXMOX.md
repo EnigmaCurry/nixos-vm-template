@@ -150,6 +150,38 @@ BACKEND=proxmox just create-batch myvm core 2048 2 30G bridge:vmbr0
 BACKEND=proxmox just create-batch myvm core 2048 2 30G bridge:vmbr1 "10.56.0.5/24,10.56.0.1"
 ```
 
+## GPU passthrough
+
+The Proxmox backend can pass host PCI devices through to a VM via the
+per-machine file `machines/<name>/pci_devices`. Each non-comment line
+becomes one `--hostpci<N>` argument to `qm set`; run `just upgrade
+<name>` (or `just recreate`) to apply changes.
+
+```
+# machines/moon/pci_devices
+# Common forms — see `man qm` for the full hostpci syntax.
+0000:01:00.0                    # bare BDF (GPU function)
+0000:01:00.1                    # sibling audio function (HDMI audio)
+0000:02:00,pcie=1,x-vga=1       # full slot, PCIe + primary VGA
+```
+
+For NVIDIA GPUs pass **both** the VGA function (`00.0`) and the HDMI
+audio function (`00.1`), or audio in the guest will break.
+
+When you `just create` a VM with the `moonshine-nvidia` profile, the
+wizard queries the Proxmox node for display-class devices (and their
+sibling audio functions) and lets you multi-select which to pass
+through. For any other profile, edit `pci_devices` by hand.
+
+**Host-side prerequisites** (out of scope for this repo):
+
+- VT-d / AMD-Vi enabled in the PVE host's BIOS.
+- The passed-through PCI device bound to `vfio-pci` on the host
+  (typically via `/etc/modprobe.d/vfio.conf` + a kernel cmdline entry).
+- See the [Proxmox PCI(e) Passthrough
+  wiki](https://pve.proxmox.com/wiki/PCI_Passthrough) for the full
+  host setup.
+
 ## Backups (Proxmox)
 
 Proxmox backups use `vzdump` and are stored on `PVE_BACKUP_STORAGE`:
