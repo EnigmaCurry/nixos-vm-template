@@ -58,6 +58,20 @@
                    "/usr/share/OVMF/OVMF_VARS.fd"
                    "/usr/share/edk2/x64/OVMF_VARS.4m.fd"]))
 
+(defn- strip-user
+  "Drop any `user@` prefix from an SSH-target-shaped string."
+  [s]
+  (let [s (or s "")]
+    (if-let [i (str/index-of s "@")] (subs s (inc i)) s)))
+
+(defn- pve-ssh-target
+  "SSH target for the Proxmox backend: always root@<host>. Any user prefix in
+  PVE_HOST is discarded — root is not user-configurable (the tool needs root
+  for pvesh/qm/pct/zfs). Empty string if PVE_HOST is unset."
+  [pve-host]
+  (let [h (strip-user pve-host)]
+    (if (str/blank? h) "" (str "root@" h))))
+
 (defn load-config
   "Build the resolved config map for the given backend (\"libvirt\"|\"proxmox\")."
   [backend]
@@ -102,8 +116,8 @@
         :ovmf-vars (env "OVMF_VARS" (detect-ovmf-vars))}
 
        "proxmox"
-       {:pve-host (env "PVE_HOST" "")
-        :pve-node (env "PVE_NODE" (env "PVE_HOST" ""))
+       {:pve-host (pve-ssh-target (env "PVE_HOST" ""))
+        :pve-node (strip-user (env "PVE_NODE" (env "PVE_HOST" "")))
         :pve-storage (env "PVE_STORAGE" "local")
         :pve-bridge (env "PVE_BRIDGE" "vmbr0")
         :pve-disk-format (env "PVE_DISK_FORMAT" "qcow2")
@@ -118,8 +132,8 @@
        ;; (pct/pvesh/zfs over ssh), plus LXC-specific knobs. No qcow/guestfish:
        ;; the rootfs is a tarball and identity is injected via `pct mount`.
        "proxmox-lxc"
-       {:pve-host (env "PVE_HOST" "")
-        :pve-node (env "PVE_NODE" (env "PVE_HOST" ""))
+       {:pve-host (pve-ssh-target (env "PVE_HOST" ""))
+        :pve-node (strip-user (env "PVE_NODE" (env "PVE_HOST" "")))
         ;; rootfs storage for the container — MUST be a CT-capable storage
         ;; (zfspool or dir), e.g. local-zfs / rust; NOT a bare ZFS pool name.
         :pve-storage (env "PVE_STORAGE" "local")

@@ -46,7 +46,7 @@ Host pve
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PVE_HOST` | Yes | - | SSH config host name (or hostname/IP) |
+| `PVE_HOST` | Yes | - | SSH config host name (or hostname/IP). SSH always logs in as `root` — any `user@` prefix is stripped. |
 | `PVE_NODE` | Yes | `$PVE_HOST` | PVE node name (must match the Proxmox hostname) |
 | `PVE_STORAGE` | No | `local` | **CT-capable** rootfs storage (zfspool/dir, e.g. `local-zfs` or `rust`) — **not** a bare ZFS pool path |
 | `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |

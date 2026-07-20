@@ -43,7 +43,7 @@ Set these in your `.env` file or as environment variables:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `PVE_HOST` | Yes | - | SSH config host name (or hostname/IP for simple setups) |
+| `PVE_HOST` | Yes | - | SSH config host name (or hostname/IP). SSH always logs in as `root` — any `user@` prefix is stripped. |
 | `PVE_NODE` | Yes | `$PVE_HOST` | PVE node name (must match Proxmox hostname) |
 | `PVE_STORAGE` | No | `local` | Target storage for VM disks |
 | `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |
