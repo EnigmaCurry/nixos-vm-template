@@ -155,6 +155,25 @@ let
     '';
   };
 
+  # RetroArch launch wrapper. Copies our declarative retroarch.cfg from the
+  # nix store over ~/.config/retroarch/retroarch.cfg on every launch, so
+  # RetroArch always starts from a known state. The cfg itself sets
+  # config_save_on_exit = "false" so RetroArch won't rewrite it on quit.
+  # To iterate live without a rebuild: SSH into the VM, edit
+  # ~/.config/retroarch/retroarch.cfg, and launch retroarch directly
+  # (retroarch -c ~/.config/retroarch/retroarch.cfg) — bypasses this reset.
+  retroarchCfg = ./moonshine/retroarch.cfg;
+  retroarchLaunch = pkgs.writeShellApplication {
+    name = "moonshine-retroarch-launch";
+    runtimeInputs = [ pkgs.coreutils pkgs.retroarch ];
+    text = ''
+      dest="$HOME/.config/retroarch/retroarch.cfg"
+      install -D -m 0644 ${retroarchCfg} "$dest"
+      exec retroarch "$@"
+    '';
+  };
+  retroarchLaunchPath = "/run/current-system/sw/bin/moonshine-retroarch-launch";
+
   # Wrapper for the Pegasus launcher tile. Prepends the shim above (so
   # Pegasus's bare `steam` lookup lands on our version) followed by the
   # NixOS system-profile bin dirs (for anything else Pegasus shells out
@@ -222,7 +241,7 @@ let
 
     [[application]]
     title = "RetroArch"
-    command = ["/run/current-system/sw/bin/retroarch"]
+    command = ["${retroarchLaunchPath}"]
 
     [[application_scanner]]
     type = "steam"
@@ -288,9 +307,12 @@ LUT
 
 [[application]]
 title = "RetroArch"
-command = ["/run/current-system/sw/bin/retroarch"]
+command = ["${retroarchLaunchPath}"]
 RET
     fi
+    # Migrate legacy RetroArch tiles that launched retroarch directly (no
+    # declarative-config reset on each launch).
+    ${pkgs.gnused}/bin/sed -i 's|"/run/current-system/sw/bin/retroarch"|"${retroarchLaunchPath}"|g' "$CONFIG"
   '';
 in
 {
@@ -429,7 +451,10 @@ in
       pkgs.lutris
       # RetroArch — LibRetro emulator frontend, gamepad-first UI. Cores and
       # ROMs are configured per-user via the RetroArch UI after first launch.
+      # The wrapper below resets ~/.config/retroarch/retroarch.cfg from a
+      # declarative copy on every launch (see retroarchLaunch above).
       pkgs.retroarch
+      retroarchLaunch
       # Input diagnostics — useful when debugging gamepads reaching the VM
       # over Moonlight (virtual devices under /dev/input, /dev/uinput, /dev/uhid).
       pkgs.usbutils
