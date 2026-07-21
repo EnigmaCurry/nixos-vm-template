@@ -104,10 +104,15 @@ let
   # the pgrep pattern below.
   heroicRunWait = pkgs.writeShellApplication {
     name = "moonshine-heroic-run-wait";
-    runtimeInputs = [ pkgs.coreutils pkgs.procps pkgs.xdg-utils ];
+    runtimeInputs = [ pkgs.coreutils pkgs.procps ];
     text = ''
       url="$1"
-      xdg-open "$url" &
+      # Invoke heroic directly with the URL rather than going through
+      # xdg-open: the moonshine session env doesn't reliably see the
+      # `x-scheme-handler/heroic` MIME registration, so xdg-open silently
+      # no-ops. Heroic itself accepts its own URL scheme on the command
+      # line and handles single-instance forwarding internally.
+      ${pkgs.heroic}/bin/heroic "$url" &
       # Poll up to 120s for a Wine .exe under a Heroic game folder to appear.
       for _ in $(seq 1 120); do
         if pgrep -f "Games/Heroic.*\.exe" >/dev/null 2>&1; then
