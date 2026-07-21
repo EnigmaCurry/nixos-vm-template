@@ -49,11 +49,23 @@ in
     # login, so Moonshine can spawn game sessions on a headless VM.
     users.users.${user}.linger = true;
 
+    # mDNS advertisement: Moonshine registers "_nvstream._tcp" via Avahi so
+    # Moonlight clients on the LAN can discover the host. Without avahi-daemon
+    # running, moonshine::publisher fails with "could not initialize
+    # AvahiClient". userServices=true lets moonshine (running as `user`)
+    # publish via the system Avahi bus.
+    services.avahi = {
+      enable = true;
+      publish.enable = true;
+      publish.userServices = true;
+      openFirewall = true;  # UDP 5353 (mDNS)
+    };
+
     systemd.services.moonshine = {
       description = "Moonshine — headless Moonlight/GameStream streaming server";
       wantedBy = [ "multi-user.target" ];
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
+      after = [ "network-online.target" "avahi-daemon.service" ];
+      wants = [ "network-online.target" "avahi-daemon.service" ];
       # Log both crates: the server's actual logic lives in moonshine_core,
       # not the thin `moonshine` bin crate.
       environment.MOONSHINE_LOG = "moonshine=info,moonshine_core=info";
