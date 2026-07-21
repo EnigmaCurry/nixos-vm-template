@@ -144,6 +144,7 @@
              :or {profile "core" network "nat"}}]
   (let [md (machine-dir cfg name)
         normalized (profile/normalize-profiles profile)]
+    (profile/ensure-no-exclusive-conflicts! normalized)
     (fs/create-dirs md)
     ;; profile
     (cond
@@ -199,12 +200,18 @@
                              (format "# Add one public key per line. Run 'just upgrade %s' to apply changes." name)
                              ""]
                             ssh-key-mode user-keys)
-    ;; tcp_ports — seeded once at creation; the nas / moonshine-nvidia profiles add
-    ;; their service ports here (not in the image) so they stay visible/editable.
-    ;; Remove any you don't want exposed.
+    ;; tcp_ports — seeded once at creation; the nas / moonshine-nvidia /
+    ;; sunshine-plasma-nvidia profiles add their service ports here (not in the
+    ;; image) so they stay visible/editable. Remove any you don't want exposed.
     (let [profs (set (map str/trim (str/split (or profile "") #",")))
           nas? (contains? profs "nas")
-          moonshine? (contains? profs "moonshine-nvidia")]
+          moonshine? (contains? profs "moonshine-nvidia")
+          sunshine? (contains? profs "sunshine-plasma-nvidia")
+          ;; Both Moonlight-protocol servers use the same well-known ports and
+          ;; both need Proxmox GPU passthrough. Exclusivity is enforced upstream
+          ;; in profile.clj, so at most one of these is ever true.
+          streaming? (or moonshine? sunshine?)
+          streaming-label (cond moonshine? "moonshine" sunshine? "sunshine" :else "")]
       (when-not (fs/exists? (str md "/tcp_ports"))
         (spit (str md "/tcp_ports")
               (str/join "\n" (concat ["# TCP ports to open in firewall (one per line)"
@@ -213,12 +220,14 @@
                                      (when nas?
                                        ["# nas profile — SMB (445), NFSv4 (2049), copyparty web+WebDAV (3923), WSD (5357):"
                                         "445" "2049" "3923" "5357"])
-                                     (when moonshine?
-                                       ["# moonshine — Moonlight HTTPS (47984), HTTP (47989), RTSP (48010):"
+                                     (when streaming?
+                                       [(format "# %s — Moonlight HTTPS (47984), HTTP (47989), RTSP (48010):"
+                                                streaming-label)
                                         "47984" "47989" "48010"])
                                      [""])))
         (println (format "Created: %s/tcp_ports%s" md
-                         (str/join "" [(when nas? " + nas") (when moonshine? " + moonshine")]))))
+                         (str/join "" [(when nas? " + nas")
+                                       (when streaming? (str " + " streaming-label))]))))
       ;; udp_ports
       (when-not (fs/exists? (str md "/udp_ports"))
         (spit (str md "/udp_ports")
@@ -227,16 +236,18 @@
                                      (when nas?
                                        ["# nas profile — mDNS (5353), WS-Discovery (3702):"
                                         "5353" "3702"])
-                                     (when moonshine?
-                                       ["# moonshine — Moonlight video (47998), control (47999), audio (48000):"
+                                     (when streaming?
+                                       [(format "# %s — Moonlight video (47998), control (47999), audio (48000):"
+                                                streaming-label)
                                         "47998" "47999" "48000"])
                                      [""])))
         (println (format "Created: %s/udp_ports%s" md
-                         (str/join "" [(when nas? " (nas)") (when moonshine? " (moonshine)")]))))
-      ;; pci_devices — seeded for moonshine-nvidia (Proxmox GPU passthrough).
+                         (str/join "" [(when nas? " (nas)")
+                                       (when streaming? (str " (" streaming-label ")"))]))))
+      ;; pci_devices — seeded for the streaming profiles (Proxmox GPU passthrough).
       ;; Users can also add this file for any Proxmox VM to pass through PCI
-      ;; devices without moonshine.
-      (when (and moonshine? (not (fs/exists? (str md "/pci_devices"))))
+      ;; devices without a streaming profile.
+      (when (and streaming? (not (fs/exists? (str md "/pci_devices"))))
         (spit (str md "/pci_devices")
               (str/join "\n" ["# Proxmox PCI passthrough — one --hostpciN entry per line."
                               "# See `man qm` for the full hostpci syntax."

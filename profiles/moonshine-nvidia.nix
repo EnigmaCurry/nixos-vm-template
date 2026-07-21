@@ -300,6 +300,10 @@ in
       message = "moonshine-nvidia profile requires the pipewire profile (audio capture)";
     }];
 
+    # Claim the Moonlight-protocol streaming ports (see modules/streaming-server.nix).
+    # Nix will error if sunshine-plasma-nvidia also tries to claim them.
+    vm.streamingServer = "moonshine";
+
     # NVIDIA bare-metal driver stack (unlike profiles/nvidia.nix, which is
     # scoped to nvidia-container-toolkit for docker workloads).
     nixpkgs.config.allowUnfree = true;

@@ -62,6 +62,29 @@
     (println "Use BACKEND=proxmox-lxc (or the `lxc`/`pve-lxc` alias) to build/run it.")
     (System/exit 1)))
 
+(def exclusive-profile-groups
+  "Groups of profiles that cannot coexist in the same VM. Each group is a set;
+  a profile list containing more than one member of any group is rejected."
+  [;; Both moonshine-nvidia and sunshine-plasma-nvidia bind the same
+   ;; well-known Moonlight ports (47984/47989/48010 TCP, 47998-48000 UDP)
+   ;; and both provide _nvstream._tcp mDNS advertisement — a VM can host
+   ;; at most one Moonlight-protocol server. Enforced at Nix eval time
+   ;; too via modules/streaming-server.nix.
+   #{"moonshine-nvidia" "sunshine-plasma-nvidia"}])
+
+(defn ensure-no-exclusive-conflicts!
+  "Exit with a friendly error if `profile-key` picks more than one member of
+  any group in `exclusive-profile-groups`."
+  [profile-key]
+  (let [profs (set (str/split profile-key #","))]
+    (doseq [group exclusive-profile-groups]
+      (let [hit (sort (filter profs group))]
+        (when (> (count hit) 1)
+          (println (format "Error: these profiles are mutually exclusive: %s"
+                           (str/join ", " hit)))
+          (println "Pick one — they claim the same ports / advertise the same service.")
+          (System/exit 1))))))
+
 (defn build-profile
   "Build a profile's base image. Honors SKIP_BUILD (bootstrap). FLAKE_UPDATE is
   taken from opts {:flake-update? bool} (upgrade) or the env var otherwise.
@@ -72,6 +95,7 @@
         output-dir (:output-dir cfg)
         profiles-out (str output-dir "/profiles")]
     (ensure-not-lxc-only! profile-key)
+    (ensure-no-exclusive-conflicts! profile-key)
     (if (= "true" (System/getenv "SKIP_BUILD"))
       (let [skip-image (str profiles-out "/" profile-key "/nixos.qcow2")]
         (if (fs/regular-file? skip-image)
@@ -119,6 +143,7 @@
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
         lxc-out (str output-dir "/lxc-profiles")]
+    (ensure-no-exclusive-conflicts! profile-key)
     (if (= "true" (System/getenv "SKIP_BUILD"))
       (let [link (str lxc-out "/" profile-key)]
         (if (fs/exists? link)

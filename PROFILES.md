@@ -23,7 +23,8 @@ just create claude-vm claude,dev,docker  # Claude Code with dev tools
 | **home-manager** | Home-manager with sway-home modules (emacs, shell config, etc.) |
 | **claude** | Claude Code CLI (Anthropic's AI coding assistant) |
 | **open-code** | Open Code CLI (open-source AI coding assistant) |
-| **moonshine-nvidia** | [Moonshine](https://github.com/hgaiser/moonshine) headless game-streaming server. Requires `pipewire` + a Proxmox VM with NVIDIA GPU passthrough (see [PROXMOX.md](PROXMOX.md#gpu-passthrough)). |
+| **moonshine-nvidia** | [Moonshine](https://github.com/hgaiser/moonshine) headless game-streaming server. Requires `pipewire` + a Proxmox VM with NVIDIA GPU passthrough (see [PROXMOX.md](PROXMOX.md#gpu-passthrough)). Mutually exclusive with `sunshine-plasma-nvidia`. |
+| **sunshine-plasma-nvidia** | [Sunshine](https://github.com/LizardByte/Sunshine) desktop-streaming server bundled with KDE Plasma 6 Wayland (SDDM autologin), Flatpak, and the [Bazaar](https://github.com/kolunmi/bazaar) app store. For streaming a full KDE desktop rather than individual games. Requires `pipewire` + a Proxmox VM with NVIDIA GPU passthrough. Mutually exclusive with `moonshine-nvidia`. First-boot Flatpak install runs in the background; Bazaar appears in the menu after a few minutes. |
 
 > **Tip for agentic use:** Consider enabling
 > [semi-mutable mode](MODES.md#semi-mutable-vms) for `claude` or `open-code` VMs

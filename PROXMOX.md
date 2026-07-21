@@ -168,10 +168,11 @@ becomes one `--hostpci<N>` argument to `qm set`; run `just upgrade
 For NVIDIA GPUs pass **both** the VGA function (`00.0`) and the HDMI
 audio function (`00.1`), or audio in the guest will break.
 
-When you `just create` a VM with the `moonshine-nvidia` profile, the
-wizard queries the Proxmox node for display-class devices (and their
-sibling audio functions) and lets you multi-select which to pass
-through. For any other profile, edit `pci_devices` by hand.
+When you `just create` a VM with the `moonshine-nvidia` or
+`sunshine-plasma-nvidia` profile, the wizard queries the Proxmox node
+for display-class devices (and their sibling audio functions) and lets
+you multi-select which to pass through. For any other profile, edit
+`pci_devices` by hand.
 
 **Host-side prerequisites** (out of scope for this repo):
 

@@ -504,13 +504,21 @@ done 2>/dev/null"]
                                 (if (str/blank? v) "30G" v))
                      "30G")
           _ (println (format "Disk size: %s" var-size))
-          ;; ── PCI passthrough (moonshine-nvidia only, proxmox KVM only) ──
-          moonshine? (boolean (some #(= % "moonshine-nvidia")
-                                    (map str/trim (str/split (or profile "") #","))))
+          ;; ── PCI passthrough (streaming profiles only, proxmox KVM only) ──
+          ;; moonshine-nvidia and sunshine-plasma-nvidia both need a discrete
+          ;; NVIDIA GPU passed through. Exclusivity is enforced upstream in
+          ;; profile.clj, so at most one of these ever appears here.
+          profs-set (set (map str/trim (str/split (or profile "") #",")))
+          streaming? (boolean (or (contains? profs-set "moonshine-nvidia")
+                                  (contains? profs-set "sunshine-plasma-nvidia")))
+          streaming-label (cond
+                            (contains? profs-set "moonshine-nvidia") "moonshine-nvidia"
+                            (contains? profs-set "sunshine-plasma-nvidia") "sunshine-plasma-nvidia"
+                            :else "")
           pci-selected
-          (when (and moonshine? (= backend "proxmox"))
+          (when (and streaming? (= backend "proxmox"))
             (println)
-            (println "PCI passthrough (moonshine-nvidia requires a discrete NVIDIA GPU):")
+            (println (format "PCI passthrough (%s requires a discrete NVIDIA GPU):" streaming-label))
             (let [devs (pve-list-display-pci cfg)]
               (cond
                 (empty? devs)

@@ -23,5 +23,6 @@
     ./ca-cert-identity.nix
     ./zram.nix
     ./image-version.nix
+    ./streaming-server.nix
   ];
 }
