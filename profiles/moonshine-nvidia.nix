@@ -114,6 +114,13 @@ in
     # allowUnfree (already set above).
     programs.steam.enable = true;
 
+    # Steam's 32-bit runtime libs bloat the base-image closure past the
+    # default virtualisation.diskSize of "auto" (closure size + 512 MiB),
+    # causing `cptofs failed. diskSize might be too small for closure`
+    # during `just build`. Bump to 16 GiB — the output qcow2 is sparse so
+    # unused space costs nothing on disk.
+    virtualisation.diskSize = lib.mkForce 16384;
+
     # Keep the user's systemd user instance running without an interactive
     # login, so Moonshine can spawn game sessions on a headless VM.
     users.users.${user}.linger = true;
