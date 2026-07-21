@@ -49,14 +49,6 @@ in
     # login, so Moonshine can spawn game sessions on a headless VM.
     users.users.${user}.linger = true;
 
-    # Pre-create the moonshine config dir so the daemon can drop defaults +
-    # pairing certs into it on first run.
-    systemd.tmpfiles.settings."10-moonshine"."/home/${user}/.config/moonshine".d = {
-      user = user;
-      group = "users";
-      mode = "0700";
-    };
-
     systemd.services.moonshine = {
       description = "Moonshine — headless Moonlight/GameStream streaming server";
       wantedBy = [ "multi-user.target" ];
@@ -69,9 +61,18 @@ in
         User = user;
         Group = "users";
         SupplementaryGroups = [ "input" "video" "render" ];
+        # Pre-create ~/.config/moonshine owned by the service user, so the
+        # daemon can drop defaults + pairing cert/key into it on first run.
+        # The '+' prefix runs these as root before the service drops to User=.
+        # tmpfiles.d is explicitly unsupported for /home/* (man tmpfiles.d),
+        # and would auto-create ~/.config as root:root, breaking write access.
+        ExecStartPre = [
+          "+${pkgs.coreutils}/bin/install -d -o ${user} -g users -m 0755 /home/${user}/.config"
+          "+${pkgs.coreutils}/bin/install -d -o ${user} -g users -m 0700 /home/${user}/.config/moonshine"
+        ];
         # Moonshine requires the config path as a positional arg; it will
         # auto-create the file (Config::load_or_create) with defaults + pairing
-        # cert/key on first run, using the dir pre-created by tmpfiles above.
+        # cert/key on first run.
         ExecStart = "${startMoonshine}/bin/start-moonshine /home/${user}/.config/moonshine/config.toml";
         Restart = "always";
         RestartSec = 3;
