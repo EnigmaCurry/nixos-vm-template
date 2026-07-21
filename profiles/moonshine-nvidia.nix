@@ -187,6 +187,7 @@ let
     beetle-ngp         # Neo Geo Pocket
     dosbox-pure        # MS-DOS
     puae               # Amiga
+    vice-x64sc         # Commodore 64 (cycle-accurate)
     scummvm            # LucasArts / Sierra point-and-click adventures
   ]);
   retroarchLaunch = pkgs.writeShellApplication {
