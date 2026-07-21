@@ -60,9 +60,19 @@ let
       # doesn't appear. Ignored when Steam is already running. Dropping
       # -bigpicture means the scanner tiles launch the game directly — the
       # separate [[application]] "Steam" tile still explicitly opens BPM.
-      ${steamCommand} -silent "steam://rungameid/$game_id"
-      # Poll up to 60s for the reaper for this AppId to appear.
-      for _ in $(seq 1 60); do
+      #
+      # Background this call: on NixOS `steam` is an FHS/bwrap wrapper that
+      # returns quickly when Steam is already running (IPC + exit), but on
+      # a cold start it stays in the foreground until Steam client itself
+      # exits — which blocks this whole wrapper forever, so we never get to
+      # poll for the reaper and callers (moonshine / Pegasus's QProcess)
+      # never see us finish. Backgrounding lets us proceed to the poll while
+      # Steam starts up. The Steam client stays running under the parent
+      # scope regardless.
+      ${steamCommand} -silent "steam://rungameid/$game_id" &
+      # Poll up to 120s for the reaper for this AppId to appear (cold start
+      # of Steam + a Proton game can easily take a minute).
+      for _ in $(seq 1 120); do
         if pgrep -f "reaper.*SteamLaunch AppId=$game_id" >/dev/null 2>&1; then
           break
         fi
