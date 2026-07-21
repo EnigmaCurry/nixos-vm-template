@@ -7,9 +7,16 @@
             [clojure.string :as str]))
 
 (def ^:private wiz-ns
-  "Loads the script-wizard pod on first use and returns its namespace symbol."
+  "Loads the script-wizard pod on first use and returns its namespace symbol.
+
+  Loaded via the local `script-wizard` binary (provided by the flake devShell)
+  rather than the babashka pod-registry. v0.3.0 in the registry has a bug
+  where numeric-looking defaults are treated as indices and crash the picker
+  when out of range (fixed upstream in v0.3.1). Switch back to the registry
+  form once v0.3.1 lands there."
   (delay
-    (pods/load-pod 'enigmacurry/script-wizard "0.3.0")
+    ;; (pods/load-pod 'enigmacurry/script-wizard "0.3.0")  ; buggy — see above
+    (pods/load-pod ["script-wizard" "pod"])
     (require '[pod.enigmacurry.script-wizard])
     'pod.enigmacurry.script-wizard))
 

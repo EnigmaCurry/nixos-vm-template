@@ -21,9 +21,16 @@
       url = "github:EnigmaCurry/nifty-filter/dev";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Pinned to v0.3.1 — the pod is loaded via a local binary path (see
+    # src/vm/prompt.clj) because babashka.pods doesn't support :url and
+    # v0.3.1 isn't in the babashka pod-registry yet.
+    script-wizard = {
+      url = "github:EnigmaCurry/script-wizard/v0.3.1";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, nifty-filter, ... }@inputs:
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, nifty-filter, script-wizard, ... }@inputs:
     let
       lib = nixpkgs.lib;
 
@@ -234,6 +241,7 @@
               libguestfs-with-appliance
               virt-manager
               mkpasswd  # For generating password hashes
+              script-wizard.packages.${system}.default  # bb pod for wizard prompts
             ];
           };
         }
