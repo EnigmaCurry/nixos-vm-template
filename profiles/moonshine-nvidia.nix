@@ -76,19 +76,44 @@ let
   };
   steamRunWaitPath = "/run/current-system/sw/bin/moonshine-steam-run-wait";
 
-  # Wrapper for the Pegasus launcher tile. Pegasus's Steam provider does a
-  # bare `steam` PATH lookup (SteamGamelist.cpp:132, ProviderUtils.cpp:123 —
-  # returns "steam" and lets QProcess resolve it), and QProcess inherits the
-  # parent env without adding anything. Under moonshine's systemd-run --user
-  # --scope launch, PATH may not include /run/current-system/sw/bin, so
-  # launching a game fails with `Could not launch 'steam'`. Prepend the
-  # NixOS system-profile bin dirs so `steam` (and anything else Pegasus
-  # shells out to) is resolvable.
+  # PATH shim for Pegasus's Steam provider. Pegasus builds `steam
+  # steam://rungameid/<id>` and blocks on that child (QProcess), so it
+  # thinks the game is finished the moment the `steam` CLI returns —
+  # which is <1s later, right after IPC to the Steam client. Result:
+  # Pegasus tries to restore its UI immediately, Steam then takes focus
+  # while the game loads, and when the user actually quits, Pegasus
+  # doesn't come back because as far as it knows the game already ended
+  # long ago. This shim intercepts the URL form, delegates to our
+  # wait-for-reaper wrapper, and only returns when the game truly exits
+  # — so Pegasus's blocking wait now aligns with the real game lifetime.
+  # Non-URL invocations pass through to the real `steam`.
+  pegasusSteamShim = pkgs.writeShellApplication {
+    name = "steam";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      for arg in "$@"; do
+        case "$arg" in
+          steam://rungameid/*)
+            game_id="''${arg#steam://rungameid/}"
+            exec ${steamRunWaitPath} "$game_id"
+            ;;
+        esac
+      done
+      exec ${steamCommand} "$@"
+    '';
+  };
+
+  # Wrapper for the Pegasus launcher tile. Prepends the shim above (so
+  # Pegasus's bare `steam` lookup lands on our version) followed by the
+  # NixOS system-profile bin dirs (for anything else Pegasus shells out
+  # to). Without this, PATH may not include /run/current-system/sw/bin
+  # under moonshine's systemd-run --user --scope, and even if it did,
+  # Pegasus would still exit its own wait too early on Steam launches.
   pegasusLaunch = pkgs.writeShellApplication {
     name = "moonshine-pegasus-launch";
     runtimeInputs = [ pkgs.coreutils ];
     text = ''
-      export PATH="/run/current-system/sw/bin:/run/wrappers/bin:''${PATH:-}"
+      export PATH="${pegasusSteamShim}/bin:/run/current-system/sw/bin:/run/wrappers/bin:''${PATH:-}"
       exec ${pkgs.pegasus-frontend}/bin/pegasus-fe "$@"
     '';
   };
