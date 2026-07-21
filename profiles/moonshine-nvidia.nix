@@ -198,6 +198,14 @@ let
       ${pkgs.coreutils}/bin/install -o ${user} -g users -m 0600 ${defaultConfig} "$CONFIG"
     fi
     ${pkgs.gnused}/bin/sed -i 's|/usr/bin/steam|${steamCommand}|g' "$CONFIG"
+    # First-boot rename: swap the upstream default `name = "Moonshine"` for
+    # the VM's actual hostname so Moonlight clients discover it by that
+    # name instead of a generic "Moonshine". Only touches the exact default
+    # literal, so any later user rename is preserved.
+    hn=$(${pkgs.coreutils}/bin/cat /var/identity/hostname 2>/dev/null | ${pkgs.coreutils}/bin/tr -d '\n' || true)
+    if [ -n "$hn" ]; then
+      ${pkgs.gnused}/bin/sed -i "s|^name = \"Moonshine\"$|name = \"$hn\"|" "$CONFIG"
+    fi
     # Migrate the legacy scanner command that launched Steam directly (session
     # never ended when the game quit) to the wait-for-reaper wrapper.
     ${pkgs.gnused}/bin/sed -i 's|"${steamCommand}", "-bigpicture", "steam://rungameid/{game_id}"|"${steamRunWaitPath}", "{game_id}"|g' "$CONFIG"
