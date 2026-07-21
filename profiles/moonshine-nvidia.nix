@@ -86,6 +86,43 @@ let
   };
   steamRunWaitPath = "/run/current-system/sw/bin/moonshine-steam-run-wait";
 
+  # Same shape as steamRunWait, but for Heroic-launched games (Epic / GOG /
+  # Amazon). Takes a `heroic://launch/...` URL, fires xdg-open (Heroic
+  # registers itself as the URL handler and launches the game), then blocks
+  # until the game's Wine .exe under a Heroic install folder is gone.
+  # Without this wrapper an [[application]] tile that just xdg-open's the
+  # URL would exit immediately (xdg-open is fire-and-forget), and the
+  # moonshine session would tear down before the game window ever
+  # appeared. Usage in ~/.config/moonshine/config.toml:
+  #
+  #   [[application]]
+  #   title = "UT2004"
+  #   command = ["${heroicRunWaitPath}", "heroic://launch/legendary/<appname>"]
+  #
+  # The Wine .exe pattern (Games/Heroic/.../*.exe) matches Heroic's default
+  # install layout. If you've relocated Heroic's install directory, adjust
+  # the pgrep pattern below.
+  heroicRunWait = pkgs.writeShellApplication {
+    name = "moonshine-heroic-run-wait";
+    runtimeInputs = [ pkgs.coreutils pkgs.procps pkgs.xdg-utils ];
+    text = ''
+      url="$1"
+      xdg-open "$url" &
+      # Poll up to 120s for a Wine .exe under a Heroic game folder to appear.
+      for _ in $(seq 1 120); do
+        if pgrep -f "Games/Heroic.*\.exe" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 1
+      done
+      # Block until every such .exe exits (game quit).
+      while pgrep -f "Games/Heroic.*\.exe" >/dev/null 2>&1; do
+        sleep 2
+      done
+    '';
+  };
+  heroicRunWaitPath = "/run/current-system/sw/bin/moonshine-heroic-run-wait";
+
   # PATH shim for Pegasus's Steam provider. Pegasus builds `steam
   # steam://rungameid/<id>` and blocks on that child (QProcess), so it
   # thinks the game is finished the moment the `steam` CLI returns —
@@ -370,6 +407,7 @@ in
     environment.systemPackages = [
       moonshine
       steamRunWait
+      heroicRunWait
       # Optional gamepad-first launcher (browsed inside a Moonlight stream)
       # alternative to Steam BPM. Configured per-user via Pegasus's own UI.
       pkgs.pegasus-frontend
