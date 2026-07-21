@@ -197,7 +197,12 @@ in
       serviceConfig = {
         User = user;
         Group = "users";
-        SupplementaryGroups = [ "input" "video" "render" ];
+        # `uinput` is required for inputtino to open /dev/uinput and create
+        # virtual gamepads. hardware.uinput.enable puts the node in the
+        # `uinput` group; the udev rule below tries to move it to `input`
+        # but NixOS's own rule wins the race in practice, so we just grant
+        # both here.
+        SupplementaryGroups = [ "input" "uinput" "video" "render" ];
         # Pre-create ~/.config/moonshine owned by the service user, so the
         # daemon can drop defaults + pairing cert/key into it on first run.
         # The '+' prefix runs these as root before the service drops to User=.
