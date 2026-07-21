@@ -351,11 +351,11 @@
       },
       "locked": {
         "dir": "home-manager",
-        "lastModified": 1784614573,
-        "narHash": "sha256-/B9I98U/glIJVqdLLd6VAM7DFKBYhXt85dOSULtD+Ts=",
+        "lastModified": 1784663642,
+        "narHash": "sha256-vBjP1vDPN1l02rqyJOl5Xop7MGdJwIpAsM3V8Z3thc0=",
         "owner": "EnigmaCurry",
         "repo": "sway-home",
-        "rev": "9ff183dfba70e2a3665818da26a1c483b461d847",
+        "rev": "ce64812771e3389f2b744207329673822ddd040a",
         "type": "github"
       },
       "original": {
