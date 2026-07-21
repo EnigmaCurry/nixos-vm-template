@@ -61,6 +61,16 @@ in
       openFirewall = true;  # UDP 5353 (mDNS)
     };
 
+    # /etc is read-only on the immutable base image. Upstream
+    # avahi-daemon.service sets ConfigurationDirectory=avahi, which makes
+    # systemd try to mkdir/chown/chmod /etc/avahi at service start — that
+    # fails with EROFS (status=241/CONFIGURATION_DIRECTORY). NixOS's
+    # environment.etc has already baked /etc/avahi/avahi-daemon.conf into
+    # the image, and avahi reads from the default compiled-in path without
+    # needing $CONFIGURATION_DIRECTORY, so clearing this is safe.
+    systemd.services.avahi-daemon.serviceConfig.ConfigurationDirectory =
+      lib.mkForce "";
+
     systemd.services.moonshine = {
       description = "Moonshine — headless Moonlight/GameStream streaming server";
       wantedBy = [ "multi-user.target" ];
