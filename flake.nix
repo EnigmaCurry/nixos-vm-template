@@ -21,11 +21,11 @@
       url = "github:EnigmaCurry/nifty-filter/dev";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    # Pinned to v0.3.1 — the pod is loaded via a local binary path (see
+    # Pinned to v0.3.2 — the pod is loaded via a local binary path (see
     # src/vm/prompt.clj) because babashka.pods doesn't support :url and
-    # v0.3.1 isn't in the babashka pod-registry yet.
+    # this version isn't in the babashka pod-registry yet.
     script-wizard = {
-      url = "github:EnigmaCurry/script-wizard/v0.3.1";
+      url = "github:EnigmaCurry/script-wizard/v0.3.2";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

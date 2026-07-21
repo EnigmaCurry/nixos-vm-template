@@ -300,16 +300,16 @@
         ]
       },
       "locked": {
-        "lastModified": 1784594090,
-        "narHash": "sha256-+23OSNb/fAfJAKOGDjcjcZQqtpgtZDK0aGzwCqBBz2U=",
+        "lastModified": 1784595260,
+        "narHash": "sha256-OJxAh711X6XWScO+RSWFD4OHCCKIyB+X+lyyoTgePtc=",
         "owner": "EnigmaCurry",
         "repo": "script-wizard",
-        "rev": "be14881037cab5f416adae3c81daae801c55b14d",
+        "rev": "0dbd03f845341dfb0028f107ca3d50df8dc98ec7",
         "type": "github"
       },
       "original": {
         "owner": "EnigmaCurry",
-        "ref": "v0.3.1",
+        "ref": "v0.3.2",
         "repo": "script-wizard",
         "type": "github"
       }
