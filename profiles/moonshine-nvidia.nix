@@ -40,6 +40,38 @@ let
   # Fields mirror moonshine v0.11.0's Config::default() serialization — the
   # deserializer requires all StreamConfig sub-fields to be present.
   steamCommand = "/run/current-system/sw/bin/steam";
+
+  # Wrapper for the Steam scanner's per-game launch command. Without it,
+  # `steam steam://rungameid/<id>` returns immediately (IPC to the running
+  # Steam client), so moonshine's `child.wait()` never blocks on the game —
+  # session teardown fires either instantly (503) or waits on the systemd
+  # scope, which stays alive because Steam BPM is a descendant. Result:
+  # quitting the game leaves the stream stuck in BPM. The wrapper waits on
+  # Steam's `reaper` process for this AppId — reaper wraps every game and
+  # exits exactly when the game does — so `child.wait()` returns when the
+  # user quits, moonshine fires ApplicationStopped, and the session ends.
+  # Same pattern as Sunshine's steam.sh.
+  steamRunWait = pkgs.writeShellApplication {
+    name = "moonshine-steam-run-wait";
+    runtimeInputs = [ pkgs.coreutils pkgs.procps ];
+    text = ''
+      game_id="$1"
+      ${steamCommand} -bigpicture "steam://rungameid/$game_id"
+      # Poll up to 60s for the reaper for this AppId to appear.
+      for _ in $(seq 1 60); do
+        if pgrep -f "reaper.*SteamLaunch AppId=$game_id" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 1
+      done
+      # Block until the reaper exits (game quit).
+      while pgrep -f "reaper.*SteamLaunch AppId=$game_id" >/dev/null 2>&1; do
+        sleep 2
+      done
+    '';
+  };
+  steamRunWaitPath = "/run/current-system/sw/bin/moonshine-steam-run-wait";
+
   defaultConfig = pkgs.writeText "moonshine-config.toml" ''
     name = "Moonshine"
     address = "0.0.0.0"
@@ -80,7 +112,7 @@ let
     [[application_scanner]]
     type = "steam"
     library = "$HOME/.local/share/Steam"
-    command = ["${steamCommand}", "-bigpicture", "steam://rungameid/{game_id}"]
+    command = ["${steamRunWaitPath}", "{game_id}"]
   '';
 
   # Seed the config on first run, and rewrite the legacy /usr/bin/steam path
@@ -93,6 +125,9 @@ let
       ${pkgs.coreutils}/bin/install -o ${user} -g users -m 0600 ${defaultConfig} "$CONFIG"
     fi
     ${pkgs.gnused}/bin/sed -i 's|/usr/bin/steam|${steamCommand}|g' "$CONFIG"
+    # Migrate the legacy scanner command that launched Steam directly (session
+    # never ended when the game quit) to the wait-for-reaper wrapper.
+    ${pkgs.gnused}/bin/sed -i 's|"${steamCommand}", "-bigpicture", "steam://rungameid/{game_id}"|"${steamRunWaitPath}", "{game_id}"|g' "$CONFIG"
   '';
 in
 {
@@ -206,7 +241,7 @@ in
     environment.etc."vulkan/implicit_layer.d/VkLayer_moonshine_wsi.json".source =
       "${moonshine}/share/vulkan/implicit_layer.d/VkLayer_moonshine_wsi.json";
 
-    environment.systemPackages = [ moonshine ];
+    environment.systemPackages = [ moonshine steamRunWait ];
 
     # Moonlight/GameStream firewall ports are seeded into the per-VM
     # machines/<name>/tcp_ports + udp_ports at machine-init time (see
