@@ -683,8 +683,8 @@ done 2>/dev/null"]
           (spit (str md "/nfs_clients") nfs-clients-template)
           (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md))))
       ;; PCI passthrough — overwrite the placeholder init-machine seeded when
-      ;; the moonshine wizard picker actually chose devices.
-      (when (and moonshine? (= backend "proxmox") (seq pci-selected))
+      ;; the streaming wizard picker actually chose devices.
+      (when (and streaming? (= backend "proxmox") (seq pci-selected))
         (spit (str md "/pci_devices")
               (str/join "\n" (concat
                               ["# Proxmox PCI passthrough — one --hostpciN entry per line."
