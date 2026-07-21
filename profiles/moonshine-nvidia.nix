@@ -56,7 +56,11 @@ let
     runtimeInputs = [ pkgs.coreutils pkgs.procps ];
     text = ''
       game_id="$1"
-      ${steamCommand} -bigpicture "steam://rungameid/$game_id"
+      # -silent: start Steam minimized/hidden if it isn't running, so BPM
+      # doesn't appear. Ignored when Steam is already running. Dropping
+      # -bigpicture means the scanner tiles launch the game directly — the
+      # separate [[application]] "Steam" tile still explicitly opens BPM.
+      ${steamCommand} -silent "steam://rungameid/$game_id"
       # Poll up to 60s for the reaper for this AppId to appear.
       for _ in $(seq 1 60); do
         if pgrep -f "reaper.*SteamLaunch AppId=$game_id" >/dev/null 2>&1; then
