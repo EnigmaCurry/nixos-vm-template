@@ -163,9 +163,35 @@ let
   # ~/.config/retroarch/retroarch.cfg, and launch retroarch directly
   # (retroarch -c ~/.config/retroarch/retroarch.cfg) — bypasses this reset.
   retroarchCfg = ./moonshine/retroarch.cfg;
+  # RetroArch bundled with a curated set of libretro cores from the nix store,
+  # so first-run players don't have to hit the Online Updater. `mupen64plus`
+  # in nixpkgs points at libretro/mupen64plus-libretro-nx (Mupen64Plus-Next).
+  retroarchWithCores = pkgs.retroarch.withCores (cores: with cores; [
+    mesen              # NES
+    snes9x             # SNES
+    bsnes              # SNES (accuracy-focused)
+    bsnes-hd           # SNES (bsnes + HD Mode 7 / widescreen)
+    mupen64plus        # N64 (Mupen64Plus-Next)
+    sameboy            # Game Boy / Game Boy Color
+    mgba               # Game Boy Advance
+    melonds            # Nintendo DS
+    genesis-plus-gx    # Genesis / Sega CD / Master System / Game Gear
+    picodrive          # 32X
+    beetle-saturn      # Saturn
+    flycast            # Dreamcast
+    beetle-psx-hw      # PlayStation 1 (hardware-rendered)
+    ppsspp             # PSP
+    fbneo              # Arcade (FinalBurn Neo)
+    beetle-pce         # TurboGrafx-16
+    stella             # Atari 2600
+    beetle-ngp         # Neo Geo Pocket
+    dosbox-pure        # MS-DOS
+    puae               # Amiga
+    scummvm            # LucasArts / Sierra point-and-click adventures
+  ]);
   retroarchLaunch = pkgs.writeShellApplication {
     name = "moonshine-retroarch-launch";
-    runtimeInputs = [ pkgs.coreutils pkgs.retroarch ];
+    runtimeInputs = [ pkgs.coreutils retroarchWithCores ];
     text = ''
       dest="$HOME/.config/retroarch/retroarch.cfg"
       install -D -m 0644 ${retroarchCfg} "$dest"
@@ -449,11 +475,12 @@ in
       # Lutris — meta-launcher for Wine/Proton/native, plus community install
       # scripts for many storefronts (EA, Ubisoft, Battle.net, etc.).
       pkgs.lutris
-      # RetroArch — LibRetro emulator frontend, gamepad-first UI. Cores and
-      # ROMs are configured per-user via the RetroArch UI after first launch.
-      # The wrapper below resets ~/.config/retroarch/retroarch.cfg from a
-      # declarative copy on every launch (see retroarchLaunch above).
-      pkgs.retroarch
+      # RetroArch — LibRetro emulator frontend, gamepad-first UI. Cores are
+      # bundled from the nix store via retroarch.withCores (see
+      # retroarchWithCores above); ROMs are per-user. The wrapper below
+      # resets ~/.config/retroarch/retroarch.cfg from a declarative copy on
+      # every launch (see retroarchLaunch above).
+      retroarchWithCores
       retroarchLaunch
       # Input diagnostics — useful when debugging gamepads reaching the VM
       # over Moonlight (virtual devices under /dev/input, /dev/uinput, /dev/uhid).
