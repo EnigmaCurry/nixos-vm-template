@@ -22,7 +22,9 @@
    {:file "static_ip"   :mode "0644"}
    {:file "ca-cert.pem" :mode "0644"}
    {:file "root_password_hash" :mode "0600" :ensure :always}
-   {:file "woodpecker.env" :mode "0600"}])
+   {:file "woodpecker.env" :mode "0600"}
+   {:file "samba_credentials"    :mode "0600"}
+   {:file "samba_client_shares"  :mode "0644"}])
 
 (defn- non-empty-file? [path]
   (and (fs/regular-file? path) (pos? (fs/size path))))
