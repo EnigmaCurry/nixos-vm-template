@@ -69,7 +69,10 @@ in
         User = user;
         Group = "users";
         SupplementaryGroups = [ "input" "video" "render" ];
-        ExecStart = "${startMoonshine}/bin/start-moonshine";
+        # Moonshine requires the config path as a positional arg; it will
+        # auto-create the file (Config::load_or_create) with defaults + pairing
+        # cert/key on first run, using the dir pre-created by tmpfiles above.
+        ExecStart = "${startMoonshine}/bin/start-moonshine /home/${user}/.config/moonshine/config.toml";
         Restart = "always";
         RestartSec = 3;
         # inputtino virtual devices + GPU nodes for Vulkan encode/compositor.
