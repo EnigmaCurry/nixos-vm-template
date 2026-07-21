@@ -174,6 +174,14 @@ let
     title = "Heroic"
     command = ["/run/current-system/sw/bin/heroic"]
 
+    [[application]]
+    title = "Lutris"
+    command = ["/run/current-system/sw/bin/lutris"]
+
+    [[application]]
+    title = "RetroArch"
+    command = ["/run/current-system/sw/bin/retroarch"]
+
     [[application_scanner]]
     type = "steam"
     library = "$HOME/.local/share/Steam"
@@ -214,6 +222,24 @@ PEG
 title = "Heroic"
 command = ["/run/current-system/sw/bin/heroic"]
 HER
+    fi
+    # Append the Lutris launcher tile if not already present.
+    if ! ${pkgs.gnugrep}/bin/grep -qF 'title = "Lutris"' "$CONFIG"; then
+      ${pkgs.coreutils}/bin/cat >> "$CONFIG" <<'LUT'
+
+[[application]]
+title = "Lutris"
+command = ["/run/current-system/sw/bin/lutris"]
+LUT
+    fi
+    # Append the RetroArch launcher tile if not already present.
+    if ! ${pkgs.gnugrep}/bin/grep -qF 'title = "RetroArch"' "$CONFIG"; then
+      ${pkgs.coreutils}/bin/cat >> "$CONFIG" <<'RET'
+
+[[application]]
+title = "RetroArch"
+command = ["/run/current-system/sw/bin/retroarch"]
+RET
     fi
   '';
 in
@@ -343,6 +369,12 @@ in
       # Heroic Games Launcher — Epic Games Store, GOG, Amazon Prime Gaming.
       # Own storefront browser + game grid; sign in and configure per-user.
       pkgs.heroic
+      # Lutris — meta-launcher for Wine/Proton/native, plus community install
+      # scripts for many storefronts (EA, Ubisoft, Battle.net, etc.).
+      pkgs.lutris
+      # RetroArch — LibRetro emulator frontend, gamepad-first UI. Cores and
+      # ROMs are configured per-user via the RetroArch UI after first launch.
+      pkgs.retroarch
       # Input diagnostics — useful when debugging gamepads reaching the VM
       # over Moonlight (virtual devices under /dev/input, /dev/uinput, /dev/uhid).
       pkgs.usbutils
