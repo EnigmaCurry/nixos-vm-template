@@ -76,6 +76,24 @@ let
   };
   steamRunWaitPath = "/run/current-system/sw/bin/moonshine-steam-run-wait";
 
+  # Wrapper for the Pegasus launcher tile. Pegasus's Steam provider does a
+  # bare `steam` PATH lookup (SteamGamelist.cpp:132, ProviderUtils.cpp:123 —
+  # returns "steam" and lets QProcess resolve it), and QProcess inherits the
+  # parent env without adding anything. Under moonshine's systemd-run --user
+  # --scope launch, PATH may not include /run/current-system/sw/bin, so
+  # launching a game fails with `Could not launch 'steam'`. Prepend the
+  # NixOS system-profile bin dirs so `steam` (and anything else Pegasus
+  # shells out to) is resolvable.
+  pegasusLaunch = pkgs.writeShellApplication {
+    name = "moonshine-pegasus-launch";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      export PATH="/run/current-system/sw/bin:/run/wrappers/bin:''${PATH:-}"
+      exec ${pkgs.pegasus-frontend}/bin/pegasus-fe "$@"
+    '';
+  };
+  pegasusLaunchPath = "/run/current-system/sw/bin/moonshine-pegasus-launch";
+
   defaultConfig = pkgs.writeText "moonshine-config.toml" ''
     name = "Moonshine"
     address = "0.0.0.0"
@@ -115,7 +133,7 @@ let
 
     [[application]]
     title = "Pegasus"
-    command = ["/run/current-system/sw/bin/pegasus-fe"]
+    command = ["${pegasusLaunchPath}"]
 
     [[application_scanner]]
     type = "steam"
@@ -143,9 +161,12 @@ let
 
 [[application]]
 title = "Pegasus"
-command = ["/run/current-system/sw/bin/pegasus-fe"]
+command = ["${pegasusLaunchPath}"]
 PEG
     fi
+    # Migrate legacy Pegasus tiles that ran pegasus-fe directly (no PATH set,
+    # so Pegasus's Steam provider couldn't find the `steam` binary).
+    ${pkgs.gnused}/bin/sed -i 's|"/run/current-system/sw/bin/pegasus-fe"|"${pegasusLaunchPath}"|g' "$CONFIG"
   '';
 in
 {
@@ -270,6 +291,7 @@ in
       # Optional gamepad-first launcher (browsed inside a Moonlight stream)
       # alternative to Steam BPM. Configured per-user via Pegasus's own UI.
       pkgs.pegasus-frontend
+      pegasusLaunch
       # Input diagnostics — useful when debugging gamepads reaching the VM
       # over Moonlight (virtual devices under /dev/input, /dev/uinput, /dev/uhid).
       pkgs.usbutils
