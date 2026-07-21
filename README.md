@@ -29,10 +29,11 @@ A better approach: separate the OS from your data.
 - Multiple VMs can share the same base image (thin provisioning)
 - Corruption-resistant - the root filesystem can't be modified at runtime
 
-**The tradeoff:** You can't `apt install` or `dnf install` on a running
-VM. System changes require rebuilding the image. This is a feature,
-not a bug - it forces infrastructure-as-code practices and ensures
-every VM is reproducible from source.
+**The tradeoff:** You can't install packages at runtime. If you want
+to add packages, you need to rebuild the image. This is because the
+root filesystem — including `/nix` — is mounted read-only by design.
+This forces infrastructure-as-code practices and ensures every VM is
+reproducible from source.
 
 This project builds NixOS images with this architecture. NixOS is
 ideal for this because the entire system configuration is declared in
@@ -41,7 +42,8 @@ predictably, and can be recreated identically at any time.
 
 ## Features
 
-- Works on any Linux host distribution (e.g., Fedora, Debian, Arch Linux)
+- Works on any Linux host distribution (e.g., NixOS, Fedora, Debian,
+  Arch Linux, etc.)
 - **Three backends**: local libvirt/KVM, remote Proxmox VE (KVM), or Proxmox LXC containers
 - It is a build script to create your own customized NixOS VM images
 - Immutable, container-like root filesystem (read-only)
