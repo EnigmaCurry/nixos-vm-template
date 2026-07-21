@@ -113,6 +113,10 @@ let
     title = "Steam"
     command = ["${steamCommand}", "steam://open/bigpicture"]
 
+    [[application]]
+    title = "Pegasus"
+    command = ["/run/current-system/sw/bin/pegasus-fe"]
+
     [[application_scanner]]
     type = "steam"
     library = "$HOME/.local/share/Steam"
@@ -132,6 +136,16 @@ let
     # Migrate the legacy scanner command that launched Steam directly (session
     # never ended when the game quit) to the wait-for-reaper wrapper.
     ${pkgs.gnused}/bin/sed -i 's|"${steamCommand}", "-bigpicture", "steam://rungameid/{game_id}"|"${steamRunWaitPath}", "{game_id}"|g' "$CONFIG"
+    # Append the Pegasus launcher tile if it isn't already present, so upgraded
+    # VMs pick up the new [[application]] block without having to nuke config.
+    if ! ${pkgs.gnugrep}/bin/grep -qF 'title = "Pegasus"' "$CONFIG"; then
+      ${pkgs.coreutils}/bin/cat >> "$CONFIG" <<'PEG'
+
+[[application]]
+title = "Pegasus"
+command = ["/run/current-system/sw/bin/pegasus-fe"]
+PEG
+    fi
   '';
 in
 {
@@ -250,7 +264,19 @@ in
     environment.etc."vulkan/implicit_layer.d/VkLayer_moonshine_wsi.json".source =
       "${moonshine}/share/vulkan/implicit_layer.d/VkLayer_moonshine_wsi.json";
 
-    environment.systemPackages = [ moonshine steamRunWait ];
+    environment.systemPackages = [
+      moonshine
+      steamRunWait
+      # Optional gamepad-first launcher (browsed inside a Moonlight stream)
+      # alternative to Steam BPM. Configured per-user via Pegasus's own UI.
+      pkgs.pegasus-frontend
+      # Input diagnostics — useful when debugging gamepads reaching the VM
+      # over Moonlight (virtual devices under /dev/input, /dev/uinput, /dev/uhid).
+      pkgs.usbutils
+      pkgs.evtest
+      pkgs.sdl-jstest
+      pkgs.linuxConsoleTools
+    ];
 
     # Moonlight/GameStream firewall ports are seeded into the per-VM
     # machines/<name>/tcp_ports + udp_ports at machine-init time (see
