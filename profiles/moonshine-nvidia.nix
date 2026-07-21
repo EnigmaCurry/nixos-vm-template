@@ -170,6 +170,10 @@ let
     title = "Pegasus"
     command = ["${pegasusLaunchPath}"]
 
+    [[application]]
+    title = "Heroic"
+    command = ["/run/current-system/sw/bin/heroic"]
+
     [[application_scanner]]
     type = "steam"
     library = "$HOME/.local/share/Steam"
@@ -202,6 +206,15 @@ PEG
     # Migrate legacy Pegasus tiles that ran pegasus-fe directly (no PATH set,
     # so Pegasus's Steam provider couldn't find the `steam` binary).
     ${pkgs.gnused}/bin/sed -i 's|"/run/current-system/sw/bin/pegasus-fe"|"${pegasusLaunchPath}"|g' "$CONFIG"
+    # Append the Heroic launcher tile if not already present.
+    if ! ${pkgs.gnugrep}/bin/grep -qF 'title = "Heroic"' "$CONFIG"; then
+      ${pkgs.coreutils}/bin/cat >> "$CONFIG" <<'HER'
+
+[[application]]
+title = "Heroic"
+command = ["/run/current-system/sw/bin/heroic"]
+HER
+    fi
   '';
 in
 {
@@ -327,6 +340,9 @@ in
       # alternative to Steam BPM. Configured per-user via Pegasus's own UI.
       pkgs.pegasus-frontend
       pegasusLaunch
+      # Heroic Games Launcher — Epic Games Store, GOG, Amazon Prime Gaming.
+      # Own storefront browser + game grid; sign in and configure per-user.
+      pkgs.heroic
       # Input diagnostics — useful when debugging gamepads reaching the VM
       # over Moonlight (virtual devices under /dev/input, /dev/uinput, /dev/uhid).
       pkgs.usbutils
