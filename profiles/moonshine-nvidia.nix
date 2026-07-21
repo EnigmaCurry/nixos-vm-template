@@ -30,6 +30,70 @@ let
       exec moonshine "$@"
     '';
   };
+
+  # NixOS-correct seed config. Moonshine's built-in Config::default() writes
+  # a config.toml on first run that hard-codes /usr/bin/steam, which doesn't
+  # exist on NixOS — the Moonlight client then gets HTTP 503 when launching
+  # Steam. Ship a complete config with the NixOS system-profile path instead.
+  # /run/current-system/sw/bin/steam is stable across nixpkgs updates (unlike
+  # /nix/store/HASH/bin/steam, which would be GC'd on rebuild).
+  # Fields mirror moonshine v0.11.0's Config::default() serialization — the
+  # deserializer requires all StreamConfig sub-fields to be present.
+  steamCommand = "/run/current-system/sw/bin/steam";
+  defaultConfig = pkgs.writeText "moonshine-config.toml" ''
+    name = "Moonshine"
+    address = "0.0.0.0"
+    stream_timeout = 60
+    hdr_support = true
+
+    [webserver]
+    port = 47989
+    port_https = 47984
+    enable_pairing = true
+    certificate = "$HOME/.config/moonshine/cert.pem"
+    private_key = "$HOME/.config/moonshine/key.pem"
+
+    [stream]
+    port = 48010
+
+    [stream.video]
+    port = 47998
+    fec_percentage = 20
+    encrypt = false
+    log_frame_spikes = false
+
+    [stream.audio]
+    port = 48000
+
+    [stream.control]
+    port = 47999
+
+    [keyboard]
+    layout = "us"
+    variant = ""
+    model = ""
+
+    [[application]]
+    title = "Steam"
+    command = ["${steamCommand}", "steam://open/bigpicture"]
+
+    [[application_scanner]]
+    type = "steam"
+    library = "$HOME/.local/share/Steam"
+    command = ["${steamCommand}", "-bigpicture", "steam://rungameid/{game_id}"]
+  '';
+
+  # Seed the config on first run, and rewrite the legacy /usr/bin/steam path
+  # in any config that predates this fix. The sed is idempotent and only
+  # touches the exact upstream literal, so unrelated user edits are preserved.
+  seedConfig = pkgs.writeShellScript "moonshine-seed-config" ''
+    set -eu
+    CONFIG=/home/${user}/.config/moonshine/config.toml
+    if [ ! -f "$CONFIG" ]; then
+      ${pkgs.coreutils}/bin/install -o ${user} -g users -m 0600 ${defaultConfig} "$CONFIG"
+    fi
+    ${pkgs.gnused}/bin/sed -i 's|/usr/bin/steam|${steamCommand}|g' "$CONFIG"
+  '';
 in
 {
   config = {
@@ -44,6 +108,11 @@ in
     services.xserver.videoDrivers = [ "nvidia" ];
     hardware.graphics.enable = true;
     hardware.nvidia.open = true;  # open kernel modules (Turing+ / RTX)
+
+    # Steam client. programs.steam pulls in the FHS wrapper, 32-bit libs,
+    # gamepad udev rules, and firewall exceptions for Remote Play. Requires
+    # allowUnfree (already set above).
+    programs.steam.enable = true;
 
     # Keep the user's systemd user instance running without an interactive
     # login, so Moonshine can spawn game sessions on a headless VM.
@@ -91,6 +160,7 @@ in
         ExecStartPre = [
           "+${pkgs.coreutils}/bin/install -d -o ${user} -g users -m 0755 /home/${user}/.config"
           "+${pkgs.coreutils}/bin/install -d -o ${user} -g users -m 0700 /home/${user}/.config/moonshine"
+          "+${seedConfig}"
         ];
         # Moonshine requires the config path as a positional arg; it will
         # auto-create the file (Config::load_or_create) with defaults + pairing
