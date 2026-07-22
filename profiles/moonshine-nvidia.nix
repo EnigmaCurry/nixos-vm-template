@@ -164,6 +164,7 @@ let
   # then scp edits directly to ~/.config/retroarch/retroarch.cfg and relaunch
   # the RetroArch tile. Remove the marker to restore declarative behavior.
   retroarchCfg = ./moonshine/retroarch.cfg;
+  retroarchPlaylistScript = ./moonshine/generate-retroarch-playlists.bb;
   # RetroArch bundled with a curated set of libretro cores from the nix store,
   # so first-run players don't have to hit the Online Updater. `mupen64plus`
   # in nixpkgs points at libretro/mupen64plus-libretro-nx (Mupen64Plus-Next).
@@ -193,15 +194,44 @@ let
   ]);
   retroarchLaunch = pkgs.writeShellApplication {
     name = "moonshine-retroarch-launch";
-    runtimeInputs = [ pkgs.coreutils retroarchWithCores ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.babashka
+      retroarchWithCores
+    ];
     text = ''
       dest="$HOME/.config/retroarch/retroarch.cfg"
       marker="$HOME/.config/retroarch/.no-reset"
+      roms_dir="$HOME/emu/ROMs"
+      playlists_dir="$HOME/.config/retroarch/playlists"
+      cookie="$playlists_dir/.scan-fingerprint"
+
       if [ -f "$marker" ]; then
         echo "moonshine-retroarch-launch: $marker present, skipping declarative reset" >&2
       else
         install -D -m 0644 ${retroarchCfg} "$dest"
       fi
+
+      # Regenerate playlists when the ROM tree changes. Fingerprint = sha256
+      # of (path + mtime) for every file under the ROM dir, excluding the
+      # thumbnail cache. Fast path (no changes) is just find + sha256sum;
+      # slow path invokes the bb generator to rewrite all .lpl files.
+      if [ -d "$roms_dir" ]; then
+        fp=$(find "$roms_dir" -type f -not -path '*/.thumbnails/*' \
+               -printf '%p %T@\n' 2>/dev/null | sort | sha256sum | cut -c1-64)
+        prev=$(cat "$cookie" 2>/dev/null || true)
+        if [ "$prev" != "$fp" ]; then
+          echo "moonshine-retroarch-launch: ROM tree changed, regenerating playlists" >&2
+          mkdir -p "$playlists_dir"
+          bb ${retroarchPlaylistScript} \
+            "$roms_dir" \
+            "$playlists_dir" \
+            "${retroarchWithCores}/lib/retroarch/cores"
+          echo "$fp" > "$cookie"
+        fi
+      fi
+
       exec retroarch "$@"
     '';
   };
