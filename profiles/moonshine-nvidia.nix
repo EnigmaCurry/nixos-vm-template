@@ -206,12 +206,22 @@ let
       roms_dir="$HOME/emu/ROMs"
       playlists_dir="$HOME/.config/retroarch/playlists"
       cookie="$playlists_dir/.scan-fingerprint"
+      system_dir="$HOME/.config/retroarch/system"
 
       if [ -f "$marker" ]; then
         echo "moonshine-retroarch-launch: $marker present, skipping declarative reset" >&2
       else
         install -D -m 0644 ${retroarchCfg} "$dest"
       fi
+
+      # PPSSPP libretro ships only the .so; its data files (flash0/, fonts,
+      # ppge_atlas.zim, ...) live in the standalone `ppsspp` package under
+      # share/ppsspp/assets. The core looks for them at <system_dir>/PPSSPP,
+      # so without this link RetroArch pops "Core system files missing,
+      # expect bugs" on every PSP boot. Re-link on every launch so a ppsspp
+      # upgrade repoints to the new store path.
+      mkdir -p "$system_dir"
+      ln -sfn ${pkgs.ppsspp}/share/ppsspp/assets "$system_dir/PPSSPP"
 
       # Regenerate playlists when the ROM tree changes. Fingerprint = sha256
       # of (script store path + cores store path + path/mtime of every file
