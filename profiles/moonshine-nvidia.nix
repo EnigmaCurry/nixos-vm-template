@@ -214,12 +214,17 @@ let
       fi
 
       # Regenerate playlists when the ROM tree changes. Fingerprint = sha256
-      # of (path + mtime) for every file under the ROM dir, excluding the
-      # thumbnail cache. Fast path (no changes) is just find + sha256sum;
-      # slow path invokes the bb generator to rewrite all .lpl files.
+      # of (script store path + cores store path + path/mtime of every file
+      # under the ROM dir, excluding the thumbnail cache). Including the
+      # store paths means a script upgrade or core-set change auto-invalidates
+      # the cookie — otherwise stale .lpl files linger until the ROMs change.
+      # Fast path is just find + sha256sum; slow path invokes the bb generator.
       if [ -d "$roms_dir" ]; then
-        fp=$(find "$roms_dir" -type f -not -path '*/.thumbnails/*' \
-               -printf '%p %T@\n' 2>/dev/null | sort | sha256sum | cut -c1-64)
+        fp=$({ echo "${retroarchPlaylistScript}"
+               echo "${retroarchWithCores}"
+               find "$roms_dir" -type f -not -path '*/.thumbnails/*' \
+                 -printf '%p %T@\n' 2>/dev/null | sort
+             } | sha256sum | cut -c1-64)
         prev=$(cat "$cookie" 2>/dev/null || true)
         if [ "$prev" != "$fp" ]; then
           echo "moonshine-retroarch-launch: ROM tree changed, regenerating playlists" >&2
