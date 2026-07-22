@@ -159,9 +159,10 @@ let
   # nix store over ~/.config/retroarch/retroarch.cfg on every launch, so
   # RetroArch always starts from a known state. The cfg itself sets
   # config_save_on_exit = "false" so RetroArch won't rewrite it on quit.
-  # To iterate live without a rebuild: SSH into the VM, edit
-  # ~/.config/retroarch/retroarch.cfg, and launch retroarch directly
-  # (retroarch -c ~/.config/retroarch/retroarch.cfg) — bypasses this reset.
+  # To iterate on the cfg without a rebuild, place a marker file:
+  #   ssh user@HOST touch ~/.config/retroarch/.no-reset
+  # then scp edits directly to ~/.config/retroarch/retroarch.cfg and relaunch
+  # the RetroArch tile. Remove the marker to restore declarative behavior.
   retroarchCfg = ./moonshine/retroarch.cfg;
   # RetroArch bundled with a curated set of libretro cores from the nix store,
   # so first-run players don't have to hit the Online Updater. `mupen64plus`
@@ -195,7 +196,12 @@ let
     runtimeInputs = [ pkgs.coreutils retroarchWithCores ];
     text = ''
       dest="$HOME/.config/retroarch/retroarch.cfg"
-      install -D -m 0644 ${retroarchCfg} "$dest"
+      marker="$HOME/.config/retroarch/.no-reset"
+      if [ -f "$marker" ]; then
+        echo "moonshine-retroarch-launch: $marker present, skipping declarative reset" >&2
+      else
+        install -D -m 0644 ${retroarchCfg} "$dest"
+      fi
       exec retroarch "$@"
     '';
   };
