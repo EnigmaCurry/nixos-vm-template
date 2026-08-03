@@ -12,10 +12,13 @@
 #   One share per line, whitespace-separated:
 #     <mount-point>  <//server/share>  [extra,mount,opts]
 #   Blank lines and lines starting with `#` are ignored.
-#   Example:
+#   Examples:
 #     /var/mnt/roms    //nas.local/roms
 #     /var/mnt/media   //10.0.0.5/media  ro
-#     /var/mnt/immich  //nas.local/immich  noperm     # docker-friendly
+#     # docker container running as UID 1000 (perms enforced client-side):
+#     /var/mnt/immich  //nas.local/immich  uid=1000,gid=1000,forceuid,forcegid
+#     # fully open — any host/container UID can read/write:
+#     /var/mnt/scratch //nas.local/scratch  uid=0,gid=0,file_mode=0666,dir_mode=0777,noperm
 #
 # Mount points must live on a writable filesystem. On immutable /
 # semi-mutable VMs the root filesystem is read-only, so paths under
@@ -23,13 +26,23 @@
 # by convention (writable, persistent, off /var). Paths under `/home`
 # and `/tmp` also work.
 #
-# By default files present as `user:users` (uid 1001 / gid 100) with mode
-# 0664/0775, so only the regular user or processes in gid 100 can write.
-# For docker containers (which usually run as their own UID), add `noperm`
-# to the extras column — it disables local permission checks so any UID on
-# the host or in a container can access the mount. The server's ACL still
-# applies. Other useful CIFS options: `ro`, `vers=3.0`, `nobrl` (needed for
-# some SQLite workloads).
+# Default ownership: `user:users` (uid 1001 / gid 100), mode 0664/0775 —
+# only the regular user or processes in gid 100 can write. Common overrides
+# (put them in the extras column; later values win over the script defaults):
+#
+#   uid=N,gid=N,forceuid,forcegid   present as UID N — perms still enforced.
+#                                    Use for a docker container that runs as
+#                                    a specific UID; that container writes,
+#                                    other UIDs get read-only per mode bits.
+#   noperm                           disable client-side perm checks — any
+#                                    UID can rw. Server ACL still applies.
+#                                    Use for multi-container / mixed-UID.
+#   file_mode=NNNN,dir_mode=NNNN     override the 0664/0775 defaults.
+#   ro                               read-only mount.
+#   vers=3.0                         force SMB protocol version.
+#   nobrl                            no byte-range locks (SQLite over CIFS).
+#
+# CIFS uid=/gid= are numeric only (no user/group names).
 #
 # On boot, samba-client-mounts reads the shares file and generates a
 # `<escaped>.mount` + `<escaped>.automount` unit pair per line under
