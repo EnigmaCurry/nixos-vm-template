@@ -96,6 +96,42 @@
          count)
     0))
 
+(def ^:private samba-credentials-template
+  "Commented samba_credentials seeded when the samba-mount profile is selected.
+  All-commented = no credentials = the mount generator refuses to run."
+  (str/join "\n"
+            ["# CIFS/SMB mount credentials — mount.cifs credentials-file format."
+             "# Consumed by the samba-mount profile (see profiles/samba-mount.nix)."
+             "# File is mode 0600 — safe to store plaintext."
+             "#"
+             "# Uncomment and fill in to enable mounts. Apply changes with:"
+             "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
+             "#"
+             "# Example:"
+             "#   username=alice"
+             "#   password=hunter2"
+             "#   domain=WORKGROUP   # optional"
+             ""]))
+
+(def ^:private samba-client-shares-template
+  "Commented samba_client_shares seeded when the samba-mount profile is selected.
+  All-commented = no shares = the mount generator is a no-op."
+  (str/join "\n"
+            ["# CIFS/SMB client mounts — one share per line, whitespace-separated:"
+             "#   <mount-point>  <//server/share>  [extra,mount,opts]"
+             "#"
+             "# Consumed by the samba-mount profile. Each entry becomes a systemd"
+             "# .automount unit so an unreachable server never blocks boot."
+             "# Credentials come from samba_credentials (same directory)."
+             "#"
+             "# Apply changes with:"
+             "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
+             "#"
+             "# Examples:"
+             "#   /home/user/ROMs  //nas.local/roms"
+             "#   /mnt/media       //10.0.0.5/media  ro"
+             ""]))
+
 (defn- write-authorized-keys!
   "Port of init_machine's per-account authorized_keys handling. `account` is
   \"admin\" or \"user\"; `header-lines` are the comment header; `preset` are
@@ -205,6 +241,7 @@
     ;; image) so they stay visible/editable. Remove any you don't want exposed.
     (let [profs (set (map str/trim (str/split (or profile "") #",")))
           nas? (contains? profs "nas")
+          samba-mount? (contains? profs "samba-mount")
           moonshine? (contains? profs "moonshine-nvidia")
           sunshine? (contains? profs "sunshine-plasma-nvidia")
           ;; Both Moonlight-protocol servers use the same well-known ports and
@@ -260,7 +297,18 @@
                               "# function (00.1) so HDMI audio works. `just create` should have"
                               "# offered a picker; edit here and run `just upgrade` to change."
                               ""]))
-        (println (format "Created: %s/pci_devices (edit to pass PCI devices through)" md))))
+        (println (format "Created: %s/pci_devices (edit to pass PCI devices through)" md)))
+      ;; samba-mount — seed commented placeholders so users can discover the
+      ;; identity files without reading the profile source. All-commented = no
+      ;; mounts (the mount generator skips missing/empty credentials).
+      (when samba-mount?
+        (when-not (fs/exists? (str md "/samba_credentials"))
+          (spit (str md "/samba_credentials") samba-credentials-template)
+          (fs/set-posix-file-permissions (str md "/samba_credentials") "rw-------")
+          (println (format "Created: %s/samba_credentials (edit to add mount.cifs credentials)" md)))
+        (when-not (fs/exists? (str md "/samba_client_shares"))
+          (spit (str md "/samba_client_shares") samba-client-shares-template)
+          (println (format "Created: %s/samba_client_shares (edit to add CIFS mounts)" md)))))
     ;; resolv.conf
     (when-not (fs/exists? (str md "/resolv.conf"))
       (spit (str md "/resolv.conf")
