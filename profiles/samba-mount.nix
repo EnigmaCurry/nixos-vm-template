@@ -13,14 +13,23 @@
 #     <mount-point>  <//server/share>  [extra,mount,opts]
 #   Blank lines and lines starting with `#` are ignored.
 #   Example:
-#     /var/mnt/roms   //nas.local/roms
-#     /var/mnt/media  //10.0.0.5/media  ro
+#     /var/mnt/roms    //nas.local/roms
+#     /var/mnt/media   //10.0.0.5/media  ro
+#     /var/mnt/immich  //nas.local/immich  noperm     # docker-friendly
 #
 # Mount points must live on a writable filesystem. On immutable /
 # semi-mutable VMs the root filesystem is read-only, so paths under
 # `/`, `/opt`, `/srv`, `/mnt` etc. can't be created. Use `/var/mnt/*`
 # by convention (writable, persistent, off /var). Paths under `/home`
 # and `/tmp` also work.
+#
+# By default files present as `user:users` (uid 1001 / gid 100) with mode
+# 0664/0775, so only the regular user or processes in gid 100 can write.
+# For docker containers (which usually run as their own UID), add `noperm`
+# to the extras column — it disables local permission checks so any UID on
+# the host or in a container can access the mount. The server's ACL still
+# applies. Other useful CIFS options: `ro`, `vers=3.0`, `nobrl` (needed for
+# some SQLite workloads).
 #
 # On boot, samba-client-mounts reads the shares file and generates a
 # `<escaped>.mount` + `<escaped>.automount` unit pair per line under

@@ -129,12 +129,18 @@
              "# /srv etc. can't be used. Use /var/mnt/* by convention (writable,"
              "# persistent, on the /var disk). Paths under /home and /tmp also work."
              "#"
+             "# Files present as user:users (uid 1001/gid 100), mode 0664/0775 by"
+             "# default. For docker containers that run as their own UID, add"
+             "# `noperm` to the extras column — it disables local permission"
+             "# checks so any UID (host or container) can access the mount."
+             "#"
              "# Apply changes with:"
              "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
              "#"
              "# Examples:"
-             "#   /var/mnt/roms   //nas.local/roms"
-             "#   /var/mnt/media  //10.0.0.5/media  ro"
+             "#   /var/mnt/roms    //nas.local/roms"
+             "#   /var/mnt/media   //10.0.0.5/media  ro"
+             "#   /var/mnt/immich  //nas.local/immich  noperm     # docker-friendly"
              ""]))
 
 (defn- write-authorized-keys!
