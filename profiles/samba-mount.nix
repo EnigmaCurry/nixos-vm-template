@@ -13,21 +13,21 @@
 #     <mount-point>  <//server/share>  [extra,mount,opts]
 #   Blank lines and lines starting with `#` are ignored.
 #   Example:
-#     /mnt/roms   //nas.local/roms
-#     /mnt/media  //10.0.0.5/media  ro
+#     /var/mnt/roms   //nas.local/roms
+#     /var/mnt/media  //10.0.0.5/media  ro
 #
-# Mount points should live under /mnt by convention. On immutable /
-# semi-mutable VMs the root filesystem is read-only, so arbitrary paths
-# like /opt/foo can't be created — this profile mounts /mnt as a tmpfs
-# specifically so the generator can create anchor directories there.
-# Paths under /home and /var also work (they're on the /var disk).
+# Mount points must live on a writable filesystem. On immutable /
+# semi-mutable VMs the root filesystem is read-only, so paths under
+# `/`, `/opt`, `/srv`, `/mnt` etc. can't be created. Use `/var/mnt/*`
+# by convention (writable, persistent, off /var). Paths under `/home`
+# and `/tmp` also work.
 #
 # On boot, samba-client-mounts reads the shares file and generates a
 # `<escaped>.mount` + `<escaped>.automount` unit pair per line under
 # /run/systemd/system, then starts the automount units. Access to the mount
 # point triggers the actual CIFS mount on demand, so an unreachable NAS
 # never blocks boot. Each mount point is created (chown to the regular
-# user) if it doesn't already exist, so `/mnt/roms` etc. just work.
+# user) if it doesn't already exist, so `/var/mnt/roms` etc. just work.
 #
 # Put both files under machines/<name>/ (or wherever your workflow keeps
 # per-machine identity) and they'll be synced to /var/identity/ during
@@ -40,19 +40,6 @@ let
 in
 {
   environment.systemPackages = [ pkgs.cifs-utils ];
-
-  # /mnt as tmpfs so the mount generator can create mount points under it on
-  # a read-only root (immutable + semi-mutable). Mount points are just anchor
-  # points that systemd attaches automounts to — no persistent state needed.
-  # On mutable / LXC (`vm.mutable = true`) / is already writable so this is
-  # skipped and any existing /mnt content is preserved.
-  fileSystems = lib.mkIf (!config.vm.mutable) {
-    "/mnt" = {
-      device = "tmpfs";
-      fsType = "tmpfs";
-      options = [ "mode=0755" "nosuid" "nodev" "size=1M" ];
-    };
-  };
 
   systemd.services.samba-client-mounts = {
     description = "Generate CIFS mount+automount units from /var/identity/samba_client_shares";
