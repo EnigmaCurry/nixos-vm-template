@@ -124,12 +124,18 @@
              "# .automount unit so an unreachable server never blocks boot."
              "# Credentials come from samba_credentials (same directory)."
              "#"
+             "# Mount points should live under /mnt by convention. On immutable /"
+             "# semi-mutable VMs the root filesystem is read-only, so arbitrary"
+             "# paths like /opt/foo can't be created — the samba-mount profile"
+             "# provides /mnt as a tmpfs so anchor directories can be created"
+             "# there. Paths under /home and /var also work."
+             "#"
              "# Apply changes with:"
              "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
              "#"
              "# Examples:"
-             "#   /home/user/ROMs  //nas.local/roms"
-             "#   /mnt/media       //10.0.0.5/media  ro"
+             "#   /mnt/roms   //nas.local/roms"
+             "#   /mnt/media  //10.0.0.5/media  ro"
              ""]))
 
 (defn- write-authorized-keys!
