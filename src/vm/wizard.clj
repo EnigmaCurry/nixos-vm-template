@@ -17,24 +17,23 @@
                                          (:pve-host cfg) cmd]))
        (catch Exception _ "")))
 
-(defn- pve-list-display-pci
-  "Query PVE for PCI devices in display classes (0x03xx) plus any multimedia
-  device (0x04xx) sharing the same BB:SS slot — for NVIDIA GPUs that's the
-  HDMI audio function. Returns [{:id :label :group} ...] sorted by id.
-  Returns [] on any failure (no PVE, no lspci output, network error)."
-  [cfg]
+(defn- pci-devices-by-class-prefix
+  "Query PVE for PCI devices whose :class starts with `prefix` (e.g. \"0x03\"
+  for display, \"0x02\" for network). Returns [{:id :label :group} ...] sorted
+  by id. `extra-match?` is an optional predicate that runs against every
+  device; matched devices are unioned with the class-prefix hits (used e.g. to
+  pick up HDMI-audio siblings of a GPU). Returns [] on any query failure."
+  [cfg prefix & [extra-match?]]
   (let [out (pve-ssh cfg (format "pvesh get /nodes/%s/hardware/pci --pci-class-blacklist \"\" --output-format json"
                                  (:pve-node cfg)))]
     (if (str/blank? out)
       []
       (try
         (let [all (json/parse-string out true)
-              slot (fn [d] (second (re-find #"^[0-9a-fA-F]+:([0-9a-fA-F]+:[0-9a-fA-F]+)\." (or (:id d) ""))))
-              display-class? #(str/starts-with? (or (:class %) "") "0x03")
-              multimedia?    #(str/starts-with? (or (:class %) "") "0x04")
-              display-slots  (->> all (filter display-class?) (keep slot) set)
-              matches?       #(or (display-class? %)
-                                  (and (multimedia? %) (contains? display-slots (slot %))))]
+              class-hit? #(str/starts-with? (or (:class %) "") prefix)
+              matches?   (if extra-match?
+                           #(or (class-hit? %) (extra-match? all %))
+                           class-hit?)]
           (->> all
                (filter matches?)
                (map (fn [d]
@@ -49,6 +48,24 @@
                (sort-by :id)
                vec))
         (catch Exception _ [])))))
+
+(defn- pve-list-display-pci
+  "Display-class devices (0x03xx) plus any multimedia device (0x04xx) sharing
+  the same BB:SS slot — for NVIDIA GPUs that's the HDMI audio function."
+  [cfg]
+  (let [slot (fn [d] (second (re-find #"^[0-9a-fA-F]+:([0-9a-fA-F]+:[0-9a-fA-F]+)\." (or (:id d) ""))))
+        display-class? #(str/starts-with? (or (:class %) "") "0x03")
+        extra-match? (fn [all d]
+                       (and (str/starts-with? (or (:class d) "") "0x04")
+                            (contains? (->> all (filter display-class?) (keep slot) set)
+                                       (slot d))))]
+    (pci-devices-by-class-prefix cfg "0x03" extra-match?)))
+
+(defn- pve-list-network-pci
+  "Network-class devices (0x02xx: Ethernet, wireless, etc.) — candidates for
+  NIC passthrough with the nftables profile."
+  [cfg]
+  (pci-devices-by-class-prefix cfg "0x02"))
 
 (def ^:private nas-passwd-template
   "Commented NAS users file (mode 0600) seeded for nas containers. Shared by
@@ -504,10 +521,13 @@ done 2>/dev/null"]
                                 (if (str/blank? v) "30G" v))
                      "30G")
           _ (println (format "Disk size: %s" var-size))
-          ;; ── PCI passthrough (streaming profiles only, proxmox KVM only) ──
-          ;; moonshine-nvidia and sunshine-plasma-nvidia both need a discrete
-          ;; NVIDIA GPU passed through. Exclusivity is enforced upstream in
-          ;; profile.clj, so at most one of these ever appears here.
+          ;; ── PCI passthrough (proxmox KVM only) ──
+          ;; Streaming profiles (moonshine-nvidia / sunshine-plasma-nvidia) need
+          ;; a discrete NVIDIA GPU. Exclusivity is enforced upstream in
+          ;; profile.clj, so at most one streaming profile appears here.
+          ;; The nftables profile expects a PCI-passed NIC. Both pickers can
+          ;; fire in the same wizard run and their picks are concatenated into
+          ;; the pci_devices file.
           profs-set (set (map str/trim (str/split (or profile "") #",")))
           streaming? (boolean (or (contains? profs-set "moonshine-nvidia")
                                   (contains? profs-set "sunshine-plasma-nvidia")))
@@ -515,36 +535,41 @@ done 2>/dev/null"]
                             (contains? profs-set "moonshine-nvidia") "moonshine-nvidia"
                             (contains? profs-set "sunshine-plasma-nvidia") "sunshine-plasma-nvidia"
                             :else "")
-          pci-selected
-          (when (and streaming? (= backend "proxmox"))
+          nftables? (contains? profs-set "nftables")
+          pick-pci
+          (fn [heading devs pre-select-groupless?]
             (println)
-            (println (format "PCI passthrough (%s requires a discrete NVIDIA GPU):" streaming-label))
-            (let [devs (pve-list-display-pci cfg)]
-              (cond
-                (empty? devs)
-                (do (println (str "  No display-class PCI devices found on " (or (:pve-node cfg) "PVE")
-                                  " (or query failed)."))
-                    (println (format "  Edit %s/pci_devices by hand after creation." md))
-                    nil)
-                :else
-                (let [labels (mapv :label devs)
-                      ;; Default-preselect display-class devices only; users can
-                      ;; add or remove the audio sibling(s) themselves.
-                      default (->> devs
-                                   (filter #(seq (:group %)))  ;; always allowed to preselect
-                                   (mapv :label))
-                      picks (if (seq default)
-                              (prompt/select "Select PCI devices to pass through:" labels default)
-                              (prompt/select "Select PCI devices to pass through:" labels))
-                      ids (->> picks
-                               (map (fn [lbl]
-                                      (some #(when (= (:label %) lbl) (:id %)) devs)))
-                               (remove nil?)
-                               vec)]
-                  (println (if (seq ids)
-                             (format "PCI passthrough: %s" (str/join ", " ids))
-                             "PCI passthrough: (none — edit pci_devices to add later)"))
-                  ids))))
+            (println heading)
+            (cond
+              (empty? devs)
+              (do (println (str "  No matching PCI devices found on " (or (:pve-node cfg) "PVE")
+                                " (or query failed)."))
+                  (println (format "  Edit %s/pci_devices by hand after creation." md))
+                  [])
+              :else
+              (let [labels (mapv :label devs)
+                    default (->> devs
+                                 (filter #(or pre-select-groupless? (seq (:group %))))
+                                 (mapv :label))
+                    picks (if (seq default)
+                            (prompt/select "Select PCI devices to pass through:" labels default)
+                            (prompt/select "Select PCI devices to pass through:" labels))
+                    ids (->> picks
+                             (map (fn [lbl]
+                                    (some #(when (= (:label %) lbl) (:id %)) devs)))
+                             (remove nil?)
+                             vec)]
+                (println (if (seq ids)
+                           (format "PCI passthrough: %s" (str/join ", " ids))
+                           "PCI passthrough: (none — edit pci_devices to add later)"))
+                ids)))
+          gpu-picked (when (and streaming? (= backend "proxmox"))
+                       (pick-pci (format "PCI passthrough (%s requires a discrete NVIDIA GPU):" streaming-label)
+                                 (pve-list-display-pci cfg) false))
+          nic-picked (when (and nftables? (= backend "proxmox"))
+                       (pick-pci "PCI passthrough (nftables profile — pick the NIC(s) to hand to the guest):"
+                                 (pve-list-network-pci cfg) false))
+          pci-selected (vec (distinct (concat gpu-picked nic-picked)))
           ;; ── network ──
           _ (println)
           net-result (if (#{"proxmox" "proxmox-lxc"} backend)
@@ -683,8 +708,9 @@ done 2>/dev/null"]
           (spit (str md "/nfs_clients") nfs-clients-template)
           (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md))))
       ;; PCI passthrough — overwrite the placeholder init-machine seeded when
-      ;; the streaming wizard picker actually chose devices.
-      (when (and streaming? (= backend "proxmox") (seq pci-selected))
+      ;; a wizard picker (GPU for streaming, NIC for nftables) actually chose
+      ;; devices.
+      (when (and (or streaming? nftables?) (= backend "proxmox") (seq pci-selected))
         (spit (str md "/pci_devices")
               (str/join "\n" (concat
                               ["# Proxmox PCI passthrough — one --hostpciN entry per line."

@@ -113,6 +113,55 @@
              "#   domain=WORKGROUP   # optional"
              ""]))
 
+(def ^:private nftables-conf-template
+  "Commented nftables ruleset seeded when the nftables profile is selected. The
+  loader unit has ConditionPathExists on this file, so an all-comment file is
+  valid `nft -f` input (no rules -> the kernel has an empty ruleset)."
+  (str/join "\n"
+            ["#!/usr/sbin/nft -f"
+             "# nftables ruleset for this VM. Loaded at boot by the nftables-identity"
+             "# systemd service from /var/identity/nftables.conf. Same syntax as"
+             "# /etc/nftables.conf (`man nft`)."
+             "#"
+             "# Apply changes with:"
+             "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
+             "#"
+             "# The nftables profile disables NixOS's iptables firewall entirely,"
+             "# so any tcp_ports/udp_ports files in the machine dir are ignored."
+             "# If this file has a syntax error the loader FAILS HARD (no fallback)."
+             "#"
+             "# Starter router example (uncomment to use). Assumes a PCI-passed WAN"
+             "# NIC named `wan0` and a LAN bridge `br-lan`:"
+             "#"
+             "# flush ruleset"
+             "#"
+             "# table inet filter {"
+             "#   chain input {"
+             "#     type filter hook input priority filter; policy drop;"
+             "#     ct state { established, related } accept"
+             "#     iifname lo accept"
+             "#     iifname \"br-lan\" accept"
+             "#     ip protocol icmp accept"
+             "#     tcp dport 22 accept"
+             "#   }"
+             "#   chain forward {"
+             "#     type filter hook forward priority filter; policy drop;"
+             "#     ct state { established, related } accept"
+             "#     iifname \"br-lan\" oifname \"wan0\" accept"
+             "#   }"
+             "#   chain output {"
+             "#     type filter hook output priority filter; policy accept;"
+             "#   }"
+             "# }"
+             "#"
+             "# table ip nat {"
+             "#   chain postrouting {"
+             "#     type nat hook postrouting priority srcnat; policy accept;"
+             "#     oifname \"wan0\" masquerade"
+             "#   }"
+             "# }"
+             ""]))
+
 (def ^:private samba-client-shares-template
   "Commented samba_client_shares seeded when the samba-mount profile is selected.
   All-commented = no shares = the mount generator is a no-op."
@@ -261,17 +310,27 @@
     (let [profs (set (map str/trim (str/split (or profile "") #",")))
           nas? (contains? profs "nas")
           samba-mount? (contains? profs "samba-mount")
+          nftables? (contains? profs "nftables")
           moonshine? (contains? profs "moonshine-nvidia")
           sunshine? (contains? profs "sunshine-plasma-nvidia")
           ;; Both Moonlight-protocol servers use the same well-known ports and
           ;; both need Proxmox GPU passthrough. Exclusivity is enforced upstream
           ;; in profile.clj, so at most one of these is ever true.
           streaming? (or moonshine? sunshine?)
-          streaming-label (cond moonshine? "moonshine" sunshine? "sunshine" :else "")]
+          streaming-label (cond moonshine? "moonshine" sunshine? "sunshine" :else "")
+          ;; Any profile that consumes a --hostpciN entry seeds the pci_devices
+          ;; placeholder (currently: streaming + nftables). Users can also add
+          ;; the file by hand for any Proxmox VM regardless of profile.
+          pci-profile? (or streaming? nftables?)]
       (when-not (fs/exists? (str md "/tcp_ports"))
         (spit (str md "/tcp_ports")
               (str/join "\n" (concat ["# TCP ports to open in firewall (one per line)"
                                       (format "# Run 'just upgrade %s' to apply changes." name)
+                                      "#"
+                                      "# NOTE: this file has no effect when the alternative nftables"
+                                      "# profile is installed — that profile disables the iptables"
+                                      "# firewall and loads its ruleset from"
+                                      "# /var/identity/nftables.conf instead."
                                       "22" "80" "443"]
                                      (when nas?
                                        ["# nas profile — SMB (445), NFSv4 (2049), copyparty web+WebDAV (3923), WSD (5357):"
@@ -288,7 +347,12 @@
       (when-not (fs/exists? (str md "/udp_ports"))
         (spit (str md "/udp_ports")
               (str/join "\n" (concat ["# UDP ports to open in firewall (one per line)"
-                                      (format "# Run 'just upgrade %s' to apply changes." name)]
+                                      (format "# Run 'just upgrade %s' to apply changes." name)
+                                      "#"
+                                      "# NOTE: this file has no effect when the alternative nftables"
+                                      "# profile is installed — that profile disables the iptables"
+                                      "# firewall and loads its ruleset from"
+                                      "# /var/identity/nftables.conf instead."]
                                      (when nas?
                                        ["# nas profile — mDNS (5353), WS-Discovery (3702):"
                                         "5353" "3702"])
@@ -300,23 +364,39 @@
         (println (format "Created: %s/udp_ports%s" md
                          (str/join "" [(when nas? " (nas)")
                                        (when streaming? (str " (" streaming-label ")"))]))))
-      ;; pci_devices — seeded for the streaming profiles (Proxmox GPU passthrough).
-      ;; Users can also add this file for any Proxmox VM to pass through PCI
-      ;; devices without a streaming profile.
-      (when (and streaming? (not (fs/exists? (str md "/pci_devices"))))
+      ;; pci_devices — seeded for profiles that consume Proxmox PCI passthrough
+      ;; (streaming = GPU, nftables = NIC). Users can also add this file for
+      ;; any Proxmox VM regardless of profile.
+      (when (and pci-profile? (not (fs/exists? (str md "/pci_devices"))))
         (spit (str md "/pci_devices")
-              (str/join "\n" ["# Proxmox PCI passthrough — one --hostpciN entry per line."
-                              "# See `man qm` for the full hostpci syntax."
-                              "#"
-                              "# Common forms:"
-                              "#   0000:01:00.0"
-                              "#   0000:01:00,pcie=1,x-vga=1"
-                              "#"
-                              "# For NVIDIA GPUs, pass BOTH the VGA function (00.0) AND the audio"
-                              "# function (00.1) so HDMI audio works. `just create` should have"
-                              "# offered a picker; edit here and run `just upgrade` to change."
-                              ""]))
+              (str/join "\n"
+                        (concat
+                         ["# Proxmox PCI passthrough — one --hostpciN entry per line."
+                          "# See `man qm` for the full hostpci syntax."
+                          "#"
+                          "# Common forms:"
+                          "#   0000:01:00.0"
+                          "#   0000:01:00,pcie=1,x-vga=1"
+                          "#"]
+                         (when streaming?
+                           ["# For NVIDIA GPUs, pass BOTH the VGA function (00.0) AND the audio"
+                            "# function (00.1) so HDMI audio works. `just create` should have"
+                            "# offered a picker; edit here and run `just upgrade` to change."
+                            "#"])
+                         (when nftables?
+                           ["# For NIC passthrough, pass just the network function (e.g. 0000:04:00.0)."
+                            "# The nftables profile expects this NIC to appear in the guest so its"
+                            "# rules in /var/identity/nftables.conf can act on it. `just create`"
+                            "# should have offered a picker; edit here and run `just upgrade`."
+                            "#"])
+                         [""])))
         (println (format "Created: %s/pci_devices (edit to pass PCI devices through)" md)))
+      ;; nftables.conf — seed a commented placeholder when the nftables profile
+      ;; is selected. The nftables-identity systemd unit has ConditionPathExists
+      ;; on this file, so a commented-only file is safe (empty ruleset).
+      (when (and nftables? (not (fs/exists? (str md "/nftables.conf"))))
+        (spit (str md "/nftables.conf") nftables-conf-template)
+        (println (format "Created: %s/nftables.conf (edit to define the nftables ruleset)" md)))
       ;; samba-mount — seed commented placeholders so users can discover the
       ;; identity files without reading the profile source. All-commented = no
       ;; mounts (the mount generator skips missing/empty credentials).
