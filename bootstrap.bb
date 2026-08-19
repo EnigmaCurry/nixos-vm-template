@@ -730,7 +730,15 @@
 (defn dev-create-vm!
   "Development create: configure + build a VM locally from source via `just create`."
   [dev-dir backend env]
-  (let [vm-name (wiz/ask "VM name:" :default "nixos")]
+  (let [env-name (some-> (System/getenv "NIXOS_VM_NAME") str/trim not-empty)
+        vm-name (or env-name (wiz/ask "VM name:" :default "nixos"))
+        env-vmid (some-> (System/getenv "PVE_VMID") str/trim not-empty)
+        machine-dir (str (get env :machines-dir) "/" vm-name)]
+    ;; Pre-seed the vmid file so vm.cli skips its own VMID prompt.
+    (when (and (= backend "proxmox") env-vmid
+               (not (.exists (io/file machine-dir "vmid"))))
+      (.mkdirs (io/file machine-dir))
+      (spit (str machine-dir "/vmid") env-vmid))
     (println)
     (println (format "Configuring VM '%s' on %s (building from source)..." vm-name backend))
     (println "(Entering the flake dev shell; the first build may take a while.)")
@@ -784,19 +792,37 @@
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))))))))
 
+(defn- resolve-env-action
+  "Map NIXOS_VM_ACTION values (e.g. \"create\", \"manage\", \"exit\") to the
+  wizard's canonical action strings, or nil if the env var is unset."
+  []
+  (when-let [v (some-> (System/getenv "NIXOS_VM_ACTION") str/lower-case str/trim not-empty)]
+    (cond
+      (str/starts-with? v "create") "Create VM"
+      (str/starts-with? v "manage") "Manage VMs"
+      (str/starts-with? v "exit")   "Exit"
+      :else (do (println (format "Unknown NIXOS_VM_ACTION: %s" v))
+                (System/exit 1)))))
+
 (defn run-development! []
   (let [dev-dir (resolve-dev-dir!)
-        {:keys [backend env]} (discover-backend!)]
-    (loop []
-      (section-break!)
-      (let [action (try (wiz/choose "What would you like to do?"
-                                    ["Create VM" "Manage VMs" "Exit"])
-                        (catch Exception _ "Exit"))]
+        {:keys [backend env]} (discover-backend!)
+        env-action (resolve-env-action)]
+    (if env-action
+      (case env-action
+        "Create VM"  (dev-create-vm! dev-dir backend env)
+        "Manage VMs" (dev-manage-vms! dev-dir backend env)
+        "Exit"       (println "Bye."))
+      (loop []
         (section-break!)
-        (case action
-          "Create VM"  (do (dev-create-vm! dev-dir backend env) (recur))
-          "Manage VMs" (do (dev-manage-vms! dev-dir backend env) (recur))
-          "Exit"       (println "Bye."))))))
+        (let [action (try (wiz/choose "What would you like to do?"
+                                      ["Create VM" "Manage VMs" "Exit"])
+                          (catch Exception _ "Exit"))]
+          (section-break!)
+          (case action
+            "Create VM"  (do (dev-create-vm! dev-dir backend env) (recur))
+            "Manage VMs" (do (dev-manage-vms! dev-dir backend env) (recur))
+            "Exit"       (println "Bye.")))))))
 
 ;; ─── Main ───────────────────────────────────────────────────────────────────
 
