@@ -185,10 +185,6 @@ in
         sway-home.homeModules.nixos-vm-template
       ];
 
-      # Home Manager modules that gate on hm.home.stateVersion
-      # (e.g. programs.swaylock) need this defined.
-      home.stateVersion = config.system.stateVersion;
-
       # Install packages from sway-home
       # On mutable VMs, include home-manager CLI for hm-upgrade
       home.packages = import "${sway-home}/modules/packages.nix" { inherit pkgs; }
