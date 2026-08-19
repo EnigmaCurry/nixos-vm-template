@@ -57,6 +57,12 @@
     after = [ "cloud-init.service" ];
   };
 
+  # cloud-template skips this repo's identity-injection flow, so the usual
+  # /var/identity/tcp_ports file isn't present and modules/firewall-identity.nix
+  # opens nothing. Open port 22 directly here so clones are reachable via SSH
+  # out of the box.
+  networking.firewall.allowedTCPPorts = [ 22 ];
+
   # qemu-guest-agent lets PVE report the VM's IP + trigger clean shutdowns.
   services.qemuGuest.enable = true;
 
