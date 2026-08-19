@@ -52,11 +52,15 @@
   (validate! cfg)
   (zero? (:exit (proc/capture-result (concat (ssh-base cfg) [(:pve-host cfg) cmd])))))
 
+(def ^:private rsync-ssh-cmd
+  "SSH command string used by rsync -e. IgnoreUnknown covers Debian's
+  ssh_config GSSAPI directives which Nix's Kerberos-less openssh rejects."
+  (str "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+       " -o IgnoreUnknown=GSSAPIAuthentication,GSSAPIDelegateCredentials,GSSAPIKeyExchange"))
+
 (defn pve-rsync! [cfg src dst]
   (validate! cfg)
-  (proc/run! ["rsync" "-avz" "--progress" "-e"
-              "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-              src dst]))
+  (proc/run! ["rsync" "-avz" "--progress" "-e" rsync-ssh-cmd src dst]))
 
 (defn pve-rsync-noown!
   "Like pve-rsync! but does NOT preserve source owner/group — the remote (root)
@@ -66,8 +70,7 @@
   [cfg src dst]
   (validate! cfg)
   (proc/run! ["rsync" "-avz" "--no-owner" "--no-group" "--progress" "-e"
-              "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-              src dst]))
+              rsync-ssh-cmd src dst]))
 
 (defn ssh-host [cfg] (:pve-host cfg))
 (defn ssh-prefix [cfg] (ssh-base cfg))

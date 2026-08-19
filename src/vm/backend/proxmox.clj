@@ -53,7 +53,8 @@
 (defn- pve-rsync! [cfg src dst]
   (validate! cfg)
   (proc/run! ["rsync" "-avz" "--progress" "-e"
-              "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+              (str "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+                   " -o IgnoreUnknown=GSSAPIAuthentication,GSSAPIDelegateCredentials,GSSAPIKeyExchange")
               src dst]))
 
 ;; ─── storage-type-aware disk format ──────────────────────────────────────────
