@@ -25,6 +25,8 @@ let
   '';
 in
 {
+  virtualisation.diskSize = lib.mkForce 16384;
+
   # On mutable VMs, provide hm-upgrade script (overrides sway-home's alias)
   environment.systemPackages = lib.mkIf config.vm.mutable [ hmUpgradeScript ];
 
