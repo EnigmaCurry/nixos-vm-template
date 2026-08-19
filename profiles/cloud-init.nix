@@ -33,31 +33,28 @@
   # The nixos-generators qcow2 build baked cloud-init state into the image
   # (obj.pkl / instance-id in /var/lib/cloud) AND generated SSH host keys.
   # Both are per-VM identity that must NOT be shared across clones:
-  # * With baked instance-id, cloud-init on every clone sees a "previous iid
+  # * With a baked instance-id, cloud-init on every clone sees a "previous iid
   #   matches", denies boot-event network updates, and skips once-per-instance
   #   modules (users, passwords, ssh authorized keys) → user-data is ignored.
   # * With baked SSH host keys, every clone advertises the same host identity.
   #
-  # This oneshot runs BEFORE cloud-init.service and, on the first boot after
-  # a clone, wipes both. The marker file /var/lib/nixos-vm-template.first-boot-done
-  # is created after wiping; subsequent boots on the same VM see the marker
-  # and skip. Because we never *declare* the marker in any Nix module, the
-  # built image doesn't ship with it — so a fresh clone always finds it
-  # missing on its first boot.
-  systemd.services.cloud-init-clone-clean = {
-    description = "Wipe baked-in cloud-init/SSH state on first boot of a clone";
-    wantedBy = [ "cloud-init.target" ];
-    before = [ "cloud-init.service" ];
-    unitConfig.ConditionPathExists = "!/var/lib/nixos-vm-template.first-boot-done";
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      rm -rf /var/lib/cloud/*
-      rm -f  /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
-      mkdir -p /var/lib
-      touch /var/lib/nixos-vm-template.first-boot-done
-    '';
-  };
+  # A systemd oneshot doesn't work here because cloud-init-local.service (the
+  # first cloud-init stage) runs early and re-populates /var/lib/cloud from the
+  # seed drive before we can order our unit ahead of it. An activation script,
+  # by contrast, runs during stage 2 boot before ANY service — guaranteed to
+  # execute before cloud-init sees the disk.
+  #
+  # Marker file /var/lib/nixos-vm-template.first-boot-done gates it; on
+  # subsequent boots the marker exists and the cleanup is skipped. Because we
+  # never *declare* the marker in any Nix module, the built image doesn't ship
+  # with it, so a fresh clone always finds it missing on its first boot.
+  system.activationScripts.cloudInitFirstBootClean = lib.stringAfter [ "specialfs" ] ''
+    if [ ! -f /var/lib/nixos-vm-template.first-boot-done ]; then
+      echo "First boot: wiping baked-in cloud-init state and SSH host keys..."
+      ${pkgs.coreutils}/bin/rm -rf /var/lib/cloud/* || true
+      ${pkgs.coreutils}/bin/rm -f  /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub || true
+      ${pkgs.coreutils}/bin/mkdir -p /var/lib
+      ${pkgs.coreutils}/bin/touch /var/lib/nixos-vm-template.first-boot-done
+    fi
+  '';
 }
