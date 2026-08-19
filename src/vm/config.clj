@@ -99,12 +99,14 @@
               ;; a libvirt and a proxmox VM of the same name don't collide on disk.
               :vms-dir (str output-dir "/vms/" backend "/" host)
               :nix (tool (env "NIX") [host-cmd] "nix")
-              ;; -o IgnoreUnknown=GSSAPI* silences "Unsupported option
-              ;; 'gssapiauthentication'" warnings on hosts (e.g. Debian) that
-              ;; ship an ssh_config with GSSAPI directives, when this dev shell
-              ;; brings a Nix openssh compiled without Kerberos support.
+              ;; -o IgnoreUnknown=* silences "Unsupported option ..." warnings
+              ;; on hosts (e.g. Debian) that ship an ssh_config with directives
+              ;; the Nix openssh in this dev shell wasn't compiled for
+              ;; (GSSAPI/Kerberos being the common one). The wildcard is fine
+              ;; here because these programmatic ssh calls pass all their real
+              ;; options explicitly with -o.
               :ssh (into (tool (env "SSH") [host-cmd] "ssh")
-                         ["-o" "IgnoreUnknown=GSSAPIAuthentication,GSSAPIDelegateCredentials,GSSAPIKeyExchange"])
+                         ["-o" "IgnoreUnknown=*"])
               :readlink (tool (env "READLINK") [host-cmd] "readlink")
               :cp (tool (env "CP") [host-cmd] "cp")}]
     (merge

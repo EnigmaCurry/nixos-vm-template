@@ -54,7 +54,7 @@
   (validate! cfg)
   (proc/run! ["rsync" "-avz" "--progress" "-e"
               (str "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-                   " -o IgnoreUnknown=GSSAPIAuthentication,GSSAPIDelegateCredentials,GSSAPIKeyExchange")
+                   " -o IgnoreUnknown=*")
               src dst]))
 
 ;; ─── storage-type-aware disk format ──────────────────────────────────────────

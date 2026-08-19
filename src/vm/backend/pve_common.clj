@@ -54,9 +54,9 @@
 
 (def ^:private rsync-ssh-cmd
   "SSH command string used by rsync -e. IgnoreUnknown covers Debian's
-  ssh_config GSSAPI directives which Nix's Kerberos-less openssh rejects."
+  ssh_config directives that Nix's Kerberos-less openssh rejects."
   (str "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-       " -o IgnoreUnknown=GSSAPIAuthentication,GSSAPIDelegateCredentials,GSSAPIKeyExchange"))
+       " -o IgnoreUnknown=*"))
 
 (defn pve-rsync! [cfg src dst]
   (validate! cfg)
