@@ -24,6 +24,19 @@
     };
   };
 
+  # cloud-init's default renderer is systemd-networkd — it writes static
+  # per-interface configs to /etc/systemd/network/. modules/mutable.nix sets
+  # (with mkForce) useDHCP=true, useNetworkd=false, systemd.network.enable=false
+  # for pet-VM ergonomics. Those defaults would leave cloud-init's networkd
+  # config on disk with no daemon to read it, so we override at higher priority
+  # (25 < mkForce's 50). This ONLY fires on VMs that also carry this profile.
+  networking.useDHCP     = lib.mkOverride 25 false;
+  networking.useNetworkd = lib.mkOverride 25 true;
+  systemd.network.enable = lib.mkOverride 25 true;
+  # networkd feeds systemd-resolved; enable it so cloud-init's DNS entries
+  # are actually served to userspace resolvers.
+  services.resolved.enable = lib.mkDefault true;
+
   # qemu-guest-agent lets PVE report the VM's IP + trigger clean shutdowns.
   services.qemuGuest.enable = true;
 
