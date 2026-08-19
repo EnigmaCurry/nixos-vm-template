@@ -556,7 +556,10 @@
   {:backend <str> :env <map>}, where env carries the string env vars to export
   to the CLI plus helper keys (:machines-dir :host :pve-ssh ...)."
   []
-  (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
+  (let [env-backend (some-> (System/getenv "BACKEND") str/lower-case str/trim)
+        backend (cond
+                  (contains? #{"libvirt" "proxmox"} env-backend) env-backend
+                  :else (wiz/choose "Backend:" ["libvirt" "proxmox"]))
         pve-env (when (= backend "proxmox")
                   (let [ssh-hosts (try
                                    (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
