@@ -21,6 +21,10 @@
       # PVE attaches its cloud-init seed as NoCloud. ConfigDrive is included
       # as a fallback for other hypervisors.
       datasource_list = [ "NoCloud" "ConfigDrive" ];
+      # Don't install the seed drive's SSH key into root's authorized_keys.
+      # Clones are reached as the ciuser (typically 'admin' via PVE
+      # --ciuser); root access is via `sudo` from that account.
+      disable_root = true;
     };
   };
 
@@ -63,11 +67,6 @@
   # out of the box.
   networking.firewall.allowedTCPPorts = [ 22 ];
 
-  # sshd_config defaults to PermitRootLogin=no in this build, which rejects
-  # root before key auth even runs. cloud-init installs the seed drive's key
-  # into /etc/ssh/authorized_keys.d/root, so allow key-based (but not
-  # password) root login. mkForce because mutable.nix locks this to "no".
-  services.openssh.settings.PermitRootLogin = lib.mkForce "prohibit-password";
 
   # qemu-guest-agent lets PVE report the VM's IP + trigger clean shutdowns.
   services.qemuGuest.enable = true;
