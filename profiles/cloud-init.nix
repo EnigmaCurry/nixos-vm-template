@@ -74,16 +74,6 @@
   # cloud-init modules invoke `growpart` and related helpers.
   environment.systemPackages = with pkgs; [ cloud-utils ];
 
-  # ── DEBUG ONLY: bake a serial-console root password ──────────────────────
-  # When SSH doesn't come up, having a known root password lets us log in via
-  # `qm terminal <vmid>` to run `systemctl status sshd`, `journalctl`, etc.
-  # Cloud-init runs `passwd -l root` only when it detects an EMPTY shadow
-  # entry, so any real password here silently prevents that lock. mkDefault
-  # so downstream configs can override with hashedPassword for production.
-  # Remove — or override with hashedPassword = null — before shipping any
-  # template you don't want a known password on.
-  users.users.root.initialPassword = lib.mkDefault "debug";
-
   # The nixos-generators qcow2 build baked cloud-init state into the image
   # (obj.pkl / instance-id in /var/lib/cloud) AND generated SSH host keys.
   # Both are per-VM identity that must NOT be shared across clones:
