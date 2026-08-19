@@ -185,11 +185,10 @@ in
         sway-home.homeModules.nixos-vm-template
       ];
 
-      # Install packages from sway-home
-      # On mutable VMs, include home-manager CLI for hm-upgrade
-      home.packages = import "${sway-home}/modules/packages.nix" { inherit pkgs; }
-        ++ [ swayHomeInputs.script-wizard.packages.${pkgs.stdenv.hostPlatform.system}.default ]
-        ++ lib.optionals config.vm.mutable [ pkgs.home-manager ];
+      # sway-home's home.nix already installs its category packages
+      # (packages-dev/devops/net/shell/media/input) and the script-wizard pod.
+      # On mutable VMs, add the home-manager CLI so `hm-upgrade` works.
+      home.packages = lib.optionals config.vm.mutable [ pkgs.home-manager ];
 
       # On mutable VMs, unset the sway-home hm-upgrade alias so our wrapper script is used
       # Use mkOrder 10000 to ensure this runs after sway-home's alias.sh is sourced
