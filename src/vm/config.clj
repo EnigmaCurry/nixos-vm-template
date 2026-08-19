@@ -99,7 +99,12 @@
               ;; a libvirt and a proxmox VM of the same name don't collide on disk.
               :vms-dir (str output-dir "/vms/" backend "/" host)
               :nix (tool (env "NIX") [host-cmd] "nix")
-              :ssh (tool (env "SSH") [host-cmd] "ssh")
+              ;; -o IgnoreUnknown=GSSAPI* silences "Unsupported option
+              ;; 'gssapiauthentication'" warnings on hosts (e.g. Debian) that
+              ;; ship an ssh_config with GSSAPI directives, when this dev shell
+              ;; brings a Nix openssh compiled without Kerberos support.
+              :ssh (into (tool (env "SSH") [host-cmd] "ssh")
+                         ["-o" "IgnoreUnknown=GSSAPIAuthentication,GSSAPIDelegateCredentials,GSSAPIKeyExchange"])
               :readlink (tool (env "READLINK") [host-cmd] "readlink")
               :cp (tool (env "CP") [host-cmd] "cp")}]
     (merge
