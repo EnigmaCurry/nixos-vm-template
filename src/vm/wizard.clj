@@ -412,10 +412,15 @@ done 2>/dev/null"]
         reconfigure? (fs/directory? md)]
     (when reconfigure?
       (println (format "Machine config already exists: %s" md))
-      (when-not (prompt/confirm "Reconfigure this VM?" :no)
-        (if from-create?
-          (do (println "Using existing config.") (System/exit 0))
-          (do (println "Aborted.") (System/exit 0)))))
+      (let [env-reconf (some-> (System/getenv "NIXOS_VM_RECONFIGURE") str/lower-case str/trim)
+            answer (cond
+                     (contains? #{"yes" "y" "1" "true"} env-reconf) true
+                     (contains? #{"no"  "n" "0" "false"} env-reconf) false
+                     :else (prompt/confirm "Reconfigure this VM?" :no))]
+        (when-not answer
+          (if from-create?
+            (do (println "Using existing config.") (System/exit 0))
+            (do (println "Aborted.") (System/exit 0))))))
     (let [cur-profile (or (machine/read-field cfg name "profile") "")
           cur-memory (or (machine/read-field cfg name "memory") "")
           cur-vcpus (or (machine/read-field cfg name "vcpus") "")
@@ -429,13 +434,16 @@ done 2>/dev/null"]
                          :else 0)
           ;; LXC is mutable-only and the image is made mutable by the builder
           ;; (vm.container), so there is no mode picker and no "mutable" token.
-          mode-choice (if lxc?
-                        "Mutable (LXC container)"
-                        (choose-d "Select VM mode:"
-                                  ["Immutable (read-only root, upgradeable, recommended)"
-                                   "Semi-mutable (read-only root + writable /nix overlay)"
-                                   "Mutable (read-write pet VM, use nixos-rebuild)"]
-                                  mode-idx))
+          env-mutability (some-> (System/getenv "NIXOS_VM_MUTABILITY") str/lower-case str/trim)
+          mode-options ["Immutable (read-only root, upgradeable, recommended)"
+                        "Semi-mutable (read-only root + writable /nix overlay)"
+                        "Mutable (read-write pet VM, use nixos-rebuild)"]
+          mode-choice (cond
+                        lxc? "Mutable (LXC container)"
+                        (contains? #{"immutable" "immut"} env-mutability) (nth mode-options 0)
+                        (contains? #{"semi-mutable" "semi" "semimutable"} env-mutability) (nth mode-options 1)
+                        (contains? #{"mutable" "mut" "pet"} env-mutability) (nth mode-options 2)
+                        :else (choose-d "Select VM mode:" mode-options mode-idx))
           mutable-profile (cond lxc? ""
                                 (str/starts-with? mode-choice "Mutable") "mutable"
                                 (str/starts-with? mode-choice "Semi-mutable") "semi-mutable"
