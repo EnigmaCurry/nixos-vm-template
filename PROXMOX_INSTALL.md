@@ -412,6 +412,47 @@ qm set  101 --ciuser admin \
 qm start 101
 ```
 
+### Giving a clone internet via tinyproxy
+
+Fresh clones land on `vmbr0`, which still has no upstream — same
+predicament PVE was in at step 7. Until you have a router VM providing
+real WAN, point the clone at your workstation's tinyproxy so `curl`,
+`git`, `nix build`, etc. can reach the internet:
+
+```bash
+# From your workstation (still on 192.168.100.2/24)
+ssh admin@192.168.100.20
+
+# Inside the clone: shell env for interactive tools (curl, git, nix run)
+sudo mkdir -p /etc/profile.d
+sudo tee /etc/profile.d/proxy.sh > /dev/null <<'EOF'
+export http_proxy=http://192.168.100.2:8888/
+export https_proxy=http://192.168.100.2:8888/
+export no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
+EOF
+. /etc/profile.d/proxy.sh
+
+# nix-daemon inherits nothing from your login shell — give it the proxy
+# via a systemd drop-in so `nix build` downloads succeed too. NixOS's
+# /etc/systemd/system is under the declarative-/etc overlay and rejects
+# ad-hoc writes, so write to /run/systemd/system/ instead (tmpfs, but
+# systemd reads drop-ins from there too). This is ephemeral — gone on
+# reboot, which matches the throwaway nature of the proxy bridge.
+sudo mkdir -p /run/systemd/system/nix-daemon.service.d
+sudo tee /run/systemd/system/nix-daemon.service.d/proxy.conf > /dev/null <<'EOF'
+[Service]
+Environment=http_proxy=http://192.168.100.2:8888/
+Environment=https_proxy=http://192.168.100.2:8888/
+Environment=no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart nix-daemon
+```
+
+Once a router VM is up with PCI-passthrough NICs and providing real
+upstream on `vmbr0`, remove both files and every clone gets internet
+directly.
+
 ## 16. Destroy the temp VM
 
 Once the template is on PVE, log out of the temp VM and delete it:

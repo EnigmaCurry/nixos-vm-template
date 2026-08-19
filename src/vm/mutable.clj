@@ -183,3 +183,36 @@
                      (c "chmod" "0644" "/etc/nixos/flake.nix")
                      (c "chmod" "0644" "/etc/nixos/flake.lock")))
         (fs/delete-tree tmp)))))
+
+(defn inject-template-flake!
+  "Inject /etc/nixos/{flake.nix,flake.lock,modules,profiles} into a built
+  qcow2 for use as a Proxmox cloud-init template. The flake.nix has
+  __HOSTNAME__ placeholders (both in `nixosConfigurations.\"…\"` and
+  `networking.hostName`); a first-boot systemd service on the clone
+  substitutes them with the hostname cloud-init set, so `nixos-rebuild
+  switch` (no --flake args) matches the flake's per-hostname entry."
+  [cfg disk-path profile-str]
+  (let [repo (:repo-dir cfg)
+        tmp (str (fs/create-temp-dir))
+        nixos-dev (proc/capture (concat (:guestfish cfg) ["--ro" "-a" disk-path])
+                                {:in "run\nfindfs-label nixos\n"
+                                 :extra-env {"LIBGUESTFS_BACKEND" (:libguestfs-backend cfg)}})]
+    (when (str/blank? nixos-dev)
+      (println "Error: Could not find nixos partition")
+      (fs/delete-tree tmp)
+      (System/exit 1))
+    (println (format "Injecting /etc/nixos/ into template (%s)..." nixos-dev))
+    (spit (str tmp "/flake.nix")
+          (generate-mutable-flake "__HOSTNAME__" (detect-system) profile-str))
+    (proc/run! ["cp" (str repo "/flake.lock") (str tmp "/flake.lock")])
+    (proc/run! ["cp" "-r" "--no-preserve=mode" (str repo "/modules") (str tmp "/modules")])
+    (proc/run! ["cp" "-r" "--no-preserve=mode" (str repo "/profiles") (str tmp "/profiles")])
+    (gf! cfg disk-path
+         (concat ["run"] (c "mount" nixos-dev "/")
+                 (c "copy-in" (str tmp "/flake.nix") "/etc/nixos/")
+                 (c "copy-in" (str tmp "/flake.lock") "/etc/nixos/")
+                 (c "copy-in" (str tmp "/modules") "/etc/nixos/")
+                 (c "copy-in" (str tmp "/profiles") "/etc/nixos/")
+                 (c "chmod" "0644" "/etc/nixos/flake.nix")
+                 (c "chmod" "0644" "/etc/nixos/flake.lock")))
+    (fs/delete-tree tmp)))

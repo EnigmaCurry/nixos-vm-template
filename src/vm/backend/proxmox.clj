@@ -724,7 +724,12 @@
         (proc/run! (concat (:cp cfg) [img disk]))
         (proc/run! ["chmod" "644" disk])
         (println (format "Resizing disk to %s..." disk-size))
-        (proc/run! (concat (:qemu-img cfg) ["resize" disk disk-size])))
+        (proc/run! (concat (:qemu-img cfg) ["resize" disk disk-size]))
+        ;; Inject /etc/nixos/ (flake + modules + profiles) with __HOSTNAME__
+        ;; placeholders so clones can run `nixos-rebuild switch` after
+        ;; cloud-init sets their hostname. The systemd oneshot in
+        ;; profiles/cloud-init.nix does the substitution on first boot.
+        (mutable/inject-template-flake! cfg disk combined))
 
       ;; 4) Create the VM shell on PVE, transfer + import the disk
       (let [vmid (determine-vmid! cfg name)

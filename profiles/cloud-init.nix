@@ -32,6 +32,41 @@
     };
   };
 
+  # The `just cloud-template` build injects /etc/nixos/flake.nix with
+  # __HOSTNAME__ placeholders (both in nixosConfigurations."…" and
+  # networking.hostName). Cloud-init sets the real hostname during its
+  # init-network stage; this oneshot then substitutes it into the flake so
+  # `nixos-rebuild switch` (no --flake args) matches the flake's
+  # per-hostname entry. Runs once per clone, gated by a marker in /var/lib.
+  systemd.services.nixos-template-hostname = {
+    description = "Substitute cloud-init hostname into /etc/nixos/flake.nix";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "cloud-init.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    path = [ pkgs.coreutils pkgs.gnused ];
+    script = ''
+      if [ -f /var/lib/nixos-vm-template.flake-hostname-done ]; then
+        exit 0
+      fi
+      if [ ! -f /etc/nixos/flake.nix ]; then
+        echo "No /etc/nixos/flake.nix — skipping hostname substitution."
+        exit 0
+      fi
+      hostname=$(cat /etc/hostname | tr -d '\n')
+      if [ -z "$hostname" ]; then
+        echo "Empty /etc/hostname — skipping hostname substitution."
+        exit 0
+      fi
+      sed -i "s/__HOSTNAME__/$hostname/g" /etc/nixos/flake.nix
+      mkdir -p /var/lib
+      touch /var/lib/nixos-vm-template.flake-hostname-done
+      echo "Substituted __HOSTNAME__ → $hostname in /etc/nixos/flake.nix"
+    '';
+  };
+
   # Allow runtime password changes to persist. base.nix locks mutableUsers=false
   # for the declarative-identity flow, but cloud-init needs to write to
   # /etc/shadow (via chpasswd) for the seed drive's --cipassword to take
