@@ -37,14 +37,21 @@
   # are actually served to userspace resolvers.
   services.resolved.enable = lib.mkDefault true;
 
-  # The first-boot activation script wipes /etc/ssh/ssh_host_*_key so each
-  # clone gets unique keys. Cloud-init generates fresh ones during its
-  # modules-config stage. But sshd.service's preStart runs *before*
-  # cloud-init, sees no keys, and (on some NixOS releases) fails to
-  # generate them itself — sshd never starts and the log shows
-  #   [FAILED] Failed to start SSH Host Keys Generation.
-  # Delay sshd until cloud-init has finished (which regenerates the keys
-  # cleanly via its own ssh_keygen path).
+  # Cloud-init generates SSH host keys during its modules-config stage.
+  # NixOS's sshd-keygen-start shim also tries to generate them (via
+  # sshd-keygen.service, pulled in by sshd.service), and its script does
+  # NOT check for existing files before invoking `ssh-keygen` — when it
+  # runs after cloud-init has already created the keys it hits
+  #   /etc/ssh/ssh_host_rsa_key already exists. Overwrite (y/n)?
+  # and exits 1, which cascades into sshd.service never starting. Setting
+  # hostKeys=[] gives sshd-keygen an empty list to iterate — it exits 0
+  # with nothing to do — and sshd falls back to OpenSSH's built-in
+  # default HostKey paths (/etc/ssh/ssh_host_{ed25519,rsa}_key), which is
+  # exactly where cloud-init wrote them.
+  services.openssh.hostKeys = lib.mkForce [];
+
+  # Delay sshd until cloud-init has finished, so the keys cloud-init
+  # generates are present by the time sshd binds them.
   systemd.services.sshd = {
     wants = [ "cloud-init.service" ];
     after = [ "cloud-init.service" ];
