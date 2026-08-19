@@ -354,28 +354,35 @@
   [pve-env]
   (let [storage-info (:pve-storage-info pve-env)
         bridges (:pve-bridges pve-env)
+        env-storage (some-> (System/getenv "PVE_STORAGE") str/trim not-empty)
+        env-bridge (some-> (System/getenv "PVE_BRIDGE") str/trim not-empty)
         ;; Storage selection
-        pve-storage (if (= 1 (count storage-info))
+        pve-storage (cond
+                      env-storage
+                      (do (println (format "  Storage: %s" env-storage)) env-storage)
+                      (= 1 (count storage-info))
                       (do (println (format "  Storage: %s (%s)"
                                            (:name (first storage-info))
                                            (:type (first storage-info))))
                           (:name (first storage-info)))
-                      (if (seq storage-info)
-                        (let [choices (mapv #(format "%s (%s)" (:name %) (:type %)) storage-info)
-                              choice (wiz/choose "PVE storage:" choices)]
-                          (:name (nth storage-info (.indexOf choices choice))))
-                        (wiz/ask "PVE storage:" :default "local")))
+                      (seq storage-info)
+                      (let [choices (mapv #(format "%s (%s)" (:name %) (:type %)) storage-info)
+                            choice (wiz/choose "PVE storage:" choices)]
+                        (:name (nth storage-info (.indexOf choices choice))))
+                      :else (wiz/ask "PVE storage:" :default "local"))
         ;; Detect disk format from storage type
         storage-type (:type (first (filter #(= (:name %) pve-storage) storage-info)))
         pve-disk-format (if (or (= storage-type "lvmthin") (= storage-type "lvm"))
                           "raw" "qcow2")
         ;; Bridge selection
-        pve-bridge (if (= 1 (count bridges))
+        pve-bridge (cond
+                     env-bridge
+                     (do (println (format "  Bridge: %s" env-bridge)) env-bridge)
+                     (= 1 (count bridges))
                      (do (println (format "  Bridge: %s" (first bridges)))
                          (first bridges))
-                     (if (seq bridges)
-                       (wiz/choose "PVE bridge:" bridges)
-                       (wiz/ask "PVE bridge:" :default "vmbr0")))]
+                     (seq bridges) (wiz/choose "PVE bridge:" bridges)
+                     :else (wiz/ask "PVE bridge:" :default "vmbr0"))]
     (merge pve-env
            {"PVE_STORAGE" pve-storage
             "PVE_BRIDGE" pve-bridge
@@ -561,21 +568,25 @@
                   (contains? #{"libvirt" "proxmox"} env-backend) env-backend
                   :else (wiz/choose "Backend:" ["libvirt" "proxmox"]))
         pve-env (when (= backend "proxmox")
-                  (let [ssh-hosts (try
-                                   (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
-                                        str/split-lines
-                                        (keep #(second (re-find #"(?i)^\s*Host\s+(.+)" %)))
-                                        (mapcat #(str/split % #"\s+"))
-                                        (remove #(str/includes? % "*"))
-                                        vec)
-                                   (catch Exception _ []))
-                        pve-host (if (seq ssh-hosts)
-                                  (let [options (conj ssh-hosts "Other (enter manually)")
-                                        choice (wiz/choose "PVE host:" options)]
-                                    (if (= choice "Other (enter manually)")
-                                      (wiz/ask "PVE host (hostname or IP):")
-                                      choice))
-                                  (wiz/ask "PVE host (hostname or IP):"))
+                  (let [env-pve-host (some-> (System/getenv "PVE_HOST") str/trim not-empty)
+                        ssh-hosts (when-not env-pve-host
+                                    (try
+                                      (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
+                                           str/split-lines
+                                           (keep #(second (re-find #"(?i)^\s*Host\s+(.+)" %)))
+                                           (mapcat #(str/split % #"\s+"))
+                                           (remove #(str/includes? % "*"))
+                                           vec)
+                                      (catch Exception _ [])))
+                        pve-host (cond
+                                   env-pve-host env-pve-host
+                                   (seq ssh-hosts)
+                                   (let [options (conj ssh-hosts "Other (enter manually)")
+                                         choice (wiz/choose "PVE host:" options)]
+                                     (if (= choice "Other (enter manually)")
+                                       (wiz/ask "PVE host (hostname or IP):")
+                                       choice))
+                                   :else (wiz/ask "PVE host (hostname or IP):"))
                         _ (do (print (format "  Connecting to %s ... " pve-host))
                               (flush))
                         pve-ssh (fn [cmd]
