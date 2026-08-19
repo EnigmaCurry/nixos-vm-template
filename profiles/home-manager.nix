@@ -181,7 +181,6 @@ in
         nix-flatpak.homeManagerModules.nix-flatpak
         sway-home.homeModules.home
         sway-home.homeModules.emacs
-        sway-home.homeModules.rust
         sway-home.homeModules.nixos-vm-template
       ];
 
