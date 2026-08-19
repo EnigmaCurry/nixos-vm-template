@@ -85,12 +85,32 @@
           (println "Pick one — they claim the same ports / advertise the same service.")
           (System/exit 1))))))
 
+(defn ensure-cloud-init-mutable
+  "cloud-init writes to /etc (hostname, ssh host keys, networkd config) on
+  first boot, so it needs a writable rootfs — `mutable` mode. `semi-mutable`
+  (writable /nix overlay only) isn't enough and is rejected. If neither
+  mutability token is present (default = immutable), auto-imply `mutable`.
+  Returns the possibly-updated profile key."
+  [profile-key]
+  (let [profs (set (str/split profile-key #","))]
+    (cond
+      (not (contains? profs "cloud-init")) profile-key
+      (contains? profs "mutable") profile-key
+      (contains? profs "semi-mutable")
+      (do (println "Error: cloud-init requires 'mutable' mode; 'semi-mutable' is not enough.")
+          (println "cloud-init writes to /etc which needs a fully writable rootfs.")
+          (System/exit 1))
+      :else
+      (do (println "Note: cloud-init profile implies 'mutable' mode. Adding 'mutable'.")
+          (normalize-profiles (str profile-key ",mutable"))))))
+
 (defn build-profile
   "Build a profile's base image. Honors SKIP_BUILD (bootstrap). FLAKE_UPDATE is
   taken from opts {:flake-update? bool} (upgrade) or the env var otherwise.
   Returns the profile key."
   [cfg profiles & [opts]]
-  (let [profile-key (normalize-profiles (or profiles "core"))
+  (let [profile-key (-> (normalize-profiles (or profiles "core"))
+                        ensure-cloud-init-mutable)
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
         profiles-out (str output-dir "/profiles")]
@@ -139,7 +159,8 @@
   SKIP_BUILD. Out-links to <output-dir>/lxc-profiles/<key>; the backend resolves
   the tar.xz under <out>/tarball/. Returns the profile key."
   [cfg profiles]
-  (let [profile-key (normalize-profiles (or profiles "core"))
+  (let [profile-key (-> (normalize-profiles (or profiles "core"))
+                        ensure-cloud-init-mutable)
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
         lxc-out (str output-dir "/lxc-profiles")]

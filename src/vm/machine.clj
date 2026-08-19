@@ -409,7 +409,7 @@
     (init-machine cfg name {:profile profile :network network :ssh-key-mode "agent"})
     (let [memory (save-resource! cfg name "memory" memory "2048" #(str % "M"))
           vcpus (save-resource! cfg name "vcpus" vcpus "2" str)
-          var-size (save-resource! cfg name "var_size" var-size "30G" str)]
+          var-size (save-resource! cfg name "disk_size" var-size "30G" str)]
       (when-not (str/blank? static-ip)
         (write-static-ip! cfg name static-ip))
       (println)

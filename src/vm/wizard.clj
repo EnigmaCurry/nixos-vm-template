@@ -465,7 +465,8 @@ done 2>/dev/null"]
     (let [cur-profile (or (machine/read-field cfg name "profile") "")
           cur-memory (or (machine/read-field cfg name "memory") "")
           cur-vcpus (or (machine/read-field cfg name "vcpus") "")
-          cur-var (or (machine/read-field cfg name "var_size") "")
+          cur-var (or (machine/read-field cfg name "disk_size")
+                      (machine/read-field cfg name "var_size") "")
           cur-net (or (machine/read-field cfg name "network") "")
           ;; ── mutable mode ──
           lxc? (= backend "proxmox-lxc")
@@ -547,13 +548,15 @@ done 2>/dev/null"]
                       "2"))
           _ (println (format "vCPUs: %s" vcpus))
           ;; ── disk ──
-          env-var-size (env-str "NIXOS_VM_VAR_SIZE")
+          ;; NIXOS_VM_DISK_SIZE is the current name; NIXOS_VM_VAR_SIZE is a
+          ;; backward-compat alias while callers migrate.
+          env-var-size (or (env-str "NIXOS_VM_DISK_SIZE") (env-str "NIXOS_VM_VAR_SIZE"))
           _ (when-not env-var-size (println))
           disk-opts ["20G" "30G" "50G" "100G" "200G" "500G" "Custom"]
           disk-idx (case cur-var "20G" 0 "30G" 1 "50G" 2 "100G" 3 "200G" 4 "500G" 5
                          (if (str/blank? cur-var) nil 6))
           var-size (or env-var-size
-                       (case (choose-d "Select /var disk size:" disk-opts disk-idx)
+                       (case (choose-d "Select disk size:" disk-opts disk-idx)
                          "20G" "20G" "30G" "30G" "50G" "50G" "100G" "100G" "200G" "200G" "500G" "500G"
                          "Custom" (let [v (prompt/ask "Enter disk size (e.g., 40G):" cur-var)]
                                     (if (str/blank? v) "30G" v))
@@ -754,8 +757,12 @@ done 2>/dev/null"]
                               [""])))
         (println (format "Created: %s/pci_devices (%d device(s))" md (count pci-selected))))
       (let [nvs (machine/normalize-size var-size)]
-        (spit (str md "/var_size") (str nvs "\n"))
-        (println (format "Created: %s/var_size (%s)" md nvs))
+        (spit (str md "/disk_size") (str nvs "\n"))
+        ;; Clean up any legacy var_size file so reads don't confuse it for
+        ;; a stale value if disk_size is updated later.
+        (let [legacy (str md "/var_size")]
+          (when (fs/exists? legacy) (fs/delete legacy)))
+        (println (format "Created: %s/disk_size (%s)" md nvs))
         (save-static-ip! cfg name sip-addr sip-gw sip-dns1 sip-dns2)
         (println)
         (println (format "VM '%s' configured (profile: %s, mode: %s, memory: %sM, vcpus: %s, var: %s)"

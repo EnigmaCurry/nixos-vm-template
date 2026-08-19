@@ -652,7 +652,8 @@
 
 (defn- finish-create! [this cfg name]
   (let [profile (or (machine/read-field cfg name "profile") "core")
-        var-size (or (machine/read-field cfg name "var_size") "30G")]
+        var-size (or (machine/read-field cfg name "disk_size")
+                     (machine/read-field cfg name "var_size") "30G")]
     (profile/build-profile cfg profile)
     (b/create-disks this cfg name var-size)
     (b/start this cfg name)
