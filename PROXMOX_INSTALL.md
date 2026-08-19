@@ -416,42 +416,59 @@ qm start 101
 
 Fresh clones land on `vmbr0`, which still has no upstream — same
 predicament PVE was in at step 7. Until you have a router VM providing
-real WAN, point the clone at your workstation's tinyproxy so `curl`,
-`git`, `nix build`, etc. can reach the internet:
+real WAN, point the clone at your workstation's tinyproxy so `nix
+build` / `nixos-rebuild` / `curl` etc. can reach the internet.
+
+Two things need the proxy: the **root shell** running `nix` (flake
+input fetching happens client-side) and the **nix-daemon** (actual
+build downloads). From your workstation:
 
 ```bash
-# From your workstation (still on 192.168.100.2/24)
 ssh admin@192.168.100.20
+sudo -i
+```
 
-# Inside the clone: shell env for interactive tools (curl, git, nix run)
-sudo mkdir -p /etc/profile.d
-sudo tee /etc/profile.d/proxy.sh > /dev/null <<'EOF'
+In the root shell, export the proxy directly:
+
+```bash
 export http_proxy=http://192.168.100.2:8888/
 export https_proxy=http://192.168.100.2:8888/
 export no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
-EOF
-. /etc/profile.d/proxy.sh
+```
 
-# nix-daemon inherits nothing from your login shell — give it the proxy
-# via a systemd drop-in so `nix build` downloads succeed too. NixOS's
-# /etc/systemd/system is under the declarative-/etc overlay and rejects
-# ad-hoc writes, so write to /run/systemd/system/ instead (tmpfs, but
-# systemd reads drop-ins from there too). This is ephemeral — gone on
-# reboot, which matches the throwaway nature of the proxy bridge.
-sudo mkdir -p /run/systemd/system/nix-daemon.service.d
-sudo tee /run/systemd/system/nix-daemon.service.d/proxy.conf > /dev/null <<'EOF'
+Then give `nix-daemon` the proxy via a systemd drop-in. NixOS's
+`/etc/systemd/system/` is under the declarative-`/etc` overlay and
+rejects ad-hoc writes, so use `/run/systemd/system/` instead (`tmpfs`,
+systemd reads drop-ins from there too):
+
+```bash
+mkdir -p /run/systemd/system/nix-daemon.service.d
+tee /run/systemd/system/nix-daemon.service.d/proxy.conf > /dev/null <<'EOF'
 [Service]
 Environment=http_proxy=http://192.168.100.2:8888/
 Environment=https_proxy=http://192.168.100.2:8888/
 Environment=no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
 EOF
-sudo systemctl daemon-reload
-sudo systemctl restart nix-daemon
+systemctl daemon-reload
+systemctl restart nix-daemon
 ```
 
-Once a router VM is up with PCI-passthrough NICs and providing real
-upstream on `vmbr0`, remove both files and every clone gets internet
-directly.
+Both are ephemeral — the root-shell exports die when you log out; the
+`/run/` drop-in dies on reboot. That matches the throwaway nature of
+the whole proxy bridge: once a router VM is up on `vmbr0`, none of
+this is needed.
+
+Now:
+
+```bash
+nixos-rebuild switch --flake /etc/nixos
+```
+
+`--flake` is required — without it, nixos-rebuild looks for legacy
+`/etc/nixos/configuration.nix` which `cloud-template` doesn't create.
+The flake at `/etc/nixos/flake.nix` already has this clone's hostname
+substituted in by the `nixos-template-hostname.service` that ran during
+first boot.
 
 ## 16. Destroy the temp VM
 
