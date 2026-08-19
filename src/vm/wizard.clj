@@ -618,7 +618,12 @@ done 2>/dev/null"]
                                     (pos? (->> (str/split-lines (slurp f))
                                                (remove #(or (str/starts-with? % "#") (str/blank? %)))
                                                count)))))
+          env-ssh (some-> (env-str "NIXOS_VM_SSH_KEYS") str/lower-case)
           ssh-choice (cond
+                       (= env-ssh "keep")   "Keep existing keys"
+                       (= env-ssh "agent")  (format "Use current SSH agent keys (%d key(s))" agent-count)
+                       (= env-ssh "manual") "Enter keys manually"
+                       (= env-ssh "skip")   "Skip (no SSH access)"
                        has-existing?
                        (if (pos? agent-count)
                          (prompt/choose "SSH authorized keys:"
