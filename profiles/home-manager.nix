@@ -179,6 +179,7 @@ in
     users.${config.core.regularUser} = { pkgs, ... }: {
       imports = [
         nix-flatpak.homeManagerModules.nix-flatpak
+        sway-home.homeModules.baseline
         sway-home.homeModules.home
         sway-home.homeModules.emacs
         sway-home.homeModules.nixos-vm-template
