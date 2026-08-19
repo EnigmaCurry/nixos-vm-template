@@ -41,11 +41,11 @@
       },
       "locked": {
         "dir": "pkgs/firefox-addons",
-        "lastModified": 1784692983,
-        "narHash": "sha256-5RE5jkpkTIrP2A4XS3D9KiC9NGXOcKKE90dpV/NNc/E=",
+        "lastModified": 1785729742,
+        "narHash": "sha256-PBavY37OTsIM7VJMUYPv2Rz/gSpbtJGxAGl9iXCaMU4=",
         "owner": "rycee",
         "repo": "nur-expressions",
-        "rev": "27cc0aa451c1db33050b6b371268c755a5e85a49",
+        "rev": "1529ecae5978cd2ac18a8edbf27967350bf4b80e",
         "type": "gitlab"
       },
       "original": {
@@ -131,11 +131,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1784350909,
-        "narHash": "sha256-ZWyzLbS1yKUTeFJLmdVuWNnHttL333/ldJbEE+KzCrM=",
+        "lastModified": 1785119570,
+        "narHash": "sha256-Rgs2xKnGLFWQscxUaXX07oyZeuMDOHEbqDOsgliLFGM=",
         "owner": "nix-community",
         "repo": "home-manager",
-        "rev": "4ce190229c73d44536caa7072f6308fb2d8feeb3",
+        "rev": "d4fd24667c8cbef124bb70a20380cab75ec8474d",
         "type": "github"
       },
       "original": {
@@ -199,11 +199,11 @@
     "nixos-vm-template": {
       "flake": false,
       "locked": {
-        "lastModified": 1784686321,
-        "narHash": "sha256-oZcwdyKt+hYcZTjwojaBVXL86ckOvEBVE6e9/KrKLkE=",
+        "lastModified": 1785788876,
+        "narHash": "sha256-Yt8qkELizjeD13JjJLh3a8p6jwETndrEFJfST+DtnpA=",
         "owner": "EnigmaCurry",
         "repo": "nixos-vm-template",
-        "rev": "dbe8f8128f14285086d7ccef0c020dfc0c6f3f4c",
+        "rev": "774549a9ba88b45114676424fd59d2e19aa767b1",
         "type": "github"
       },
       "original": {
@@ -246,11 +246,11 @@
     },
     "nixpkgs_unstable": {
       "locked": {
-        "lastModified": 1784497964,
-        "narHash": "sha256-vlHUuqAcbcH2RKmHbPiuQzbv1pnzzavXnI62RD0bqCU=",
+        "lastModified": 1785692966,
+        "narHash": "sha256-vUfIeBEfpbAfZ5zjgIkYk7eHBeVfCYVjLbWnMkseYnk=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "241313f4e8e508cb9b13278c2b0fa25b9ca27163",
+        "rev": "643809054d65fdd466a63e3155b8c498cb483c04",
         "type": "github"
       },
       "original": {
@@ -351,11 +351,11 @@
       },
       "locked": {
         "dir": "home-manager",
-        "lastModified": 1784694952,
-        "narHash": "sha256-/YDVTeOtEBINtOKdjVaxx+3NQHyx+CSbnUAd+NKjbVg=",
+        "lastModified": 1786387312,
+        "narHash": "sha256-GWTqw+1ot7CVDfpvtAinFpjmNuzQYPqgqDdqlVmggrc=",
         "owner": "EnigmaCurry",
         "repo": "sway-home",
-        "rev": "e84f464ab190f7073e9dcf08222b3d70e8fc0106",
+        "rev": "068d52bf1625c5aa4d7fe682ab8f40f1174bb9b6",
         "type": "github"
       },
       "original": {
