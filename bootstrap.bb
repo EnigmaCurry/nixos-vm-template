@@ -794,11 +794,17 @@
 
   ;; When nix is available, offer to build locally from source (Development);
   ;; otherwise only the download-pre-built-images path (Production) is possible.
-  (let [mode (if (command-exists? "nix")
+  ;; NIXOS_VM_MODE=development|production skips the prompt (case-insensitive,
+  ;; prefix match: "dev"/"prod" also work).
+  (let [env-mode (some-> (System/getenv "NIXOS_VM_MODE") str/lower-case)
+        mode (cond
+               (and env-mode (str/starts-with? env-mode "dev"))  "Development"
+               (and env-mode (str/starts-with? env-mode "prod")) "Production"
+               (command-exists? "nix")
                (wiz/choose "Mode:"
                            ["Production (download pre-built images, no build)"
                             "Development (build images locally from source)"])
-               "Production")]
+               :else "Production")]
     (if (str/starts-with? mode "Development")
       (run-development!)
       (run-production!))))
