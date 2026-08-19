@@ -112,6 +112,22 @@
     (prompt/choose msg options (nth options idx))
     (prompt/choose msg options)))
 
+(defn- env-str
+  "Trimmed, non-empty value of env var VAR, or nil."
+  [var]
+  (some-> (System/getenv var) str/trim not-empty))
+
+(defn- parse-mem-mb
+  "Normalize a memory string to MB: '8192' → '8192', '8G' → '8192'."
+  [v]
+  (when v
+    (let [v (str/trim v)]
+      (cond
+        (re-matches #"\d+"       v) v
+        (re-matches #"(?i)\d+g" v) (str (* 1024 (Long/parseLong (subs v 0 (dec (count v))))))
+        (re-matches #"(?i)\d+m" v) (subs v 0 (dec (count v)))
+        :else nil))))
+
 (defn- available-profiles
   "profiles/*.nix names excluding core/mutable/semi-mutable."
   [cfg]
@@ -163,11 +179,21 @@ done 2>/dev/null"]
           (println (format "Updated: %s/resolv.conf (%s, %s)" md dns1 (if (str/blank? dns2) "1.0.0.1" dns2))))))))
 
 (defn- prompt-dns
-  "DNS server selection; returns [dns1 dns2]."
+  "DNS server selection; returns [dns1 dns2].
+  NIXOS_VM_DNS1 / NIXOS_VM_DNS2 skip the picker entirely.
+  NIXOS_VM_DNS=gateway|cloudflare|google picks a preset non-interactively."
   [cfg name gateway]
-  (let [choice (prompt/choose "DNS servers:"
-                              [(format "Gateway (%s)" (if (str/blank? gateway) "N/A" gateway))
-                               "Cloudflare (1.1.1.1, 1.0.0.1)" "Google (8.8.8.8, 8.8.4.4)" "Custom"])
+  (let [env-d1 (some-> (System/getenv "NIXOS_VM_DNS1") str/trim not-empty)
+        env-d2 (some-> (System/getenv "NIXOS_VM_DNS2") str/trim not-empty)
+        env-preset (some-> (System/getenv "NIXOS_VM_DNS") str/lower-case str/trim not-empty)
+        choice (cond
+                 env-d1 "Custom"
+                 (= env-preset "gateway") "Gateway"
+                 (= env-preset "cloudflare") "Cloudflare (1.1.1.1, 1.0.0.1)"
+                 (= env-preset "google") "Google (8.8.8.8, 8.8.4.4)"
+                 :else (prompt/choose "DNS servers:"
+                                      [(format "Gateway (%s)" (if (str/blank? gateway) "N/A" gateway))
+                                       "Cloudflare (1.1.1.1, 1.0.0.1)" "Google (8.8.8.8, 8.8.4.4)" "Custom"]))
         [d1 d2] (cond
                   (str/starts-with? choice "Gateway") [(if (str/blank? gateway) "1.1.1.1" gateway) "1.1.1.1"]
                   (str/starts-with? choice "Cloudflare") ["1.1.1.1" "1.0.0.1"]
@@ -178,7 +204,8 @@ done 2>/dev/null"]
                                                       (keep #(second (re-find #"^nameserver (.*)" %))))]
                                           [(first ns) (second ns)])
                                         [nil nil])]
-                          [(prompt/ask "Primary DNS server:" c1) (prompt/ask "Secondary DNS server:" c2)]))
+                          [(or env-d1 (prompt/ask "Primary DNS server:" c1))
+                           (or env-d2 (prompt/ask "Secondary DNS server:" c2))]))
         d2 (if (= d1 d2) "1.0.0.1" d2)]
     (println (format "DNS: %s, %s" d1 d2))
     [d1 d2]))
@@ -195,10 +222,16 @@ done 2>/dev/null"]
   {:network :addr :gw :dns1 :dns2}."
   [cfg name md cur-net]
   (let [cur-bridge (when (str/starts-with? (or cur-net "") "bridge:") (subs cur-net 7))
+        env-bridge (env-str "NIXOS_VM_BRIDGE")
         bridges (pve-list-bridges-detailed cfg)
-        network (if (empty? bridges)
+        network (cond
+                  env-bridge
+                  (do (println (format "Bridge: %s" env-bridge))
+                      (str "bridge:" env-bridge))
+                  (empty? bridges)
                   (do (println "Warning: Could not list bridges from Proxmox node.")
                       (str "bridge:" (prompt/ask "Enter bridge name:" (or cur-bridge "vmbr0"))))
+                  :else
                   (let [labels (mapv second bridges)
                         default (when cur-bridge
                                   (some (fn [[n l]] (when (= n cur-bridge) l)) bridges))
@@ -215,17 +248,25 @@ done 2>/dev/null"]
         gw (if (and (str/blank? gw0) (not (str/blank? bip)))
              (str (str/join "." (butlast (str/split bip #"\."))) ".1") gw0)
         cur-static (when (fs/exists? (str md "/static_ip")) (slurp (str md "/static_ip")))
-        ip-choice (prompt/choose "IP address configuration:" ["DHCP (automatic)" "Static IP"]
-                                 (if cur-static "Static IP" "DHCP (automatic)"))]
+        env-static-ip (env-str "NIXOS_VM_STATIC_IP")
+        env-ip-choice (some-> (env-str "NIXOS_VM_IP_MODE") str/lower-case)
+        ip-choice (cond
+                    env-static-ip "Static IP"
+                    (contains? #{"static" "static ip"} env-ip-choice) "Static IP"
+                    (contains? #{"dhcp" "dhcp (automatic)"} env-ip-choice) "DHCP (automatic)"
+                    :else (prompt/choose "IP address configuration:" ["DHCP (automatic)" "Static IP"]
+                                         (if cur-static "Static IP" "DHCP (automatic)")))]
     (println)
     (if (str/starts-with? ip-choice "Static")
       (let [da (when cur-static (second (re-find #"address=(.*)" cur-static)))
             dg (or (when cur-static (second (re-find #"gateway=(.*)" cur-static))) gw)
-            addr0 (prompt/ask (format "Enter IP address (e.g. %s/%s):" (or bip "10.0.0.5") (or bcidr "24")) da)
+            env-gw (env-str "NIXOS_VM_GATEWAY")
+            addr0 (or env-static-ip
+                      (prompt/ask (format "Enter IP address (e.g. %s/%s):" (or bip "10.0.0.5") (or bcidr "24")) da))
             _ (when (str/blank? addr0) (err-exit "Error: IP address is required for static IP configuration."))
             addr (if (str/includes? addr0 "/") addr0
                      (let [m (or bcidr "24")] (println (format "  (using /%s subnet mask)" m)) (str addr0 "/" m)))
-            gwv (prompt/ask "Enter gateway IP:" dg)
+            gwv (or env-gw (prompt/ask "Enter gateway IP:" dg))
             _ (println (format "Static IP: %s (gateway: %s)" addr (if (str/blank? gwv) "none" gwv)))
             _ (println)
             [d1 d2] (prompt-dns cfg name gwv)]
@@ -481,39 +522,42 @@ done 2>/dev/null"]
                          (if (prompt/confirm "Run as a privileged container? (needed for kernel NFS)" :no) "1" "0")))
           mounts (when lxc? (wizard-lxc-mounts cfg nas?))
           ;; ── memory ──
-          _ (println)
+          env-memory (parse-mem-mb (env-str "NIXOS_VM_MEMORY"))
+          _ (when-not env-memory (println))
           mem-opts ["1G" "2G" "4G" "8G" "16G" "32G" "Custom"]
           mem-idx (case cur-memory "1024" 0 "2048" 1 "4096" 2 "8192" 3 "16384" 4 "32768" 5
                         (if (str/blank? cur-memory) nil 6))
-          mem-choice (choose-d "Select memory size:" mem-opts mem-idx)
-          memory (case mem-choice
-                   "1G" "1024" "2G" "2048" "4G" "4096" "8G" "8192" "16G" "16384" "32G" "32768"
-                   "Custom" (let [v (prompt/ask "Enter memory in MB (e.g., 3072):" cur-memory)]
-                              (if (str/blank? v) "2048" v))
-                   "2048")
+          memory (or env-memory
+                     (case (choose-d "Select memory size:" mem-opts mem-idx)
+                       "1G" "1024" "2G" "2048" "4G" "4096" "8G" "8192" "16G" "16384" "32G" "32768"
+                       "Custom" (let [v (prompt/ask "Enter memory in MB (e.g., 3072):" cur-memory)]
+                                  (if (str/blank? v) "2048" v))
+                       "2048"))
           _ (println (format "Memory: %sM" memory))
           ;; ── vcpus ──
-          _ (println)
+          env-vcpus (env-str "NIXOS_VM_VCPUS")
+          _ (when-not env-vcpus (println))
           vcpu-opts ["1" "2" "4" "8" "Custom"]
           vcpu-idx (case cur-vcpus "1" 0 "2" 1 "4" 2 "8" 3 (if (str/blank? cur-vcpus) nil 4))
-          vcpu-choice (choose-d "Select number of vCPUs:" vcpu-opts vcpu-idx)
-          vcpus (case vcpu-choice
-                  "1" "1" "2" "2" "4" "4" "8" "8"
-                  "Custom" (let [v (prompt/ask "Enter number of vCPUs:" cur-vcpus)]
-                             (if (str/blank? v) "2" v))
-                  "2")
+          vcpus (or env-vcpus
+                    (case (choose-d "Select number of vCPUs:" vcpu-opts vcpu-idx)
+                      "1" "1" "2" "2" "4" "4" "8" "8"
+                      "Custom" (let [v (prompt/ask "Enter number of vCPUs:" cur-vcpus)]
+                                 (if (str/blank? v) "2" v))
+                      "2"))
           _ (println (format "vCPUs: %s" vcpus))
           ;; ── disk ──
-          _ (println)
+          env-var-size (env-str "NIXOS_VM_VAR_SIZE")
+          _ (when-not env-var-size (println))
           disk-opts ["20G" "30G" "50G" "100G" "200G" "500G" "Custom"]
           disk-idx (case cur-var "20G" 0 "30G" 1 "50G" 2 "100G" 3 "200G" 4 "500G" 5
                          (if (str/blank? cur-var) nil 6))
-          disk-choice (choose-d "Select /var disk size:" disk-opts disk-idx)
-          var-size (case disk-choice
-                     "20G" "20G" "30G" "30G" "50G" "50G" "100G" "100G" "200G" "200G" "500G" "500G"
-                     "Custom" (let [v (prompt/ask "Enter disk size (e.g., 40G):" cur-var)]
-                                (if (str/blank? v) "30G" v))
-                     "30G")
+          var-size (or env-var-size
+                       (case (choose-d "Select /var disk size:" disk-opts disk-idx)
+                         "20G" "20G" "30G" "30G" "50G" "50G" "100G" "100G" "200G" "200G" "500G" "500G"
+                         "Custom" (let [v (prompt/ask "Enter disk size (e.g., 40G):" cur-var)]
+                                    (if (str/blank? v) "30G" v))
+                         "30G"))
           _ (println (format "Disk size: %s" var-size))
           ;; ── PCI passthrough (streaming profiles only, proxmox KVM only) ──
           ;; moonshine-nvidia and sunshine-plasma-nvidia both need a discrete
