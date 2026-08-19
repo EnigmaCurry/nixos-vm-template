@@ -676,9 +676,21 @@
     (cond
       (.exists (io/file dir ".git"))
       (let [sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
-                                            "git" "rev-parse" "--short" "HEAD")))]
+                                            "git" "rev-parse" "--short" "HEAD")))
+            dirty? (seq (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
+                                                    "git" "status" "--porcelain"))))]
         (println (format "Using existing development checkout: %s (commit: %s)" dir sha))
-        (println "  (bootstrap won't touch your tree; run 'git pull' there to update.)")
+        (if dirty?
+          (println "  (working tree has local changes; skipping pull.)")
+          ;; Attempt a fast-forward pull; fails cleanly if non-ff or no upstream.
+          (let [res (proc/shell {:dir dir :out :string :err :string :continue true}
+                                "git" "pull" "--ff-only" "--quiet")]
+            (if (zero? (:exit res))
+              (let [new-sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
+                                                        "git" "rev-parse" "--short" "HEAD")))]
+                (when (not= sha new-sha)
+                  (println (format "  Fast-forwarded to %s." new-sha))))
+              (println "  (couldn't fast-forward — non-ff or no upstream; leaving tree as-is.)"))))
         dir)
 
       (and (.exists dir-file) (seq (.list dir-file)))
