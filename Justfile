@@ -64,6 +64,12 @@ create name:
 create-batch name profiles="core" memory="2048" vcpus="2" var_size="30G" network="nat" static_ip="":
     @{{VM_CLI}} create-batch "{{name}}" "{{profiles}}" "{{memory}}" "{{vcpus}}" "{{var_size}}" "{{network}}" "{{static_ip}}"
 
+# Build a Proxmox template with cloud-init + mutable (+ optional extra profiles).
+# Produces a PVE template (not a running VM); each clone gets its own identity
+# on first boot from the cloud-init seed drive.
+cloud-template name extra_profiles="":
+    @{{VM_CLI}} cloud-template "{{name}}" "{{extra_profiles}}"
+
 # Clone a VM: copy /var disk from source, generate fresh identity, create boot disk
 # Memory/vcpus default to source VM's values if not specified
 clone source dest memory="" vcpus="" network="":

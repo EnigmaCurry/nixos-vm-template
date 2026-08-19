@@ -759,6 +759,32 @@
       (when (not= 0 (:exit result))
         (System/exit (:exit result))))))
 
+(defn dev-cloud-template!
+  "Development cloud-template: build a Proxmox template (cloud-init + mutable
+  + optional extra profiles) via `just cloud-template <name> <extras>`. Skips
+  identity injection — each clone gets its own via cloud-init's seed drive."
+  [dev-dir backend env]
+  (when-not (= backend "proxmox")
+    (println "Error: cloud-template is only supported on the proxmox backend.")
+    (println (format "  BACKEND=%s" backend))
+    (System/exit 1))
+  (let [env-name (some-> (System/getenv "NIXOS_VM_NAME") str/trim not-empty)
+        tmpl-name (or env-name (wiz/ask "Template name:" :default "nixos"))
+        env-extras (or (some-> (System/getenv "NIXOS_VM_PROFILE") str/trim not-empty) "")
+        env-vmid (some-> (System/getenv "PVE_VMID") str/trim not-empty)
+        machine-dir (str (get env :machines-dir) "/" tmpl-name)]
+    (when (and env-vmid (not (.exists (io/file machine-dir "vmid"))))
+      (.mkdirs (io/file machine-dir))
+      (spit (str machine-dir "/vmid") env-vmid))
+    (println)
+    (println (format "Building Proxmox template '%s' (cloud-init,mutable%s)..."
+                     tmpl-name (if (str/blank? env-extras) "" (str "," env-extras))))
+    (println "(Entering the flake dev shell; the first build may take a while.)")
+    (println)
+    (let [result (dev-just! dev-dir backend env "cloud-template" tmpl-name env-extras)]
+      (when (not= 0 (:exit result))
+        (System/exit (:exit result))))))
+
 (defn dev-manage-vms!
   "Development manage: upgrade (rebuild from source), destroy, or purge a VM."
   [dev-dir backend env]
@@ -805,11 +831,13 @@
                   (System/exit (:exit result)))))))))))
 
 (defn- resolve-env-action
-  "Map NIXOS_VM_ACTION values (e.g. \"create\", \"manage\", \"exit\") to the
-  wizard's canonical action strings, or nil if the env var is unset."
+  "Map NIXOS_VM_ACTION values (e.g. \"create\", \"cloud-template\", \"manage\",
+  \"exit\") to the wizard's canonical action strings, or nil if the env var is
+  unset."
   []
   (when-let [v (some-> (System/getenv "NIXOS_VM_ACTION") str/lower-case str/trim not-empty)]
     (cond
+      (or (= v "cloud-template") (= v "cloud") (= v "template")) "Cloud template"
       (str/starts-with? v "create") "Create VM"
       (str/starts-with? v "manage") "Manage VMs"
       (str/starts-with? v "exit")   "Exit"
@@ -822,19 +850,21 @@
         env-action (resolve-env-action)]
     (if env-action
       (case env-action
-        "Create VM"  (dev-create-vm! dev-dir backend env)
-        "Manage VMs" (dev-manage-vms! dev-dir backend env)
-        "Exit"       (println "Bye."))
+        "Create VM"      (dev-create-vm! dev-dir backend env)
+        "Cloud template" (dev-cloud-template! dev-dir backend env)
+        "Manage VMs"     (dev-manage-vms! dev-dir backend env)
+        "Exit"           (println "Bye."))
       (loop []
         (section-break!)
         (let [action (try (wiz/choose "What would you like to do?"
-                                      ["Create VM" "Manage VMs" "Exit"])
+                                      ["Create VM" "Cloud template" "Manage VMs" "Exit"])
                           (catch Exception _ "Exit"))]
           (section-break!)
           (case action
-            "Create VM"  (do (dev-create-vm! dev-dir backend env) (recur))
-            "Manage VMs" (do (dev-manage-vms! dev-dir backend env) (recur))
-            "Exit"       (println "Bye.")))))))
+            "Create VM"      (do (dev-create-vm! dev-dir backend env) (recur))
+            "Cloud template" (do (dev-cloud-template! dev-dir backend env) (recur))
+            "Manage VMs"     (do (dev-manage-vms! dev-dir backend env) (recur))
+            "Exit"           (println "Bye.")))))))
 
 ;; ─── Main ───────────────────────────────────────────────────────────────────
 

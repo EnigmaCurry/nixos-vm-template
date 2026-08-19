@@ -494,9 +494,14 @@ done 2>/dev/null"]
           ;; lxc-only profiles (nas) are hidden on KVM backends; kernel-bound
           ;; profiles can't run in a container.
           avail (let [a (available-profiles cfg)]
-                  (if lxc?
-                    (remove #{"nvidia" "pipewire" "zram"} a)
-                    (remove profile/lxc-only-profiles a)))
+                  (->> a
+                       ((if lxc?
+                          #(remove #{"nvidia" "pipewire" "zram"} %)
+                          #(remove profile/lxc-only-profiles %)))
+                       ;; cloud-init is only for template builds (just cloud-template);
+                       ;; hide it from the regular VM picker so users don't get a
+                       ;; runtime cloud-init failure with no seed drive attached.
+                       (remove #{"cloud-init"})))
           ;; ── profile(s) ──
           env-profile (some-> (System/getenv "NIXOS_VM_PROFILE") str/trim not-empty)
           profile

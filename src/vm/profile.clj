@@ -87,22 +87,21 @@
 
 (defn ensure-cloud-init-mutable
   "cloud-init writes to /etc (hostname, ssh host keys, networkd config) on
-  first boot, so it needs a writable rootfs — `mutable` mode. `semi-mutable`
-  (writable /nix overlay only) isn't enough and is rejected. If neither
-  mutability token is present (default = immutable), auto-imply `mutable`.
-  Returns the possibly-updated profile key."
+  first boot, so it needs a writable rootfs — `mutable` mode. Anything else
+  (immutable/semi-mutable) is rejected. `cloud-template` sets mutable itself
+  before calling build, so callers hitting this error have combined cloud-init
+  with the wrong mode in the regular create path."
   [profile-key]
   (let [profs (set (str/split profile-key #","))]
     (cond
       (not (contains? profs "cloud-init")) profile-key
       (contains? profs "mutable") profile-key
-      (contains? profs "semi-mutable")
-      (do (println "Error: cloud-init requires 'mutable' mode; 'semi-mutable' is not enough.")
-          (println "cloud-init writes to /etc which needs a fully writable rootfs.")
-          (System/exit 1))
       :else
-      (do (println "Note: cloud-init profile implies 'mutable' mode. Adding 'mutable'.")
-          (normalize-profiles (str profile-key ",mutable"))))))
+      (do (println "Error: cloud-init profile requires 'mutable' mode.")
+          (println "cloud-init writes to /etc, which needs a writable rootfs.")
+          (println "To build a Proxmox template with cloud-init:")
+          (println "  just cloud-template <name>")
+          (System/exit 1)))))
 
 (defn build-profile
   "Build a profile's base image. Honors SKIP_BUILD (bootstrap). FLAKE_UPDATE is
