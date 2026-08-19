@@ -461,14 +461,8 @@ this is needed.
 Now:
 
 ```bash
-nixos-rebuild switch --flake /etc/nixos
+nixos-rebuild switch
 ```
-
-`--flake` is required — without it, nixos-rebuild looks for legacy
-`/etc/nixos/configuration.nix` which `cloud-template` doesn't create.
-The flake at `/etc/nixos/flake.nix` already has this clone's hostname
-substituted in by the `nixos-template-hostname.service` that ran during
-first boot.
 
 ## 16. Destroy the temp VM
 
