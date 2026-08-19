@@ -241,6 +241,8 @@
               libguestfs-with-appliance
               virt-manager
               mkpasswd  # For generating password hashes
+              rsync     # proxmox backend: transfers built images to PVE
+              openssh   # proxmox backend: qm/pvesh over SSH
               script-wizard.packages.${system}.default  # bb pod for wizard prompts
             ];
           };
