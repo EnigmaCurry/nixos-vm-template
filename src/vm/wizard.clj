@@ -456,9 +456,12 @@ done 2>/dev/null"]
                     (remove #{"nvidia" "pipewire" "zram"} a)
                     (remove profile/lxc-only-profiles a)))
           ;; ── profile(s) ──
+          env-profile (some-> (System/getenv "NIXOS_VM_PROFILE") str/trim not-empty)
           profile
-          (if-not (str/blank? profile0)
-            profile0
+          (cond
+            env-profile env-profile
+            (not (str/blank? profile0)) profile0
+            :else
             (do (println)
                 (let [defaults (->> (str/split cur-profile #",")
                                     (map str/trim)
