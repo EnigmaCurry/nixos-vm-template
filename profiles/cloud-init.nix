@@ -37,6 +37,19 @@
   # are actually served to userspace resolvers.
   services.resolved.enable = lib.mkDefault true;
 
+  # The first-boot activation script wipes /etc/ssh/ssh_host_*_key so each
+  # clone gets unique keys. Cloud-init generates fresh ones during its
+  # modules-config stage. But sshd.service's preStart runs *before*
+  # cloud-init, sees no keys, and (on some NixOS releases) fails to
+  # generate them itself — sshd never starts and the log shows
+  #   [FAILED] Failed to start SSH Host Keys Generation.
+  # Delay sshd until cloud-init has finished (which regenerates the keys
+  # cleanly via its own ssh_keygen path).
+  systemd.services.sshd = {
+    wants = [ "cloud-init.service" ];
+    after = [ "cloud-init.service" ];
+  };
+
   # qemu-guest-agent lets PVE report the VM's IP + trigger clean shutdowns.
   services.qemuGuest.enable = true;
 
