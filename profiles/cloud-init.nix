@@ -63,6 +63,12 @@
   # out of the box.
   networking.firewall.allowedTCPPorts = [ 22 ];
 
+  # sshd_config defaults to PermitRootLogin=no in this build, which rejects
+  # root before key auth even runs. cloud-init installs the seed drive's key
+  # into /etc/ssh/authorized_keys.d/root, so allow key-based (but not
+  # password) root login. mkForce because mutable.nix locks this to "no".
+  services.openssh.settings.PermitRootLogin = lib.mkForce "prohibit-password";
+
   # qemu-guest-agent lets PVE report the VM's IP + trigger clean shutdowns.
   services.qemuGuest.enable = true;
 
