@@ -39,19 +39,17 @@
   # every activation and console password login stays broken.
   users.mutableUsers = lib.mkForce true;
 
-  # nixpkgs builds libxcrypt with `enableHashes = "strong"` by default, which
-  # supports $6$ (SHA-512), $2b$ (bcrypt), $y$ (yescrypt) — but NOT $5$
-  # (SHA-256 crypt). PVE's --cipassword generates $5$ hashes (Debian's
-  # default), and pam_unix / unix_chkpwd then reject them with:
+  # NOTE: PVE's --cipassword generates $5$ (SHA-256 crypt) hashes, but
+  # nixpkgs' libxcrypt defaults to enableHashes = "strong" which excludes
+  # $5$ — pam_unix rejects them at login with
   #   The password hash "$5$..." is unknown to libcrypt.
-  # Rebuild libxcrypt with all hash formats so console password login works.
-  # This does trigger a big rebuild (libxcrypt is in glibc's closure), but
-  # it's the standard nixpkgs fix for this problem.
-  nixpkgs.overlays = [
-    (final: prev: {
-      libxcrypt = prev.libxcrypt.override { enableHashes = "all"; };
-    })
-  ];
+  # Console password login via --cipassword therefore doesn't work out of
+  # the box. Options if you need it:
+  #   * SSH in with your key, run `sudo passwd admin` — the new hash is $6$
+  #     (SHA-512) which libxcrypt does support.
+  #   * Override libxcrypt with `enableHashes = "all"` via nixpkgs.overlays,
+  #     but that cascades a glibc/gcc rebuild — ~16 GB RAM during build.
+  # SSH key auth from --sshkeys is unaffected and remains the primary path.
 
   # cloud-init's default renderer is systemd-networkd — it writes static
   # per-interface configs to /etc/systemd/network/. modules/mutable.nix sets
