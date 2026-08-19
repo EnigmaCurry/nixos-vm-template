@@ -25,8 +25,19 @@
       # Clones are reached as the ciuser (typically 'admin' via PVE
       # --ciuser); root access is via `sudo` from that account.
       disable_root = true;
+      # Tell cloud-init the distro's default user is 'admin' so PVE's
+      # top-level `password:` (which cc_set_passwords applies to the default
+      # user) targets admin instead of falling back to root.
+      system_info.default_user.name = config.core.adminUser;
     };
   };
+
+  # Allow runtime password changes to persist. base.nix locks mutableUsers=false
+  # for the declarative-identity flow, but cloud-init needs to write to
+  # /etc/shadow (via chpasswd) for the seed drive's --cipassword to take
+  # effect. Without this override, NixOS reverts admin's shadow entry on
+  # every activation and console password login stays broken.
+  users.mutableUsers = lib.mkForce true;
 
   # cloud-init's default renderer is systemd-networkd — it writes static
   # per-interface configs to /etc/systemd/network/. modules/mutable.nix sets
