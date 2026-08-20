@@ -525,6 +525,7 @@ pattern as step 15 — `--sshkeys` fails on multi-key
 `authorized_keys` files):
 
 ```bash
+mkdir -p /var/lib/vz/snippets
 {
   cat <<'EOF'
 #cloud-config
