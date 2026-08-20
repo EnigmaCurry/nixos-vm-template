@@ -635,8 +635,8 @@ ssh -o StrictHostKeyChecking=accept-new root@192.168.100.1 hostname
 Register a `pve` shell alias so you can drive the Proxmox backend
 from any directory (see [INSTALL.md](INSTALL.md#tab-completion-and-per-backend-aliases)
 for the alias mechanism). Write the backend config to
-`~/.config/nixos-vm-template/pve.env` and wire the alias in
-`~/.bashrc`:
+`~/.config/nixos-vm-template/pve.env`, bridge `~/.bashrc` into login
+shells (SSH doesn't source it directly), then wire the alias:
 
 ```bash
 mkdir -p ~/.config/nixos-vm-template
@@ -648,6 +648,10 @@ PVE_STORAGE=local-zfs
 # Prod VMs default to vmbr1 (serviced by the router VM once it's up).
 PVE_BRIDGE=vmbr1
 EOF
+
+# Bridge ~/.bashrc into login shells (SSH), idempotent.
+grep -q '\.bashrc' ~/.bash_profile 2>/dev/null || \
+  echo '[ -f ~/.bashrc ] && . ~/.bashrc' >> ~/.bash_profile
 
 cat >> ~/.bashrc <<'EOF'
 
