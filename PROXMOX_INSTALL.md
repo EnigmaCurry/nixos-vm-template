@@ -588,7 +588,9 @@ EOF
 
 # Insert ./proxy.nix into the modules list, right before the
 # "# VM-specific settings" anchor the mutable template always emits.
-sed -i 's|^          # VM-specific settings$|          ./proxy.nix\n          # VM-specific settings|' /etc/nixos/flake.nix
+# \1 copies the anchor's indentation so this doesn't care how many
+# spaces the template uses.
+sed -i 's|^\([[:space:]]*\)# VM-specific settings$|\1./proxy.nix\n\1# VM-specific settings|' /etc/nixos/flake.nix
 ```
 
 For the immediate `nixos-rebuild switch` (which itself needs to reach
