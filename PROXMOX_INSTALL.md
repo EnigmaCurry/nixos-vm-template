@@ -520,15 +520,27 @@ everything else lands on `vmbr1` once the router VM is up.
 
 ### Clone the template
 
-On **PVE**:
+On **PVE**, apply the SSH keys via a `--cicustom` snippet (same
+pattern as step 15 — `--sshkeys` fails on multi-key
+`authorized_keys` files):
 
 ```bash
+{
+  cat <<'EOF'
+#cloud-config
+hostname: admin
+users:
+  - name: admin
+    ssh_authorized_keys:
+EOF
+  awk 'NF{printf "      - \"%s\"\n", $0}' /root/.ssh/authorized_keys
+} > /var/lib/vz/snippets/admin.yaml
+
 qm clone 9010 100 --name admin --full 1
 qm set 100 --memory 4096 --cores 2
 qm set 100 --net0 virtio,bridge=mgmt
-qm set 100 --ciuser admin \
-           --sshkeys ~/.ssh/authorized_keys \
-           --ipconfig0 ip=192.168.100.100/24,gw=192.168.100.1
+qm set 100 --cicustom "user=local:snippets/admin.yaml"
+qm set 100 --ipconfig0 ip=192.168.100.100/24,gw=192.168.100.1
 qm start 100
 ```
 
