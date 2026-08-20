@@ -644,7 +644,7 @@ PVE_STORAGE=local-zfs
 PVE_BRIDGE=vmbr1
 EOF
 
-nix develop --command just list
+just list
 ```
 
 You should see VMID 100 (this VM) listed. From here on, any
