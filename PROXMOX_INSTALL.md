@@ -287,19 +287,19 @@ router. The only thing PVE needs on `vmbr1` is the L2 fabric for guest
 NICs; management traffic (including PVE's own `apt-get update`) stays on
 `mgmt` via workstation tinyproxy indefinitely.
 
-Append to `/etc/network/interfaces`:
+Write a new drop-in under `/etc/network/interfaces.d/` (sourced by the
+main file's trailing `source /etc/network/interfaces.d/*`):
 
 ```bash
-cat >> /etc/network/interfaces <<'EOF'
-
+cat > /etc/network/interfaces.d/vmbr1 <<'EOF'
+# Prod-VM bridge. Serviced by the router VM (built later) — PVE has
+# no IP here on purpose. bridge-ports is 'none' until the router
+# attaches its virtio NIC as the sole member.
 auto vmbr1
 iface vmbr1 inet manual
     bridge-ports none
     bridge-stp off
     bridge-fd 0
-    # Prod-VM bridge. Serviced by the router VM (built later) — PVE has
-    # no IP here on purpose. bridge-ports is 'none' until the router
-    # attaches its virtio NIC as the sole member.
 EOF
 
 ifreload -a
