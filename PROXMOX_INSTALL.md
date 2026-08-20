@@ -255,12 +255,7 @@ sed -i 's/\bvmbr0\b/mgmt/g' /etc/network/interfaces
 cat /etc/network/interfaces          # sanity-check before rebooting
 ```
 
-Then reboot to apply — **not** `ifreload -a`. ifupdown2 treats the
-rename as "delete vmbr0, create mgmt" and does a live teardown/recreate
-cycle that briefly drops 192.168.100.1 from the network; if anything
-in the cycle stalls or errors, your SSH session hangs. A reboot avoids
-all of it: the kernel starts fresh, networking.service reads the new
-config, mgmt comes up cleanly on 192.168.100.1.
+Then reboot to apply:
 
 ```bash
 reboot
