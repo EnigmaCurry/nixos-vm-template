@@ -237,28 +237,44 @@ ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no root@192.168
 `vmbr0` is going to stay isolated forever in this design — it's the
 management-only path (PVE ↔ workstation ↔ admin VM ↔ tinyproxy). Renaming
 it to `mgmt` makes every downstream reference (`--net0 bridge=mgmt`,
-`PVE_BRIDGE=mgmt`) self-document. Do it before creating any VMs so
-nothing needs re-attaching later.
+`PVE_BRIDGE=mgmt`) self-document.
+
+**⚠️ Do this on a fresh install, before any VMs exist.** If any VM's
+config still references `bridge=vmbr0` after the rename, that VM will
+come up networkless. `qm list` should be empty; `bridge link show`
+should show only the USB NIC as a member of vmbr0 (no `tapNNNi0` or
+`fwprNNNp0` entries). If either check fails, stop and either destroy
+the VMs first or skip this step (keep `vmbr0` — the doc still works,
+substitute `vmbr0` for `mgmt` in every downstream `bridge=…` reference).
 
 Edit `/etc/network/interfaces` and change every occurrence of `vmbr0`
-to `mgmt` (both the `auto vmbr0` line and the `iface vmbr0 inet static`
-stanza header):
+to `mgmt`:
 
 ```bash
 sed -i 's/\bvmbr0\b/mgmt/g' /etc/network/interfaces
-ifreload -a
+cat /etc/network/interfaces          # sanity-check before rebooting
 ```
 
-Verify:
+Then reboot to apply — **not** `ifreload -a`. ifupdown2 treats the
+rename as "delete vmbr0, create mgmt" and does a live teardown/recreate
+cycle that briefly drops 192.168.100.1 from the network; if anything
+in the cycle stalls or errors, your SSH session hangs. A reboot avoids
+all of it: the kernel starts fresh, networking.service reads the new
+config, mgmt comes up cleanly on 192.168.100.1.
+
+```bash
+reboot
+# wait ~60s
+ssh root@192.168.100.1
+```
+
+Verify after reconnecting:
 
 ```bash
 ip -br link show mgmt        # UP, MAC of the USB NIC
 ip -br addr show mgmt        # 192.168.100.1/24
 bridge link show             # USB NIC as member of mgmt
 ```
-
-Your SSH session should survive — the bridge index doesn't change, only
-the name.
 
 **Caveat:** PVE's web UI expects bridges matching `vmbr\d+` and won't
 offer `mgmt` in the GUI network dropdown. This is fine here because
