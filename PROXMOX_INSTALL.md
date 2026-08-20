@@ -630,15 +630,19 @@ into the admin VM (`scp` from workstation, or paste into
 ssh -o StrictHostKeyChecking=accept-new root@192.168.100.1 hostname
 ```
 
-Set the backend and confirm the CLI can talk to PVE:
+Persist the backend config in `.env` at the repo root (the Justfile
+sets `dotenv-load`, so every `just` invocation picks it up):
 
 ```bash
-export BACKEND=proxmox
-export PVE_HOST=192.168.100.1
-export PVE_STORAGE=local-zfs
-export PVE_BRIDGE=vmbr1                      # prod VMs default to the router bridge
+cat > .env <<'EOF'
+BACKEND=proxmox
+PVE_HOST=192.168.100.1
+PVE_STORAGE=local-zfs
+# Prod VMs default to vmbr1 (serviced by the router VM once it's up).
+PVE_BRIDGE=vmbr1
+EOF
 
-nix develop --command just list-vms
+nix develop --command just list
 ```
 
 You should see VMID 100 (this VM) listed. From here on, any
