@@ -540,6 +540,7 @@ EOF
 } > /var/lib/vz/snippets/admin.yaml
 
 qm clone 9010 100 --name admin --full 1
+qm resize 100 virtio0 +100G
 qm set 100 --memory 4096 --cores 2
 qm set 100 --net0 virtio,bridge=mgmt
 qm set 100 --cicustom "user=local:snippets/admin.yaml"
