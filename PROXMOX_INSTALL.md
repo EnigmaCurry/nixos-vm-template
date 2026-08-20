@@ -35,8 +35,11 @@ machine. The installer will use the USB NIC as the management interface.
 The onboard/PCIe NICs stay unbound so we can dedicate them to **PCI
 passthrough** later (see [`profiles/nftables.nix`](profiles/nftables.nix)
 for the passthrough-picker). This also means the default PVE bridge
-(`vmbr0`) has no upstream — it's an isolated internal switch that guest VMs
-route through, rather than an uplink to the LAN.
+(`vmbr0`) has no upstream — it's an isolated internal switch reserved
+for management traffic between PVE, the workstation, and the admin VM.
+Step 11 renames it to `mgmt` so this role is self-documenting; step 12
+adds a second bridge (`vmbr1`) that the router VM will service for prod
+VMs, on a subnet distinct from the physical LAN.
 
 ## 3. Boot from USB and install PVE
 
@@ -223,7 +226,75 @@ ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no root@192.168
 # expected: Permission denied (publickey).
 ```
 
-## 11. Download a Debian cloud image on PVE
+## 11. Rename `vmbr0` → `mgmt`
+
+`vmbr0` is going to stay isolated forever in this design — it's the
+management-only path (PVE ↔ workstation ↔ admin VM ↔ tinyproxy). Renaming
+it to `mgmt` makes every downstream reference (`--net0 bridge=mgmt`,
+`PVE_BRIDGE=mgmt`) self-document. Do it before creating any VMs so
+nothing needs re-attaching later.
+
+Edit `/etc/network/interfaces` and change every occurrence of `vmbr0`
+to `mgmt` (both the `auto vmbr0` line and the `iface vmbr0 inet static`
+stanza header):
+
+```bash
+sed -i 's/\bvmbr0\b/mgmt/g' /etc/network/interfaces
+ifreload -a
+```
+
+Verify:
+
+```bash
+ip -br link show mgmt        # UP, MAC of the USB NIC
+ip -br addr show mgmt        # 192.168.100.1/24
+bridge link show             # USB NIC as member of mgmt
+```
+
+Your SSH session should survive — the bridge index doesn't change, only
+the name.
+
+**Caveat:** PVE's web UI expects bridges matching `vmbr\d+` and won't
+offer `mgmt` in the GUI network dropdown. This is fine here because
+everything downstream (`qm`, `bootstrap.bb`, `nixos-vm-template`) drives
+PVE via the CLI, not the GUI.
+
+## 12. Create `vmbr1` — the prod bridge
+
+Prod VMs live on `vmbr1`, on a subnet distinct from the physical LAN,
+and reach the internet through the router VM (built in a later step).
+PVE itself deliberately gets **no IP** on this bridge — the hypervisor
+stays airgapped on `mgmt`, and there's no route from PVE through the
+router. The only thing PVE needs on `vmbr1` is the L2 fabric for guest
+NICs; management traffic (including PVE's own `apt-get update`) stays on
+`mgmt` via workstation tinyproxy indefinitely.
+
+Append to `/etc/network/interfaces`:
+
+```bash
+cat >> /etc/network/interfaces <<'EOF'
+
+auto vmbr1
+iface vmbr1 inet manual
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+    # Prod-VM bridge. Serviced by the router VM (built later) — PVE has
+    # no IP here on purpose. bridge-ports is 'none' until the router
+    # attaches its virtio NIC as the sole member.
+EOF
+
+ifreload -a
+```
+
+Verify:
+
+```bash
+ip -br link show vmbr1       # UP, no address
+brctl show vmbr1             # exists, no ports
+```
+
+## 13. Download a Debian cloud image on PVE
 
 We'll use a throwaway Debian VM as the launcher for `bootstrap.bb` — it
 does the image prep + rsync-back to PVE, then we destroy it. This keeps
@@ -237,7 +308,7 @@ cd /root
 curl -fLO https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 ```
 
-## 12. Create the temp VM and import the disk
+## 14. Create the temp VM and import the disk
 
 Clean up any previous attempt first, so retries start fresh:
 
@@ -249,7 +320,7 @@ Then create:
 
 ```bash
 qm create 9999 --name debian-tmp-nix-build --memory 8192 --cores 4 \
-  --net0 virtio,bridge=vmbr0 --ostype l26 --cpu host \
+  --net0 virtio,bridge=mgmt --ostype l26 --cpu host \
   --scsihw virtio-scsi-single --serial0 socket --agent 1
 
 qm importdisk 9999 debian-13-genericcloud-amd64.qcow2 local-zfs
@@ -261,7 +332,7 @@ qm resize 9999 scsi0 +100G
 
 Adjust `local-zfs` if your storage is named differently (`pvesm status`).
 
-## 13. Configure cloud-init via a custom snippet and boot
+## 15. Configure cloud-init via a custom snippet and boot
 
 PVE's `--sshkeys` codepath URL-encodes the file contents and often fails
 cloud-init's key-application step (you'll see `Applying SSH credentials
@@ -295,7 +366,7 @@ qm start 9999
 
 Wait ~30s for cloud-init to finish first-boot.
 
-## 14. SSH into the temp VM and install Nix
+## 16. SSH into the temp VM and install Nix
 
 From your **workstation**, load your key into ssh-agent and SSH to the
 temp VM with `-A` so the agent is forwarded — the bootstrap in step 15
@@ -308,7 +379,7 @@ ssh -A root@192.168.100.10
 Inside the temp VM, point apt/curl at the proxy, then install Nix. We
 use Nix (rather than apt for `libguestfs-tools` + a static `bb`) so the
 flake dev shell provides every build tool at the exact pinned version
-this repo expects:
+this repo expects.
 
 ```bash
 cat > /etc/apt/apt.conf.d/99proxy <<'EOF'
@@ -357,7 +428,7 @@ nix --version
 nix run nixpkgs#hello       # first run pulls a few MB through tinyproxy
 ```
 
-## 15. Build the Proxmox cloud-init template
+## 17. Build the Proxmox cloud-init template
 
 Inside the temp VM, invoke `bootstrap.bb` via Nix-provided `babashka`.
 Nix on `PATH` means bootstrap detects **Development mode** and runs
@@ -376,7 +447,7 @@ export NIXOS_VM_NAME=nixos                   # the template name
 export NIXOS_VM_PROFILE=""                   # extra profiles (cloud-init,mutable auto-added)
 export PVE_HOST=192.168.100.1                # skip PVE host: prompt
 export PVE_STORAGE=local-zfs                 # skip storage prompt
-export PVE_BRIDGE=vmbr0                      # skip bridge prompt
+export PVE_BRIDGE=mgmt                       # skip bridge prompt (renamed in step 11)
 export PVE_VMID=9010                         # any free VMID (templates conventionally 9000+)
 export NIXOS_VM_MEMORY=2G                    # per-clone default — clones can bump
 export NIXOS_VM_VCPUS=2                      # per-clone default — clones can bump
@@ -399,72 +470,10 @@ The build runs `just cloud-template nixos "$NIXOS_VM_PROFILE"` inside
 the flake dev shell. It skips the interactive wizard entirely
 (templates carry no per-VM identity), builds the qcow2, imports it to
 PVE, attaches an IDE2 cloud-init seed drive, and marks the VM as a
-template with `qm template`. No VM is started.
+template with `qm template`. No VM is started. Clones from this
+template are configured in step 19 (the admin VM).
 
-Clone from the template — set the per-clone identity via
-`qm set --sshkeys/--ipconfig0`, then start:
-
-```bash
-qm clone 9000 101 --name web-01 --full 1
-qm set  101 --ciuser admin \
-            --sshkeys ~/.ssh/authorized_keys \
-            --ipconfig0 ip=192.168.100.20/24,gw=192.168.100.1
-qm start 101
-```
-
-### Giving a clone internet via tinyproxy
-
-Fresh clones land on `vmbr0`, which still has no upstream — same
-predicament PVE was in at step 7. Until you have a router VM providing
-real WAN, point the clone at your workstation's tinyproxy so `nix
-build` / `nixos-rebuild` / `curl` etc. can reach the internet.
-
-Two things need the proxy: the **root shell** running `nix` (flake
-input fetching happens client-side) and the **nix-daemon** (actual
-build downloads). From your workstation:
-
-```bash
-ssh admin@192.168.100.20
-sudo -i
-```
-
-In the root shell, export the proxy directly:
-
-```bash
-export http_proxy=http://192.168.100.2:8888/
-export https_proxy=http://192.168.100.2:8888/
-export no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
-```
-
-Then give `nix-daemon` the proxy via a systemd drop-in. NixOS's
-`/etc/systemd/system/` is under the declarative-`/etc` overlay and
-rejects ad-hoc writes, so use `/run/systemd/system/` instead (`tmpfs`,
-systemd reads drop-ins from there too):
-
-```bash
-mkdir -p /run/systemd/system/nix-daemon.service.d
-tee /run/systemd/system/nix-daemon.service.d/proxy.conf > /dev/null <<'EOF'
-[Service]
-Environment=http_proxy=http://192.168.100.2:8888/
-Environment=https_proxy=http://192.168.100.2:8888/
-Environment=no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
-EOF
-systemctl daemon-reload
-systemctl restart nix-daemon
-```
-
-Both are ephemeral — the root-shell exports die when you log out; the
-`/run/` drop-in dies on reboot. That matches the throwaway nature of
-the whole proxy bridge: once a router VM is up on `vmbr0`, none of
-this is needed.
-
-Now:
-
-```bash
-nixos-rebuild switch
-```
-
-## 16. Destroy the temp VM
+## 18. Destroy the temp VM
 
 Once the template is on PVE, log out of the temp VM and delete it:
 
@@ -477,3 +486,153 @@ rm /var/lib/vz/snippets/bootstrap-tmp.yaml
 
 Nothing about the temp VM persists — the `nixos` template is the only
 artifact left on PVE, and clones from it are the next building block.
+
+## 19. Create the admin VM (VMID 100)
+
+The admin VM is the first clone from the template and takes over the
+"launcher for other VMs" role that the temp VM played — but permanently.
+Pet containers may still be cloned from the template directly (like
+this VM), but the majority of the fleet will be built from **inside
+this VM** using `nixos-vm-template` (`just create ...`) against the PVE
+backend at `192.168.100.1`.
+
+The admin VM lives on `mgmt` alongside PVE, at `192.168.100.100/24`.
+It's the only VM (besides pet clones) that stays on `mgmt` long-term —
+everything else lands on `vmbr1` once the router VM is up.
+
+### Clone the template
+
+On **PVE**:
+
+```bash
+qm clone 9010 100 --name admin --full 1
+qm set 100 --memory 4096 --cores 2
+qm set 100 --net0 virtio,bridge=mgmt
+qm set 100 --ciuser admin \
+           --sshkeys ~/.ssh/authorized_keys \
+           --ipconfig0 ip=192.168.100.100/24,gw=192.168.100.1
+qm start 100
+```
+
+Wait ~30s for cloud-init to finish first boot, then from your
+**workstation**:
+
+```bash
+ssh admin@192.168.100.100
+sudo -i
+```
+
+### Wire the admin VM to tinyproxy — persistently
+
+The admin VM has the same predicament PVE had in step 7: it's on
+`mgmt`, which has no upstream. Unlike the throwaway clones case, this
+one is permanent — the admin VM stays on `mgmt` forever and its only
+route to the internet is workstation tinyproxy. Bake the proxy into
+`/etc/nixos/configuration.nix` so it survives reboots and
+`nixos-rebuild` runs.
+
+Two things need the proxy: the **root/user shell** running `nix`
+(flake input fetching happens client-side) and the **nix-daemon**
+(actual build downloads).
+
+In the root shell on the admin VM, add to `/etc/nixos/configuration.nix`
+(inside the top-level `{ config, pkgs, ... }: {}` block):
+
+```nix
+{
+  # tinyproxy on the workstation is this VM's only route to the internet
+  # (mgmt is airgapped). Both the nix-daemon and interactive shells need
+  # the proxy — the daemon downloads store paths, the shell fetches flake
+  # inputs client-side.
+  systemd.services.nix-daemon.environment = {
+    http_proxy  = "http://192.168.100.2:8888/";
+    https_proxy = "http://192.168.100.2:8888/";
+    no_proxy    = "localhost,127.0.0.0/8,192.168.100.0/24";
+  };
+
+  environment.sessionVariables = {
+    http_proxy  = "http://192.168.100.2:8888/";
+    https_proxy = "http://192.168.100.2:8888/";
+    no_proxy    = "localhost,127.0.0.0/8,192.168.100.0/24";
+  };
+}
+```
+
+For the immediate `nixos-rebuild switch` (which itself needs to reach
+the internet), export the proxy in the current shell first:
+
+```bash
+export http_proxy=http://192.168.100.2:8888/
+export https_proxy=http://192.168.100.2:8888/
+export no_proxy=localhost,127.0.0.0/8,192.168.100.0/24
+
+nixos-rebuild switch
+```
+
+After the rebuild, log out and back in so the new
+`environment.sessionVariables` are picked up.
+
+### Clone the nixos-vm-template repo
+
+Still on the admin VM as `admin` (not root — the repo lives under the
+admin user):
+
+```bash
+git clone https://github.com/EnigmaCurry/nixos-vm-template.git
+cd nixos-vm-template
+```
+
+### Point at PVE and verify
+
+The admin VM manages PVE over SSH using the same key that
+`ssh-copy-id` installed on PVE in step 10 — but the key needs to be on
+the admin VM, not just the workstation. Copy your workstation SSH key
+into the admin VM (`scp` from workstation, or paste into
+`~/.ssh/id_ed25519`), then:
+
+```bash
+ssh -o StrictHostKeyChecking=accept-new root@192.168.100.1 hostname
+```
+
+Set the backend and confirm the CLI can talk to PVE:
+
+```bash
+export BACKEND=proxmox
+export PVE_HOST=192.168.100.1
+export PVE_STORAGE=local-zfs
+export PVE_BRIDGE=vmbr1                      # prod VMs default to the router bridge
+
+nix develop --command just list-vms
+```
+
+You should see VMID 100 (this VM) listed. From here on, any
+`just create <name>` from inside the admin VM builds a new prod VM,
+attaches it to `vmbr1`, and imports the disk to PVE at
+`192.168.100.1`.
+
+## 20. Next: router VM with PCI NIC passthrough (TBD)
+
+The remaining pieces to reach a working prod fleet:
+
+- **PVE host prep for passthrough** — enable IOMMU on the kernel
+  cmdline, bind the onboard NIC PCI IDs to `vfio-pci` via
+  `/etc/modprobe.d/vfio.conf`, `update-initramfs -u`, reboot. Verify
+  `lspci -nnk` shows `vfio-pci` on both NICs in distinct IOMMU groups.
+- **Router VM** — built from the admin VM with the
+  [`nftables`](profiles/nftables.nix) profile (immutable). Two
+  passed-through physical NICs (`wan0` = ISP uplink, `lan0` = physical
+  house-LAN switch), one virtio NIC on `vmbr1` for prod VMs, plus a
+  `systemd.link` file to pin `wan0`/`lan0` names by MAC. The wizard's
+  network-class PCI picker (added on this branch) lists the candidate
+  NICs interactively.
+- **nftables ruleset** — NAT out `wan0`, forward between `lan0` and
+  the `vmbr1`-side interface, drop everything else. Written into
+  `machines/router/nftables.conf`.
+- **DHCP + DNS for prod VMs** — TBD. Likely a companion profile
+  (`dhcp-dns` or similar) composed with `nftables`, so the nftables
+  profile stays firewall-only. Not implemented yet.
+- **PVE stays airgapped** — no `vmbr1` IP, no route through the
+  router. Its only internet path remains workstation tinyproxy over
+  `mgmt`, indefinitely. The only reason PVE ever needs to reach the
+  router VM is a direct SSH link from the admin VM to `192.168.100.1`
+  and back — not a routed path.
