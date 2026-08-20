@@ -247,11 +247,12 @@ should show only the USB NIC as a member of vmbr0 (no `tapNNNi0` or
 the VMs first or skip this step (keep `vmbr0` — the doc still works,
 substitute `vmbr0` for `mgmt` in every downstream `bridge=…` reference).
 
-Edit `/etc/network/interfaces` and change every occurrence of `vmbr0`
-to `mgmt`:
+Edit `/etc/network/interfaces` — rename `vmbr0` to `mgmt` and drop
+the `gateway 192.168.100.1` line:
 
 ```bash
 sed -i 's/\bvmbr0\b/mgmt/g' /etc/network/interfaces
+sed -i '/^[[:space:]]*gateway 192\.168\.100\.1[[:space:]]*$/d' /etc/network/interfaces
 cat /etc/network/interfaces          # sanity-check before rebooting
 ```
 
