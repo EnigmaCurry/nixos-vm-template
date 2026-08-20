@@ -15,6 +15,13 @@ against it without a Nix laptop.
 - **A second machine** — to write the installer USB, and to remotely
   login. The machine needs two network interfaces: one for normal
   internet access (e.g. wifi) and a second physical NIC (maybe USB).
+- **`ssh-agent` running on the workstation with your ed25519 key
+  loaded** — every `ssh` in this doc assumes `ssh-add -l` already
+  lists a key. If it doesn't:
+  ```bash
+  eval "$(ssh-agent)"
+  ssh-add ~/.ssh/id_ed25519
+  ```
 
 ## 1. Download the ISO and write to USB
 
@@ -95,29 +102,28 @@ package installs on the fresh host will need internet. Run a small
 HTTP proxy on your workstation that PVE can dial through the direct
 link.
 
-Write a minimal `tinyproxy.conf`:
+Tinyproxy is config-file-driven (no CLI equivalents for `Listen`/`Allow`),
+so pipe the config in as a process-substituted file:
 
-```
+```bash
+nix run nixpkgs#tinyproxy -- -d -c <(cat <<'EOF'
 Port 8888
 Listen 192.168.100.2
 Allow 192.168.100.0/24
+EOF
+)
 ```
 
-Then run it (now that `192.168.100.2` is bound):
-
-```bash
-nix run nixpkgs#tinyproxy -- -d -c ./tinyproxy.conf
-```
-
-(keep this terminal open until the proxy is not needed; or run it in tmux.)
+Keep this terminal open until the proxy is not needed (or run it in tmux).
+PVE stays airgapped forever in this design, so tinyproxy is the
+**permanent** internet path for the hypervisor — plan for it to run any
+time you need to `apt-get` on PVE, not just during install.
 
 ## 6. SSH into PVE
 
-In another terminal,
+In another terminal:
 
 ```bash
-eval $(ssh-agent)
-ssh-add ~/.ssh/id_ed25519
 ssh root@192.168.100.1
 ```
 
