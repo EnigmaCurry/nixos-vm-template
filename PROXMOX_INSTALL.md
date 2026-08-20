@@ -559,31 +559,36 @@ sudo -i
 
 Until the router VM is up, the admin VM has the same predicament PVE
 had in step 7: `mgmt` has no upstream. Route it through workstation
-tinyproxy in the meantime — bake the proxy into
-`/etc/nixos/configuration.nix` so it survives reboots and
-`nixos-rebuild` runs. Two things need the proxy: the root/user shell
-running `nix`, and the `nix-daemon`.
+tinyproxy in the meantime. Write a self-contained proxy module to
+`/etc/nixos/proxy.nix` and hook it into `/etc/nixos/flake.nix`'s
+`modules` list — this survives reboots and `nixos-rebuild` runs. Two
+things need the proxy: the root/user shell running `nix`, and the
+`nix-daemon`.
 
-In the root shell on the admin VM, add to `/etc/nixos/configuration.nix`
-(inside the top-level `{ config, pkgs, ... }: {}` block):
+In the root shell on the admin VM:
 
-```nix
+```bash
+cat > /etc/nixos/proxy.nix <<'EOF'
+# Temporary — workstation tinyproxy is this VM's only route to the
+# internet until the router VM is up. Remove once the admin VM has a
+# NIC on vmbr1 and can reach the internet through the router.
 {
-  # Temporary — workstation tinyproxy is this VM's only route to the
-  # internet until the router VM is up. Remove once the admin VM has a
-  # NIC on vmbr1 and can reach the internet through the router.
   systemd.services.nix-daemon.environment = {
     http_proxy  = "http://192.168.100.2:8888/";
     https_proxy = "http://192.168.100.2:8888/";
     no_proxy    = "localhost,127.0.0.0/8,192.168.100.0/24";
   };
-
   environment.sessionVariables = {
     http_proxy  = "http://192.168.100.2:8888/";
     https_proxy = "http://192.168.100.2:8888/";
     no_proxy    = "localhost,127.0.0.0/8,192.168.100.0/24";
   };
 }
+EOF
+
+# Insert ./proxy.nix into the modules list, right before the
+# "# VM-specific settings" anchor the mutable template always emits.
+sed -i 's|^          # VM-specific settings$|          ./proxy.nix\n          # VM-specific settings|' /etc/nixos/flake.nix
 ```
 
 For the immediate `nixos-rebuild switch` (which itself needs to reach
