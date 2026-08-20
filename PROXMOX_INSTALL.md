@@ -643,7 +643,11 @@ PVE_STORAGE=local-zfs
 # Prod VMs default to vmbr1 (serviced by the router VM once it's up).
 PVE_BRIDGE=vmbr1
 EOF
+```
 
+Confirm the CLI can talk to PVE:
+
+```bash
 just list
 ```
 
