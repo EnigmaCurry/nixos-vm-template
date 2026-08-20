@@ -651,10 +651,12 @@ Confirm the CLI can talk to PVE:
 just list
 ```
 
-You should see VMID 100 (this VM) listed. From here on, any
-`just create <name>` from inside the admin VM builds a new prod VM,
-attaches it to `vmbr1`, and imports the disk to PVE at
-`192.168.100.1`.
+The list will be empty (or only show VMs `just` already manages) —
+the admin VM itself was cloned directly from the template, so it's not
+in the registry. A clean exit with no SSH/auth error is what confirms
+the CLI can reach PVE. From here on, any `just create <name>` from
+inside the admin VM builds a new prod VM, attaches it to `vmbr1`, and
+imports the disk to PVE at `192.168.100.1`.
 
 ## 21. Next: router VM with PCI NIC passthrough (TBD)
 
