@@ -53,7 +53,8 @@
 (defn- pve-rsync! [cfg src dst]
   (validate! cfg)
   (proc/run! ["rsync" "-avz" "--progress" "-e"
-              "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+              (str "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+                   " -o IgnoreUnknown=*")
               src dst]))
 
 ;; ─── storage-type-aware disk format ──────────────────────────────────────────
@@ -652,7 +653,8 @@
 
 (defn- finish-create! [this cfg name]
   (let [profile (or (machine/read-field cfg name "profile") "core")
-        var-size (or (machine/read-field cfg name "var_size") "30G")]
+        var-size (or (machine/read-field cfg name "disk_size")
+                     (machine/read-field cfg name "var_size") "30G")]
     (profile/build-profile cfg profile)
     (b/create-disks this cfg name var-size)
     (b/start this cfg name)
@@ -670,6 +672,108 @@
   (machine/config-vm cfg name {:profile profile :memory memory :vcpus vcpus
                                :var-size var-size :network network :static-ip static-ip})
   (finish-create! this cfg name))
+
+(defn cloud-template
+  "Build a Proxmox template with cloud-init + mutable (+ optional extra profiles).
+  Produces a PVE template (not a running VM). Each clone gets per-VM identity
+  on first boot from a cloud-init seed drive attached at clone time; the template
+  itself carries no injected identity."
+  [_this cfg name extra-profiles]
+  (validate! cfg)
+  (when (str/blank? name)
+    (println "Error: cloud-template requires a name.")
+    (println "Usage: just cloud-template <name> [extra_profiles]")
+    (System/exit 1))
+  (let [extras (or extra-profiles "")
+        combined (profile/normalize-profiles
+                  (str "cloud-init,mutable"
+                       (when-not (str/blank? extras) (str "," extras))))
+        md (machine/machine-dir cfg name)
+        vd (vm-dir cfg name)
+        disk (str vd "/disk.qcow2")
+        stg (:pve-staging-dir cfg)]
+
+    ;; 1) Machine config. SSH keys are skipped — cloud-init injects per-clone
+    ;;    identity (hostname, ssh host keys, user keys) from PVE's seed drive.
+    (machine/init-machine cfg name {:profile combined
+                                    :network "bridge:vmbr0"
+                                    :ssh-key-mode "skip"})
+    (let [memory   (or (machine/read-field cfg name "memory") "2048")
+          vcpus    (or (machine/read-field cfg name "vcpus")  "2")
+          disk-size (machine/normalize-size
+                     (or (machine/read-field cfg name "disk_size")
+                         (machine/read-field cfg name "var_size")
+                         "10G"))]
+      (when-not (fs/exists? (str md "/memory"))    (spit (str md "/memory")    memory))
+      (when-not (fs/exists? (str md "/vcpus"))     (spit (str md "/vcpus")     vcpus))
+      (when-not (fs/exists? (str md "/disk_size")) (spit (str md "/disk_size") disk-size))
+
+      ;; 2) Build the base image
+      (profile/build-profile cfg combined)
+
+      ;; 3) Copy the built qcow2 locally + resize (NO guestfish identity injection)
+      (let [prof (profile/normalize-profiles (machine/read-field cfg name "profile"))
+            img (str (proc/capture (concat (:readlink cfg)
+                                           ["-f" (str (:output-dir cfg) "/profiles/" prof)]))
+                     "/nixos.qcow2")]
+        (when-not (fs/regular-file? img)
+          (println (format "Error: Built profile image not found: %s" img))
+          (System/exit 1))
+        (fs/create-dirs vd)
+        (println (format "Copying base image for template '%s'..." name))
+        (proc/run! (concat (:cp cfg) [img disk]))
+        (proc/run! ["chmod" "644" disk])
+        (println (format "Resizing disk to %s..." disk-size))
+        (proc/run! (concat (:qemu-img cfg) ["resize" disk disk-size]))
+        ;; Inject /etc/nixos/ (flake + modules + profiles) with __HOSTNAME__
+        ;; placeholders so clones can run `nixos-rebuild switch` after
+        ;; cloud-init sets their hostname. The systemd oneshot in
+        ;; profiles/cloud-init.nix does the substitution on first boot.
+        (mutable/inject-template-flake! cfg disk combined))
+
+      ;; 4) Create the VM shell on PVE, transfer + import the disk
+      (let [vmid (determine-vmid! cfg name)
+            bridge (bridge-for cfg name)
+            mac (machine/read-field cfg name "mac-address")]
+        (qm-create! cfg name vmid memory vcpus mac bridge)
+        (pve-ssh cfg (format "mkdir -p %s/%s" stg name))
+        (println "Transferring disk to Proxmox...")
+        (pve-rsync! cfg disk (format "%s:%s/%s/disk.qcow2" (:pve-host cfg) stg name))
+        (println "Importing disk...")
+        (pve-ssh! cfg (format "qm importdisk %s %s/%s/disk.qcow2 %s --format %s"
+                              vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
+        (println "Attaching disk and configuring boot...")
+        (let [disk-vol (config-line (pve-ssh cfg (format "qm config %s" vmid)) "unused0")]
+          (when (str/blank? disk-vol)
+            (println "Error: Could not find imported disk in VM config")
+            (println (format "Check 'qm config %s' on the Proxmox node" vmid))
+            (System/exit 1))
+          (pve-ssh! cfg (format "qm set %s --virtio0 %s --boot order=virtio0" vmid disk-vol)))
+
+        ;; 5) Attach the cloud-init seed drive so cloned VMs pick it up on first boot
+        (println "Attaching cloud-init drive...")
+        (pve-ssh! cfg (format "qm set %s --ide2 %s:cloudinit" vmid (:pve-storage cfg)))
+
+        ;; 6) Convert to a PVE template (also marks the disk read-only)
+        (println "Converting to PVE template...")
+        (pve-ssh! cfg (format "qm template %s" vmid))
+
+        ;; 7) Clean up staging
+        (pve-ssh cfg (format "rm -rf %s/%s" stg name))
+
+        (println)
+        (println (format "Template '%s' created on Proxmox (VMID: %s)" name vmid))
+        (println (format "  Profile: %s" combined))
+        (println (format "  Storage: %s" (:pve-storage cfg)))
+        (println (format "  Bridge:  %s" bridge))
+        (println (format "  Disk:    %s" disk-size))
+        (println)
+        (println "Clone to a new VM with per-VM cloud-init identity, e.g.:")
+        (println (format "  qm clone %s <new-vmid> --name <newname> --full 1" vmid))
+        (println "  qm set <new-vmid> --ciuser admin \\")
+        (println "                    --sshkeys ~/.ssh/authorized_keys \\")
+        (println "                    --ipconfig0 ip=<addr>/<mask>,gw=<gw>")
+        (println "  qm start <new-vmid>")))))
 
 (defn clone-vm [this cfg source dest memory vcpus network]
   (let [src-md (machine/machine-dir cfg source)

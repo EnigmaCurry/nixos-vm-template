@@ -354,28 +354,35 @@
   [pve-env]
   (let [storage-info (:pve-storage-info pve-env)
         bridges (:pve-bridges pve-env)
+        env-storage (some-> (System/getenv "PVE_STORAGE") str/trim not-empty)
+        env-bridge (some-> (System/getenv "PVE_BRIDGE") str/trim not-empty)
         ;; Storage selection
-        pve-storage (if (= 1 (count storage-info))
+        pve-storage (cond
+                      env-storage
+                      (do (println (format "  Storage: %s" env-storage)) env-storage)
+                      (= 1 (count storage-info))
                       (do (println (format "  Storage: %s (%s)"
                                            (:name (first storage-info))
                                            (:type (first storage-info))))
                           (:name (first storage-info)))
-                      (if (seq storage-info)
-                        (let [choices (mapv #(format "%s (%s)" (:name %) (:type %)) storage-info)
-                              choice (wiz/choose "PVE storage:" choices)]
-                          (:name (nth storage-info (.indexOf choices choice))))
-                        (wiz/ask "PVE storage:" :default "local")))
+                      (seq storage-info)
+                      (let [choices (mapv #(format "%s (%s)" (:name %) (:type %)) storage-info)
+                            choice (wiz/choose "PVE storage:" choices)]
+                        (:name (nth storage-info (.indexOf choices choice))))
+                      :else (wiz/ask "PVE storage:" :default "local"))
         ;; Detect disk format from storage type
         storage-type (:type (first (filter #(= (:name %) pve-storage) storage-info)))
         pve-disk-format (if (or (= storage-type "lvmthin") (= storage-type "lvm"))
                           "raw" "qcow2")
         ;; Bridge selection
-        pve-bridge (if (= 1 (count bridges))
+        pve-bridge (cond
+                     env-bridge
+                     (do (println (format "  Bridge: %s" env-bridge)) env-bridge)
+                     (= 1 (count bridges))
                      (do (println (format "  Bridge: %s" (first bridges)))
                          (first bridges))
-                     (if (seq bridges)
-                       (wiz/choose "PVE bridge:" bridges)
-                       (wiz/ask "PVE bridge:" :default "vmbr0")))]
+                     (seq bridges) (wiz/choose "PVE bridge:" bridges)
+                     :else (wiz/ask "PVE bridge:" :default "vmbr0"))]
     (merge pve-env
            {"PVE_STORAGE" pve-storage
             "PVE_BRIDGE" pve-bridge
@@ -556,23 +563,30 @@
   {:backend <str> :env <map>}, where env carries the string env vars to export
   to the CLI plus helper keys (:machines-dir :host :pve-ssh ...)."
   []
-  (let [backend (wiz/choose "Backend:" ["libvirt" "proxmox"])
+  (let [env-backend (some-> (System/getenv "BACKEND") str/lower-case str/trim)
+        backend (cond
+                  (contains? #{"libvirt" "proxmox"} env-backend) env-backend
+                  :else (wiz/choose "Backend:" ["libvirt" "proxmox"]))
         pve-env (when (= backend "proxmox")
-                  (let [ssh-hosts (try
-                                   (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
-                                        str/split-lines
-                                        (keep #(second (re-find #"(?i)^\s*Host\s+(.+)" %)))
-                                        (mapcat #(str/split % #"\s+"))
-                                        (remove #(str/includes? % "*"))
-                                        vec)
-                                   (catch Exception _ []))
-                        pve-host (if (seq ssh-hosts)
-                                  (let [options (conj ssh-hosts "Other (enter manually)")
-                                        choice (wiz/choose "PVE host:" options)]
-                                    (if (= choice "Other (enter manually)")
-                                      (wiz/ask "PVE host (hostname or IP):")
-                                      choice))
-                                  (wiz/ask "PVE host (hostname or IP):"))
+                  (let [env-pve-host (some-> (System/getenv "PVE_HOST") str/trim not-empty)
+                        ssh-hosts (when-not env-pve-host
+                                    (try
+                                      (->> (slurp (str (System/getenv "HOME") "/.ssh/config"))
+                                           str/split-lines
+                                           (keep #(second (re-find #"(?i)^\s*Host\s+(.+)" %)))
+                                           (mapcat #(str/split % #"\s+"))
+                                           (remove #(str/includes? % "*"))
+                                           vec)
+                                      (catch Exception _ [])))
+                        pve-host (cond
+                                   env-pve-host env-pve-host
+                                   (seq ssh-hosts)
+                                   (let [options (conj ssh-hosts "Other (enter manually)")
+                                         choice (wiz/choose "PVE host:" options)]
+                                     (if (= choice "Other (enter manually)")
+                                       (wiz/ask "PVE host (hostname or IP):")
+                                       choice))
+                                   :else (wiz/ask "PVE host (hostname or IP):"))
                         _ (do (print (format "  Connecting to %s ... " pve-host))
                               (flush))
                         pve-ssh (fn [cmd]
@@ -662,9 +676,21 @@
     (cond
       (.exists (io/file dir ".git"))
       (let [sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
-                                            "git" "rev-parse" "--short" "HEAD")))]
+                                            "git" "rev-parse" "--short" "HEAD")))
+            dirty? (seq (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
+                                                    "git" "status" "--porcelain"))))]
         (println (format "Using existing development checkout: %s (commit: %s)" dir sha))
-        (println "  (bootstrap won't touch your tree; run 'git pull' there to update.)")
+        (if dirty?
+          (println "  (working tree has local changes; skipping pull.)")
+          ;; Attempt a fast-forward pull; fails cleanly if non-ff or no upstream.
+          (let [res (proc/shell {:dir dir :out :string :err :string :continue true}
+                                "git" "pull" "--ff-only" "--quiet")]
+            (if (zero? (:exit res))
+              (let [new-sha (str/trim (:out (proc/shell {:dir dir :out :string :err :string}
+                                                        "git" "rev-parse" "--short" "HEAD")))]
+                (when (not= sha new-sha)
+                  (println (format "  Fast-forwarded to %s." new-sha))))
+              (println "  (couldn't fast-forward — non-ff or no upstream; leaving tree as-is.)"))))
         dir)
 
       (and (.exists dir-file) (seq (.list dir-file)))
@@ -716,12 +742,46 @@
 (defn dev-create-vm!
   "Development create: configure + build a VM locally from source via `just create`."
   [dev-dir backend env]
-  (let [vm-name (wiz/ask "VM name:" :default "nixos")]
+  (let [env-name (some-> (System/getenv "NIXOS_VM_NAME") str/trim not-empty)
+        vm-name (or env-name (wiz/ask "VM name:" :default "nixos"))
+        env-vmid (some-> (System/getenv "PVE_VMID") str/trim not-empty)
+        machine-dir (str (get env :machines-dir) "/" vm-name)]
+    ;; Pre-seed the vmid file so vm.cli skips its own VMID prompt.
+    (when (and (= backend "proxmox") env-vmid
+               (not (.exists (io/file machine-dir "vmid"))))
+      (.mkdirs (io/file machine-dir))
+      (spit (str machine-dir "/vmid") env-vmid))
     (println)
     (println (format "Configuring VM '%s' on %s (building from source)..." vm-name backend))
     (println "(Entering the flake dev shell; the first build may take a while.)")
     (println)
     (let [result (dev-just! dev-dir backend env "create" vm-name)]
+      (when (not= 0 (:exit result))
+        (System/exit (:exit result))))))
+
+(defn dev-cloud-template!
+  "Development cloud-template: build a Proxmox template (cloud-init + mutable
+  + optional extra profiles) via `just cloud-template <name> <extras>`. Skips
+  identity injection — each clone gets its own via cloud-init's seed drive."
+  [dev-dir backend env]
+  (when-not (= backend "proxmox")
+    (println "Error: cloud-template is only supported on the proxmox backend.")
+    (println (format "  BACKEND=%s" backend))
+    (System/exit 1))
+  (let [env-name (some-> (System/getenv "NIXOS_VM_NAME") str/trim not-empty)
+        tmpl-name (or env-name (wiz/ask "Template name:" :default "nixos"))
+        env-extras (or (some-> (System/getenv "NIXOS_VM_PROFILE") str/trim not-empty) "")
+        env-vmid (some-> (System/getenv "PVE_VMID") str/trim not-empty)
+        machine-dir (str (get env :machines-dir) "/" tmpl-name)]
+    (when (and env-vmid (not (.exists (io/file machine-dir "vmid"))))
+      (.mkdirs (io/file machine-dir))
+      (spit (str machine-dir "/vmid") env-vmid))
+    (println)
+    (println (format "Building Proxmox template '%s' (cloud-init,mutable%s)..."
+                     tmpl-name (if (str/blank? env-extras) "" (str "," env-extras))))
+    (println "(Entering the flake dev shell; the first build may take a while.)")
+    (println)
+    (let [result (dev-just! dev-dir backend env "cloud-template" tmpl-name env-extras)]
       (when (not= 0 (:exit result))
         (System/exit (:exit result))))))
 
@@ -770,19 +830,41 @@
                 (when (not= 0 (:exit result))
                   (System/exit (:exit result)))))))))))
 
+(defn- resolve-env-action
+  "Map NIXOS_VM_ACTION values (e.g. \"create\", \"cloud-template\", \"manage\",
+  \"exit\") to the wizard's canonical action strings, or nil if the env var is
+  unset."
+  []
+  (when-let [v (some-> (System/getenv "NIXOS_VM_ACTION") str/lower-case str/trim not-empty)]
+    (cond
+      (or (= v "cloud-template") (= v "cloud") (= v "template")) "Cloud template"
+      (str/starts-with? v "create") "Create VM"
+      (str/starts-with? v "manage") "Manage VMs"
+      (str/starts-with? v "exit")   "Exit"
+      :else (do (println (format "Unknown NIXOS_VM_ACTION: %s" v))
+                (System/exit 1)))))
+
 (defn run-development! []
   (let [dev-dir (resolve-dev-dir!)
-        {:keys [backend env]} (discover-backend!)]
-    (loop []
-      (section-break!)
-      (let [action (try (wiz/choose "What would you like to do?"
-                                    ["Create VM" "Manage VMs" "Exit"])
-                        (catch Exception _ "Exit"))]
+        {:keys [backend env]} (discover-backend!)
+        env-action (resolve-env-action)]
+    (if env-action
+      (case env-action
+        "Create VM"      (dev-create-vm! dev-dir backend env)
+        "Cloud template" (dev-cloud-template! dev-dir backend env)
+        "Manage VMs"     (dev-manage-vms! dev-dir backend env)
+        "Exit"           (println "Bye."))
+      (loop []
         (section-break!)
-        (case action
-          "Create VM"  (do (dev-create-vm! dev-dir backend env) (recur))
-          "Manage VMs" (do (dev-manage-vms! dev-dir backend env) (recur))
-          "Exit"       (println "Bye."))))))
+        (let [action (try (wiz/choose "What would you like to do?"
+                                      ["Create VM" "Cloud template" "Manage VMs" "Exit"])
+                          (catch Exception _ "Exit"))]
+          (section-break!)
+          (case action
+            "Create VM"      (do (dev-create-vm! dev-dir backend env) (recur))
+            "Cloud template" (do (dev-cloud-template! dev-dir backend env) (recur))
+            "Manage VMs"     (do (dev-manage-vms! dev-dir backend env) (recur))
+            "Exit"           (println "Bye.")))))))
 
 ;; ─── Main ───────────────────────────────────────────────────────────────────
 
@@ -794,11 +876,17 @@
 
   ;; When nix is available, offer to build locally from source (Development);
   ;; otherwise only the download-pre-built-images path (Production) is possible.
-  (let [mode (if (command-exists? "nix")
+  ;; NIXOS_VM_MODE=development|production skips the prompt (case-insensitive,
+  ;; prefix match: "dev"/"prod" also work).
+  (let [env-mode (some-> (System/getenv "NIXOS_VM_MODE") str/lower-case)
+        mode (cond
+               (and env-mode (str/starts-with? env-mode "dev"))  "Development"
+               (and env-mode (str/starts-with? env-mode "prod")) "Production"
+               (command-exists? "nix")
                (wiz/choose "Mode:"
                            ["Production (download pre-built images, no build)"
                             "Development (build images locally from source)"])
-               "Production")]
+               :else "Production")]
     (if (str/starts-with? mode "Development")
       (run-development!)
       (run-production!))))

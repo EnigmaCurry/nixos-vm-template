@@ -283,7 +283,8 @@
   (let [profile (or (machine/read-field cfg name "profile") "core")
         memory (or (machine/read-field cfg name "memory") "2048")
         vcpus (or (machine/read-field cfg name "vcpus") "2")
-        var-size (or (machine/read-field cfg name "var_size") "30G")]
+        var-size (or (machine/read-field cfg name "disk_size")
+                     (machine/read-field cfg name "var_size") "30G")]
     (profile/build-profile cfg profile)
     (b/create-disks this cfg name var-size)
     (b/generate-config this cfg name memory vcpus)

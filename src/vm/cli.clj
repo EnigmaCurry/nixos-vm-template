@@ -27,15 +27,22 @@
   {"libvirt" {:create-vm lv/create-vm :create-vm-batch lv/create-vm-batch :clone-vm lv/clone-vm
               :upgrade-vm lv/upgrade-vm :resize-var lv/resize-var :resize-vm lv/resize-vm
               :backup-vm lv/backup-vm :restore-backup-vm lv/restore-backup-vm
-              :ssh-vm lv/ssh-vm :list-backups lv/list-backups}
+              :ssh-vm lv/ssh-vm :list-backups lv/list-backups
+              :cloud-template (fn [_b _cfg _name _extras]
+                                (println "Error: cloud-template is only supported on the proxmox backend.")
+                                (System/exit 1))}
    "proxmox" {:create-vm px/create-vm :create-vm-batch px/create-vm-batch :clone-vm px/clone-vm
               :upgrade-vm px/upgrade-vm :resize-var px/resize-var :resize-vm px/resize-vm
               :backup-vm px/backup-vm :restore-backup-vm px/restore-backup-vm
-              :ssh-vm px/ssh-vm :list-backups px/list-backups}
+              :ssh-vm px/ssh-vm :list-backups px/list-backups
+              :cloud-template px/cloud-template}
    "proxmox-lxc" {:create-vm lxc/create-vm :create-vm-batch lxc/create-vm-batch :clone-vm lxc/clone-vm
                   :upgrade-vm lxc/upgrade-vm :resize-var lxc/resize-var :resize-vm lxc/resize-vm
                   :backup-vm lxc/backup-vm :restore-backup-vm lxc/restore-backup-vm
-                  :ssh-vm lxc/ssh-vm :list-backups lxc/list-backups}})
+                  :ssh-vm lxc/ssh-vm :list-backups lxc/list-backups
+                  :cloud-template (fn [_b _cfg _name _extras]
+                                    (println "Error: cloud-template is only supported on the proxmox KVM backend, not proxmox-lxc.")
+                                    (System/exit 1))}})
 
 (defn- cf [cfg k] (get-in composite-fns [(:backend cfg) k]))
 
@@ -170,6 +177,7 @@
       "create"        ((cf cfg :create-vm) @B cfg (arg a 0 nil))
       "create-batch"  ((cf cfg :create-vm-batch) @B cfg (arg a 0 nil) (arg a 1 "core")
                        (arg a 2 "2048") (arg a 3 "2") (arg a 4 "30G") (arg a 5 "nat") (arg a 6 ""))
+      "cloud-template" ((cf cfg :cloud-template) @B cfg (arg a 0 nil) (arg a 1 ""))
       "clone"         ((cf cfg :clone-vm) @B cfg (arg a 0 nil) (arg a 1 nil)
                        (arg a 2 "") (arg a 3 "") (arg a 4 ""))
       "upgrade"       ((cf cfg :upgrade-vm) @B cfg (arg a 0 nil))

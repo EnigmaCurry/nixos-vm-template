@@ -85,12 +85,31 @@
           (println "Pick one — they claim the same ports / advertise the same service.")
           (System/exit 1))))))
 
+(defn ensure-cloud-init-mutable
+  "cloud-init writes to /etc (hostname, ssh host keys, networkd config) on
+  first boot, so it needs a writable rootfs — `mutable` mode. Anything else
+  (immutable/semi-mutable) is rejected. `cloud-template` sets mutable itself
+  before calling build, so callers hitting this error have combined cloud-init
+  with the wrong mode in the regular create path."
+  [profile-key]
+  (let [profs (set (str/split profile-key #","))]
+    (cond
+      (not (contains? profs "cloud-init")) profile-key
+      (contains? profs "mutable") profile-key
+      :else
+      (do (println "Error: cloud-init profile requires 'mutable' mode.")
+          (println "cloud-init writes to /etc, which needs a writable rootfs.")
+          (println "To build a Proxmox template with cloud-init:")
+          (println "  just cloud-template <name>")
+          (System/exit 1)))))
+
 (defn build-profile
   "Build a profile's base image. Honors SKIP_BUILD (bootstrap). FLAKE_UPDATE is
   taken from opts {:flake-update? bool} (upgrade) or the env var otherwise.
   Returns the profile key."
   [cfg profiles & [opts]]
-  (let [profile-key (normalize-profiles (or profiles "core"))
+  (let [profile-key (-> (normalize-profiles (or profiles "core"))
+                        ensure-cloud-init-mutable)
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
         profiles-out (str output-dir "/profiles")]
@@ -139,7 +158,8 @@
   SKIP_BUILD. Out-links to <output-dir>/lxc-profiles/<key>; the backend resolves
   the tar.xz under <out>/tarball/. Returns the profile key."
   [cfg profiles]
-  (let [profile-key (normalize-profiles (or profiles "core"))
+  (let [profile-key (-> (normalize-profiles (or profiles "core"))
+                        ensure-cloud-init-mutable)
         repo-dir (:repo-dir cfg)
         output-dir (:output-dir cfg)
         lxc-out (str output-dir "/lxc-profiles")]
