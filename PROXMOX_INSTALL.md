@@ -514,9 +514,12 @@ this VM), but the majority of the fleet will be built from **inside
 this VM** using `nixos-vm-template` (`just create ...`) against the PVE
 backend at `192.168.100.1`.
 
-The admin VM lives on `mgmt` alongside PVE, at `192.168.100.100/24`.
-It's the only VM (besides pet clones) that stays on `mgmt` long-term —
-everything else lands on `vmbr1` once the router VM is up.
+The admin VM is the SSH bastion for the PVE host: PVE itself won't be
+reachable from your prod network — administration goes through this VM.
+It sits on `mgmt` at `192.168.100.100/24` for a direct link to PVE at
+`192.168.100.1`. Once the router VM is up, a second NIC on `vmbr1`
+will make the admin VM reachable from the prod side (see step 20);
+`mgmt` remains PVE ↔ admin only.
 
 ### Clone the template
 
@@ -554,26 +557,21 @@ sudo -i
 
 ### Wire the admin VM to tinyproxy — persistently
 
-The admin VM has the same predicament PVE had in step 7: it's on
-`mgmt`, which has no upstream. Unlike the throwaway clones case, this
-one is permanent — the admin VM stays on `mgmt` forever and its only
-route to the internet is workstation tinyproxy. Bake the proxy into
+Until the router VM is up, the admin VM has the same predicament PVE
+had in step 7: `mgmt` has no upstream. Route it through workstation
+tinyproxy in the meantime — bake the proxy into
 `/etc/nixos/configuration.nix` so it survives reboots and
-`nixos-rebuild` runs.
-
-Two things need the proxy: the **root/user shell** running `nix`
-(flake input fetching happens client-side) and the **nix-daemon**
-(actual build downloads).
+`nixos-rebuild` runs. Two things need the proxy: the root/user shell
+running `nix`, and the `nix-daemon`.
 
 In the root shell on the admin VM, add to `/etc/nixos/configuration.nix`
 (inside the top-level `{ config, pkgs, ... }: {}` block):
 
 ```nix
 {
-  # tinyproxy on the workstation is this VM's only route to the internet
-  # (mgmt is airgapped). Both the nix-daemon and interactive shells need
-  # the proxy — the daemon downloads store paths, the shell fetches flake
-  # inputs client-side.
+  # Temporary — workstation tinyproxy is this VM's only route to the
+  # internet until the router VM is up. Remove once the admin VM has a
+  # NIC on vmbr1 and can reach the internet through the router.
   systemd.services.nix-daemon.environment = {
     http_proxy  = "http://192.168.100.2:8888/";
     https_proxy = "http://192.168.100.2:8888/";
