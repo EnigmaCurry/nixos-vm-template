@@ -518,7 +518,7 @@ The admin VM is the SSH bastion for the PVE host: PVE itself won't be
 reachable from your prod network — administration goes through this VM.
 It sits on `mgmt` at `192.168.100.100/24` for a direct link to PVE at
 `192.168.100.1`. Once the router VM is up, a second NIC on `vmbr1`
-will make the admin VM reachable from the prod side (see step 20);
+will make the admin VM reachable from the prod side (see step 21);
 `mgmt` remains PVE ↔ admin only.
 
 ### Clone the template
@@ -608,9 +608,11 @@ nixos-rebuild switch
 After the rebuild, log out and back in so the new
 `environment.sessionVariables` are picked up.
 
-### Clone the nixos-vm-template repo
+## 20. Install nixos-vm-template on the admin VM
 
-Still on the admin VM as `admin` (not root — the repo lives under the
+### Clone the repo
+
+Back on the admin VM as `admin` (not root — the repo lives under the
 admin user):
 
 ```bash
@@ -650,7 +652,7 @@ You should see VMID 100 (this VM) listed. From here on, any
 attaches it to `vmbr1`, and imports the disk to PVE at
 `192.168.100.1`.
 
-## 20. Next: router VM with PCI NIC passthrough (TBD)
+## 21. Next: router VM with PCI NIC passthrough (TBD)
 
 The remaining pieces to reach a working prod fleet:
 
