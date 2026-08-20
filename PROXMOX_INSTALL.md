@@ -632,31 +632,47 @@ into the admin VM (`scp` from workstation, or paste into
 ssh -o StrictHostKeyChecking=accept-new root@192.168.100.1 hostname
 ```
 
-Persist the backend config in `.env` at the repo root (the Justfile
-sets `dotenv-load`, so every `just` invocation picks it up):
+Register a `pve` shell alias so you can drive the Proxmox backend
+from any directory (see [INSTALL.md](INSTALL.md#tab-completion-and-per-backend-aliases)
+for the alias mechanism). Write the backend config to
+`~/.config/nixos-vm-template/pve.env` and wire the alias in
+`~/.bashrc`:
 
 ```bash
-cat > .env <<'EOF'
+mkdir -p ~/.config/nixos-vm-template
+
+cat > ~/.config/nixos-vm-template/pve.env <<'EOF'
 BACKEND=proxmox
 PVE_HOST=192.168.100.1
 PVE_STORAGE=local-zfs
 # Prod VMs default to vmbr1 (serviced by the router VM once it's up).
 PVE_BRIDGE=vmbr1
 EOF
+
+cat >> ~/.bashrc <<'EOF'
+
+# nixos-vm-template — pve alias for the Proxmox backend
+export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"
+source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
+nixos-vm-template-alias pve "$HOME/.config/nixos-vm-template/pve.env"
+EOF
+
+source ~/.bashrc
 ```
 
-Confirm the CLI can talk to PVE:
+Confirm the CLI can reach PVE from any directory:
 
 ```bash
-just list
+cd ~
+pve list
 ```
 
-The list will be empty (or only show VMs `just` already manages) —
+The list will be empty (or only show VMs the tooling already manages) —
 the admin VM itself was cloned directly from the template, so it's not
 in the registry. A clean exit with no SSH/auth error is what confirms
-the CLI can reach PVE. From here on, any `just create <name>` from
-inside the admin VM builds a new prod VM, attaches it to `vmbr1`, and
-imports the disk to PVE at `192.168.100.1`.
+the CLI can reach PVE. From here on, any `pve create <name>` builds a
+new prod VM, attaches it to `vmbr1`, and imports the disk to PVE at
+`192.168.100.1`.
 
 ## 21. Next: router VM with PCI NIC passthrough (TBD)
 
