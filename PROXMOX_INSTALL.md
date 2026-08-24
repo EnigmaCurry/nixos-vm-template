@@ -49,10 +49,8 @@ Boot the target off the installer USB and choose **Install Proxmox VE
 - **IP address / gateway / DNS:** the values for your LAN. A static
   address is easiest — you'll be SSHing to it repeatedly.
 - **Network Options** — Create identifiable names for your detected
-  NICs (`lan`, `wan`, `wifi`, etc.), otherwise they will have the
-  generic `nicX` names. Avoid `mgmt` — [PROXMOX_ROUTER.md](PROXMOX_ROUTER.md)
-  uses `mgmtbr` for a bridge and a NIC named `mgmt` would prefix-match
-  filters that expect `mgmt*` to mean the bridge.
+  NICs (`lan`, `wan`, `wifi`, `mgmt`, etc.), otherwise they will have
+  the generic `nicX` names.
 
 Confirm the summary and let it install. Remove the USB installer when it
 reboots.
