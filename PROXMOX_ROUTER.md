@@ -355,11 +355,29 @@ Find the onboard NIC PCI IDs:
 
 ```bash
 lspci -nn | grep -i ether
-# example: 02:00.0 Ethernet controller [0200]: Intel ... I210 [8086:1533]
+# 02:00.0 Ethernet controller [0200]: Intel ... I210 [8086:1533]
+# 03:00.0 Ethernet controller [0200]: Intel ... I210 [8086:1533]
 ```
 
-Bind them to `vfio-pci` (the `ids=` list is the `[vendor:device]`
-part; both onboard NICs of the same model share one ID):
+Bind them to `vfio-pci`. `ids=` is a comma-separated list of
+**unique** `vendor:device` pairs from the `[…]` field above — one
+entry per NIC *model*, not per NIC. The kernel binds every device
+matching any listed ID.
+
+Two NICs of the same model (like the pair of I210s above) share one
+entry:
+
+```
+options vfio-pci ids=8086:1533
+```
+
+Two NICs of different models get two entries:
+
+```
+options vfio-pci ids=8086:1533,10ec:8168
+```
+
+Write it, load the vfio modules early, rebuild the initrd, and reboot:
 
 ```bash
 cat > /etc/modprobe.d/vfio.conf <<'EOF'
