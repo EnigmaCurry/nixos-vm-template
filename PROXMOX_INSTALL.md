@@ -452,12 +452,27 @@ register a `pve` shell alias so the CLI works from any directory (see
 [INSTALL.md](INSTALL.md#tab-completion-and-per-backend-aliases) for
 the alias mechanism):
 
+Find your PVE node name first — it's PVE's short hostname (e.g.
+`pve`, `pve-router`, whatever you set at install time):
+
+```bash
+ssh pve hostname -s
+```
+
+Then write pve.env. `PVE_NODE` is separate from `PVE_HOST` because
+`PVE_HOST` is the SSH connection target (an alias like `pve`), while
+`PVE_NODE` is the actual PVE cluster node name — used inside `pvesh
+get /nodes/<node>/…` calls (e.g. by the PCI passthrough picker). If
+you don't set it, the CLI falls back to `PVE_HOST` and `pvesh` can't
+resolve the alias as a node name:
+
 ```bash
 mkdir -p ~/.config/nixos-vm-template
 
 cat > ~/.config/nixos-vm-template/pve.env <<'EOF'
 BACKEND=proxmox
 PVE_HOST=pve
+PVE_NODE=<pve-node-name>
 PVE_STORAGE=local-zfs
 PVE_BRIDGE=vmbr0
 EOF
