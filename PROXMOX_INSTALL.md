@@ -48,17 +48,23 @@ Boot the target off the installer USB and choose **Install Proxmox VE
 - **Hostname (FQDN):** e.g. `pve.lan`.
 - **IP address / gateway / DNS:** the values for your LAN. A static
   address is easiest — you'll be SSHing to it repeatedly.
+- **Network Options** — Create identifiable names for your detected
+  NICs (`lan`, `wan`, `wifi`, `mgmt`, etc.), otherwise they will have
+  the generic `nicX` names.
 
 Confirm the summary and let it install. Remove the USB installer when it
 reboots.
 
 ## 3. SSH into PVE
 
-From your workstation, set a shell variable for the address you gave PVE
-and connect:
+From your workstation, connect to the PVE IP address (set the PVE_HOST
+temp variable so you can follow these docs verbatim):
 
 ```bash
 export PVE_HOST=<pve-ip>
+```
+
+```bash
 ssh root@$PVE_HOST
 ```
 
@@ -202,6 +208,18 @@ EOF
 
 qm set 9999 --cicustom "user=local:snippets/bootstrap-tmp.yaml"
 qm set 9999 --ipconfig0 ip=dhcp
+```
+
+Examine the MAC address of the created VM. If your LAN router requires
+static DHCP leases, associate the MAC address now:
+
+```bash
+qm config 9999 | awk -F'[=,]' '/^net0:/ {print $2}'
+```
+
+Start the VM:
+
+```
 qm start 9999
 ```
 
