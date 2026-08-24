@@ -234,7 +234,10 @@ snippet above installs on first boot — Debian's generic cloud image
 doesn't ship it):
 
 ```bash
-qm guest cmd 9999 network-get-interfaces
+qm guest cmd 9999 network-get-interfaces \
+  | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+  | grep -v '^127\.' \
+  | head -n1
 ```
 
 Pin it in a workstation shell variable for the next steps:
