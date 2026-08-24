@@ -372,6 +372,7 @@ qm resize 100 virtio0 +100G
 qm set 100 --memory 4096 --cores 2
 qm set 100 --cicustom "user=local:snippets/admin.yaml"
 qm set 100 --ipconfig0 ip=dhcp
+qm set 100 --onboot 1 --startup order=1
 ```
 
 If your LAN router requires static DHCP leases, associate the MAC
