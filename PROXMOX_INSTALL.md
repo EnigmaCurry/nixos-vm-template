@@ -287,22 +287,18 @@ nix run nixpkgs#hello
 
 ## 11. Build the Proxmox cloud-init template
 
-Inside the temp VM, invoke `bootstrap.bb` via Nix-provided `babashka`.
-Nix on `PATH` means bootstrap detects **Development mode** and runs
-`just cloud-template` inside the flake dev shell, so every disk tool
-(guestfish, qemu-img, rsync, ...) comes from the flake — no apt
-installs on the temp VM. The end result is a **PVE template** (not a
-running VM) with `cloud-init` + `mutable` baked in; clones spawned
-from it will pick up per-VM identity (hostname, SSH keys, IP, etc.)
-from PVE's cloud-init seed drive on first boot.
+Set variables for the config for the template build:
+
+
+Make sure PVE_HOST points to your PVE IP address:
 
 ```bash
+export PVE_HOST=<pve-ip>                     # your PVE address
 export BACKEND=proxmox                       # skip Backend: prompt
 export NIXOS_VM_MODE=development             # skip Mode: prompt
 export NIXOS_VM_ACTION=cloud-template        # build a template, not a VM
 export NIXOS_VM_NAME=nixos                   # the template name
 export NIXOS_VM_PROFILE=""                   # extra profiles (cloud-init,mutable auto-added)
-export PVE_HOST=<pve-ip>                     # your PVE address
 export PVE_STORAGE=local-zfs                 # skip storage prompt
 export PVE_BRIDGE=vmbr0                      # skip bridge prompt (default PVE bridge)
 export PVE_VMID=9010                         # any free VMID (templates conventionally 9000+)
@@ -310,11 +306,18 @@ export NIXOS_VM_MEMORY=2G                    # per-clone default — clones can 
 export NIXOS_VM_VCPUS=2                      # per-clone default — clones can bump
 export NIXOS_VM_DISK_SIZE=10G                # template disk size; qcow2 is sparse
 export LIBGUESTFS_BACKEND=direct
+```
 
-# Pre-accept PVE's host key — bootstrap SSHes with BatchMode=yes,
-# which won't accept an unknown key interactively.
+Pre-accept PVE's host key — bootstrap SSHes with BatchMode=yes, which
+won't accept an unknown key interactively.
+
+```bash
 ssh -o StrictHostKeyChecking=accept-new root@$PVE_HOST hostname
+```
 
+Build the template (~5 minutes):
+
+```bash
 nix run nixpkgs#babashka -- \
   -e '(load-string (slurp "https://github.com/EnigmaCurry/nixos-vm-template/raw/refs/heads/master/bootstrap.bb"))'
 ```
@@ -327,7 +330,7 @@ template with `qm template`. No VM is started.
 
 ## 12. Destroy the temp VM
 
-Once the template is on PVE, log out of the temp VM and delete it:
+Once the template is on PVE, log out of the temp VM and delete it. On the **PVE** host
 
 ```bash
 qm stop 9999
@@ -339,22 +342,115 @@ rm /var/lib/vz/snippets/bootstrap-tmp.yaml
 Nothing about the temp VM persists — the `nixos` template is the only
 artifact left on PVE.
 
-## Next: build VMs from the template
+## Next: create an admin VM
 
-From any machine with `nixos-vm-template` checked out, point the CLI at
-PVE and clone the template into a per-VM instance:
+Clone the template into an "admin" VM — a permanent NixOS bastion
+that hosts `nixos-vm-template` and manages further VMs on PVE from a
+single place instead of from your workstation. It's the first clone
+from the template, and takes over the "launcher for other VMs" role
+the temp VM played.
+
+### Clone the template
+
+On **PVE** (same `--cicustom` pattern as step 9 — `--sshkeys`
+URL-encodes and fails on multi-key files):
 
 ```bash
-export BACKEND=proxmox
-export PVE_HOST=<pve-ip>
-export PVE_STORAGE=local-zfs
-export PVE_BRIDGE=vmbr0
+{
+  cat <<'EOF'
+#cloud-config
+hostname: admin
+users:
+  - name: admin
+    ssh_authorized_keys:
+EOF
+  awk 'NF{printf "      - \"%s\"\n", $0}' /root/.ssh/authorized_keys
+} > /var/lib/vz/snippets/admin.yaml
 
-just create myvm
+qm clone 9010 100 --name admin --full 1
+qm resize 100 virtio0 +100G
+qm set 100 --memory 4096 --cores 2
+qm set 100 --cicustom "user=local:snippets/admin.yaml"
+qm set 100 --ipconfig0 ip=dhcp
+qm start 100
 ```
 
-The wizard clones the template, applies identity (hostname, SSH keys,
-IP), and starts the VM. See [INSTALL.md](INSTALL.md) for the full CLI
-and per-backend alias setup, [PROXMOX.md](PROXMOX.md) for
-Proxmox-specific options like GPU passthrough, and [PROFILES.md](PROFILES.md)
-for the list of composable feature profiles.
+Wait ~30s for cloud-init to finish first-boot, then look up the IP
+(same command as step 9):
+
+```bash
+qm guest cmd 100 network-get-interfaces \
+  | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' \
+  | grep -v '^127\.' \
+  | head -n1
+```
+
+### Install nixos-vm-template on the admin VM
+
+From your **workstation**, SSH into the admin VM with `-A` so agent
+forwarding lets admin's shell reach PVE using the same key:
+
+```bash
+export ADMIN_HOST=<admin-ip>
+ssh -A admin@$ADMIN_HOST
+```
+
+Inside the admin VM, pre-accept PVE's host key and clone the repo
+(`git` ships in the NixOS template):
+
+```bash
+export PVE_HOST=<pve-ip>
+ssh -o StrictHostKeyChecking=accept-new root@$PVE_HOST hostname
+git clone https://github.com/EnigmaCurry/nixos-vm-template.git
+```
+
+For persistent access to PVE (after your agent-forwarding session
+ends), copy your workstation SSH key onto admin — `scp` from the
+workstation or paste into `~/.ssh/id_ed25519`.
+
+### Wire the `pve` alias
+
+Write the backend config to `~/.config/nixos-vm-template/pve.env` and
+register a `pve` shell alias so the CLI works from any directory (see
+[INSTALL.md](INSTALL.md#tab-completion-and-per-backend-aliases) for
+the alias mechanism):
+
+```bash
+mkdir -p ~/.config/nixos-vm-template
+
+cat > ~/.config/nixos-vm-template/pve.env <<EOF
+BACKEND=proxmox
+PVE_HOST=$PVE_HOST
+PVE_STORAGE=local-zfs
+PVE_BRIDGE=vmbr0
+EOF
+
+# Bridge ~/.bashrc into login shells (SSH), idempotent.
+grep -q '\.bashrc' ~/.bash_profile 2>/dev/null || \
+  echo '[ -f ~/.bashrc ] && . ~/.bashrc' >> ~/.bash_profile
+
+cat >> ~/.bashrc <<'EOF'
+
+# nixos-vm-template — pve alias for the Proxmox backend
+export NIXOS_VM_TEMPLATE="$HOME/nixos-vm-template"
+source "$NIXOS_VM_TEMPLATE/completions/vm.bash"
+nixos-vm-template-alias pve "$HOME/.config/nixos-vm-template/pve.env"
+EOF
+
+source ~/.bashrc
+```
+
+Confirm the CLI can reach PVE from any directory:
+
+```bash
+cd ~
+pve list
+```
+
+An empty list with no SSH/auth error confirms the alias works — the
+admin VM itself was cloned directly, not via the CLI, so it isn't in
+the registry. From here on `pve <command>` (e.g. `pve create <name>`,
+`pve clone nixos <name>`) builds or clones VMs on PVE from the admin
+VM. See [INSTALL.md](INSTALL.md), [PROXMOX.md](PROXMOX.md), and
+[PROFILES.md](PROFILES.md) for the full CLI surface and composable
+profiles.
