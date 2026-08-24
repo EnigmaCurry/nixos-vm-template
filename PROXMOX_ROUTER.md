@@ -377,11 +377,25 @@ Two NICs of different models get two entries:
 options vfio-pci ids=8086:1533,10ec:8168
 ```
 
-Write it, load the vfio modules early, rebuild the initrd, and reboot:
+You also need `softdep` entries so `vfio-pci` loads **before** the
+ethernet driver — otherwise the ethernet driver (`i40e` for
+X710/XL710, `igc` for I225/I226, `igb` for I210/I350, `e1000e` for
+older Intel) claims the device first and vfio-pci silently loses.
+Symptom: after reboot the NICs still appear in `ip link` and
+`lspci -nnk` shows `Kernel driver in use: <ethernet-driver>` instead
+of `vfio-pci`.
+
+Add one `softdep` per ethernet driver your NICs use. Check with
+`lspci -nnk | grep -A3 -i ether` **before** binding to see the current
+driver names.
+
+Write it all, load the vfio modules early, rebuild the initrd, and
+reboot:
 
 ```bash
 cat > /etc/modprobe.d/vfio.conf <<'EOF'
 options vfio-pci ids=8086:1533
+softdep igb pre: vfio-pci
 EOF
 
 cat > /etc/modules-load.d/vfio.conf <<'EOF'
