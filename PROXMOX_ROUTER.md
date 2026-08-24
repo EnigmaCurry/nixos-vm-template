@@ -325,9 +325,10 @@ direct link:
 
 ```bash
 ssh pve
-ip -br addr show vmbr0     # UP, no address
+ip -4 -br addr show vmbr0        # empty (no IPv4)
+ip -br link show vmbr0           # UNKNOWN (normal for empty bridge — flips to UP once the router VM attaches)
 bridge link show | grep vmbr0    # no ports
-apt-get update             # still works via tinyproxy
+apt-get update                   # still works via tinyproxy
 ```
 
 ## 6. PVE passthrough prep
