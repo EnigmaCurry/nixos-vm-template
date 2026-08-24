@@ -39,7 +39,9 @@
                (map (fn [d]
                       (let [vendor (or (:vendor_name d) "")
                             device (or (:device_name d) "")
-                            group  (or (:iommugroup d) "")
+                            ;; :iommugroup is an integer in PVE's JSON — coerce
+                            ;; to string so str/blank? and format don't blow up.
+                            group  (str (or (:iommugroup d) ""))
                             label  (str (:id d)
                                         (when-not (str/blank? group) (format "  [iommu %s]" group))
                                         (when (or (seq vendor) (seq device))
