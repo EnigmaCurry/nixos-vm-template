@@ -202,6 +202,8 @@ disable_root: false
 package_update: true
 packages:
   - qemu-guest-agent
+runcmd:
+  - [ systemctl, enable, --now, qemu-guest-agent ]
 users:
   - name: root
     ssh_authorized_keys:
