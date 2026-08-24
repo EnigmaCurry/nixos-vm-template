@@ -377,17 +377,22 @@ Two NICs of different models get two entries:
 options vfio-pci ids=8086:1533,10ec:8168
 ```
 
-You also need `softdep` entries so `vfio-pci` loads **before** the
-ethernet driver — otherwise the ethernet driver (`i40e` for
-X710/XL710, `igc` for I225/I226, `igb` for I210/I350, `e1000e` for
-older Intel) claims the device first and vfio-pci silently loses.
-Symptom: after reboot the NICs still appear in `ip link` and
-`lspci -nnk` shows `Kernel driver in use: <ethernet-driver>` instead
-of `vfio-pci`.
+You also need to **blacklist** the ethernet drivers your NICs
+currently use, so they can't bind — otherwise they race with vfio-pci
+during PCI enumeration and usually win. Common drivers by Intel NIC
+family: `i40e` (X710/XL710), `igc` (I225/I226), `igb` (I210/I350),
+`e1000e` (older Intel). Check yours **before** binding:
 
-Add one `softdep` per ethernet driver your NICs use. Check with
-`lspci -nnk | grep -A3 -i ether` **before** binding to see the current
-driver names.
+```bash
+lspci -nnk | grep -A3 -i ether
+# Kernel driver in use: <driver-name>
+```
+
+Blacklisting is safe here because all onboard NICs are going to
+vfio-pci — nothing else on this host wants those drivers. If you had
+mixed use (some NICs for the host, others for vfio), you'd use
+`driverctl set-override <BDF> vfio-pci` for per-device binding
+instead.
 
 Write it all, load the vfio modules early, rebuild the initrd, and
 reboot:
@@ -395,7 +400,7 @@ reboot:
 ```bash
 cat > /etc/modprobe.d/vfio.conf <<'EOF'
 options vfio-pci ids=8086:1533
-softdep igb pre: vfio-pci
+blacklist igb
 EOF
 
 cat > /etc/modules-load.d/vfio.conf <<'EOF'
