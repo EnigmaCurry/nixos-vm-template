@@ -27,11 +27,11 @@ finished you'll have:
 - `pve list` from admin returns cleanly
 
 The rest of this doc reconfigures that setup: adds a USB NIC as the
-only management path, moves admin off `vmbr0` onto an isolated `mgmt`
+only management path, moves admin off `vmbr0` onto an isolated `mgmtbr`
 bridge, destroys `vmbr0`, and binds the onboard NICs to `vfio-pci` for
 router VM passthrough.
 
-## 2. Create the `mgmt` bridge on PVE
+## 2. Create the `mgmtbr` bridge on PVE
 
 Plug the USB Ethernet adapter into PVE. From your workstation, SSH to
 PVE (still reachable via the LAN uplink on vmbr0) and find the USB
@@ -53,9 +53,9 @@ Write a bridge drop-in that fronts the USB NIC and gives PVE
 `192.168.100.1`:
 
 ```bash
-cat > /etc/network/interfaces.d/mgmt <<EOF
-auto mgmt
-iface mgmt inet static
+cat > /etc/network/interfaces.d/mgmtbr <<EOF
+auto mgmtbr
+iface mgmtbr inet static
     address 192.168.100.1/24
     bridge-ports $USB_NIC
     bridge-stp off
@@ -68,16 +68,16 @@ ifreload -a
 Verify:
 
 ```bash
-ip -br addr show mgmt      # UP, 192.168.100.1/24
-bridge link show mgmt      # $USB_NIC as member
+ip -br addr show mgmtbr    # UP, 192.168.100.1/24
+bridge link show mgmtbr    # $USB_NIC as member
 ```
 
 `vmbr0` still carries the LAN uplink and admin VM keeps its DHCP
-address, so nothing has broken yet — `mgmt` is idle until step 3
+address, so nothing has broken yet — `mgmtbr` is idle until step 3
 hooks up the workstation.
 
 **Caveat:** PVE's web UI expects bridge names matching `vmbr\d+` and
-won't offer `mgmt` in the GUI network dropdown. Fine here since
+won't offer `mgmtbr` in the GUI network dropdown. Fine here since
 everything downstream (`qm`, `nixos-vm-template`) drives PVE via the
 CLI, not the GUI.
 
@@ -108,7 +108,7 @@ ssh root@192.168.100.1 hostname
 
 Now run tinyproxy on the workstation — PVE will need it once step 6
 removes `vmbr0` (which currently carries the LAN uplink), and admin
-will need it too once we move it to `mgmt` in step 4. Tinyproxy is
+will need it too once we move it to `mgmtbr` in step 4. Tinyproxy is
 config-file-driven (no CLI equivalents for `Listen`/`Allow`), so pipe
 the config in as a process-substituted file:
 
@@ -150,7 +150,7 @@ Verify — the request should show up in the tinyproxy terminal:
 apt-get update
 ```
 
-## 4. Move the admin VM to `mgmt`
+## 4. Move the admin VM to `mgmtbr`
 
 ### 4a. Add `proxy.nix` on admin (still on vmbr0)
 
@@ -165,7 +165,7 @@ sudo -i
 
 cat > /etc/nixos/proxy.nix <<'EOF'
 # Workstation tinyproxy is admin's only route to the internet
-# (mgmt has no upstream). Remove once the router VM is up and admin
+# (mgmtbr has no upstream). Remove once the router VM is up and admin
 # gets a NIC on vmbr1 with routed internet.
 {
   systemd.services.nix-daemon.environment = {
@@ -189,10 +189,10 @@ nixos-rebuild switch
 exit
 ```
 
-### 4b. Point admin's SSH alias + `pve.env` at the mgmt topology
+### 4b. Point admin's SSH alias + `pve.env` at the mgmtbr topology
 
 Still on admin (as `admin`), update `~/.ssh/config`'s `Host pve` entry
-so it resolves to PVE's mgmt IP after the move:
+so it resolves to PVE's mgmtbr IP after the move:
 
 ```bash
 sed -i '/^Host pve$/,/^$/ s|^  HostName .*|  HostName 192.168.100.1|' ~/.ssh/config
@@ -212,7 +212,7 @@ exit
 
 ### 4c. Rebridge admin on PVE
 
-From your **workstation**, SSH to PVE via the mgmt direct link (don't
+From your **workstation**, SSH to PVE via the mgmtbr direct link (don't
 use `pve-admin` — it's about to go offline):
 
 ```bash
@@ -220,14 +220,14 @@ ssh root@192.168.100.1
 
 qm shutdown 100
 # wait ~10s for graceful shutdown
-qm set 100 --net0 virtio,bridge=mgmt
+qm set 100 --net0 virtio,bridge=mgmtbr
 qm set 100 --ipconfig0 ip=192.168.100.100/24,gw=192.168.100.1
 qm start 100
 ```
 
 ### 4d. Update workstation `pve-admin` alias
 
-On your **workstation**, point `Host pve-admin` at the new mgmt IP:
+On your **workstation**, point `Host pve-admin` at the new mgmtbr IP:
 
 ```bash
 sed -i '/^Host pve-admin$/,/^$/ s|^  HostName .*|  HostName 192.168.100.100|' ~/.ssh/config
@@ -237,7 +237,7 @@ Wait ~30s for cloud-init/networkd to apply the new address on admin,
 then verify end-to-end:
 
 ```bash
-ssh pve-admin              # workstation → admin over mgmt
+ssh pve-admin              # workstation → admin over mgmtbr
 pve list                   # admin → PVE via pve alias (192.168.100.1)
 ```
 
@@ -272,7 +272,7 @@ bridge link show vmbr1     # exists, no ports
 `vmbr0` still owns the onboard NIC and the LAN uplink. Once removed,
 the onboard NIC is a plain interface (no bridge membership) and free
 for `vfio-pci` binding in step 7. Also unplug the LAN cable — PVE is
-now airgapped on `mgmt`.
+now airgapped on `mgmtbr`.
 
 Before destroying, note the onboard NIC MAC addresses — you'll need
 them in step 8 for `systemd.link` name pinning inside the router VM:
@@ -475,5 +475,5 @@ sudo sed -i '/^[[:space:]]*\.\/proxy\.nix$/d' /etc/nixos/flake.nix
 sudo nixos-rebuild switch
 ```
 
-Admin now has routed internet through the router VM; `mgmt` stays as
+Admin now has routed internet through the router VM; `mgmtbr` stays as
 the PVE-only management path.
