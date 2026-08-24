@@ -401,7 +401,7 @@ reboot:
 cat > /etc/modprobe.d/vfio.conf <<'EOF'
 options vfio-pci ids=8086:1533
 blacklist igb
-blacklist e1000e
+blacklist i40e
 EOF
 
 cat > /etc/modules-load.d/vfio.conf <<'EOF'
