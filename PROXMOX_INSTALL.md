@@ -372,6 +372,18 @@ qm resize 100 virtio0 +100G
 qm set 100 --memory 4096 --cores 2
 qm set 100 --cicustom "user=local:snippets/admin.yaml"
 qm set 100 --ipconfig0 ip=dhcp
+```
+
+If your LAN router requires static DHCP leases, associate the MAC
+address now (same as step 9):
+
+```bash
+qm config 100 | awk -F'[=,]' '/^net0:/ {print $2}'
+```
+
+Start the VM:
+
+```bash
 qm start 100
 ```
 
