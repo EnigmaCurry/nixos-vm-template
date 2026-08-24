@@ -399,12 +399,24 @@ qm guest cmd 100 network-get-interfaces \
 
 ### Install nixos-vm-template on the admin VM
 
-From your **workstation**, SSH into the admin VM with `-A` so agent
-forwarding lets admin's shell reach PVE using the same key:
+On your **workstation**, add a permanent `~/.ssh/config` entry for the
+admin VM so `ssh pve-admin` works from anywhere. `ForwardAgent yes`
+lets admin's shell reach PVE with the same key:
 
 ```bash
-export ADMIN_HOST=<admin-ip>
-ssh -A admin@$ADMIN_HOST
+cat >> ~/.ssh/config <<'EOF'
+
+Host pve-admin
+  HostName <admin-ip>
+  User admin
+  ForwardAgent yes
+EOF
+```
+
+Then connect:
+
+```bash
+ssh pve-admin
 ```
 
 Inside the admin VM, pre-accept PVE's host key and clone the repo
