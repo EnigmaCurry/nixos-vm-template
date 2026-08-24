@@ -419,18 +419,30 @@ Then connect:
 ssh pve-admin
 ```
 
-Inside the admin VM, pre-accept PVE's host key and clone the repo
-(`git` ships in the NixOS template):
+Inside the admin VM, add a permanent `~/.ssh/config` entry for PVE so
+`ssh pve` works from anywhere (the CLI's Proxmox backend expects
+`PVE_HOST=pve` to resolve to this alias):
 
 ```bash
-export PVE_HOST=<pve-ip>
-ssh -o StrictHostKeyChecking=accept-new root@$PVE_HOST hostname
+cat >> ~/.ssh/config <<'EOF'
+
+Host pve
+  HostName <pve-ip>
+  User root
+EOF
+```
+
+Pre-accept PVE's host key and clone the repo (`git` ships in the
+NixOS template):
+
+```bash
+ssh -o StrictHostKeyChecking=accept-new pve hostname
 git clone https://github.com/EnigmaCurry/nixos-vm-template.git
 ```
 
-For persistent access to PVE (after your agent-forwarding session
-ends), copy your workstation SSH key onto admin — `scp` from the
-workstation or paste into `~/.ssh/id_ed25519`.
+For persistent access after your workstation's agent-forwarding
+session ends, copy your workstation SSH key onto admin — `scp` from
+the workstation or paste into `~/.ssh/id_ed25519`.
 
 ### Wire the `pve` alias
 
@@ -442,9 +454,9 @@ the alias mechanism):
 ```bash
 mkdir -p ~/.config/nixos-vm-template
 
-cat > ~/.config/nixos-vm-template/pve.env <<EOF
+cat > ~/.config/nixos-vm-template/pve.env <<'EOF'
 BACKEND=proxmox
-PVE_HOST=$PVE_HOST
+PVE_HOST=pve
 PVE_STORAGE=local-zfs
 PVE_BRIDGE=vmbr0
 EOF
