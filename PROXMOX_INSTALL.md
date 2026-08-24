@@ -199,6 +199,9 @@ mkdir -p /var/lib/vz/snippets
 #cloud-config
 hostname: debian-tmp-nix-build
 disable_root: false
+package_update: true
+packages:
+  - qemu-guest-agent
 users:
   - name: root
     ssh_authorized_keys:
@@ -224,8 +227,9 @@ qm start 9999
 ```
 
 Wait ~30s for cloud-init to finish first-boot, then look up the address
-DHCP handed the guest (needs the qemu-guest-agent, which the Debian
-cloud image ships and cloud-init starts):
+DHCP handed the guest (via qemu-guest-agent, which the cloud-init
+snippet above installs on first boot — Debian's generic cloud image
+doesn't ship it):
 
 ```bash
 qm guest cmd 9999 network-get-interfaces
