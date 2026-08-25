@@ -706,22 +706,38 @@ done 2>/dev/null"]
                       :else [ak ""]))))
             [nil nil])
           ;; ── proxmox VMID ──
+          ;; Precedence: pre-seeded machines/<name>/vmid file → PVE_VMID env var
+          ;; (fails hard on conflict rather than looping) → interactive prompt
+          ;; with pvesh nextid as default.
+          env-vmid (env-str "PVE_VMID")
           pve-vmid (when (#{"proxmox" "proxmox-lxc"} backend)
-                     (if (fs/exists? (str md "/vmid"))
-                       (str/trim (slurp (str md "/vmid")))
-                       (do (println)
-                           (println "Allocating VMID from Proxmox...")
-                           (let [default-vmid (pve-ssh cfg "pvesh get /cluster/nextid")
-                                 qcmd (if lxc? "pct config" "qm config")]
-                             (loop []
-                               (let [in (prompt/ask "Enter Proxmox VMID:" default-vmid)
-                                     v (if (str/blank? in) default-vmid in)
-                                     existing (-> (pve-ssh cfg (format "%s %s 2>/dev/null | grep '^hostname:\\|^name:'" qcmd v))
-                                                  (str/replace #"^(hostname|name): " "") str/trim)]
-                                 (if (and (not (str/blank? existing)) (not= existing name))
-                                   (do (println (format "VMID %s is already in use by '%s'. Choose a different ID." v existing))
-                                       (recur))
-                                   (do (println (format "VMID: %s" v)) v))))))))]
+                     (let [qcmd (if lxc? "pct config" "qm config")
+                           existing-of (fn [v]
+                                         (-> (pve-ssh cfg (format "%s %s 2>/dev/null | grep '^hostname:\\|^name:'" qcmd v))
+                                             (str/replace #"^(hostname|name): " "") str/trim))]
+                       (cond
+                         (fs/exists? (str md "/vmid"))
+                         (str/trim (slurp (str md "/vmid")))
+
+                         env-vmid
+                         (let [existing (existing-of env-vmid)]
+                           (when (and (not (str/blank? existing)) (not= existing name))
+                             (err-exit (format "Error: PVE_VMID=%s is already in use by '%s'." env-vmid existing)))
+                           (println (format "VMID: %s (from PVE_VMID)" env-vmid))
+                           env-vmid)
+
+                         :else
+                         (do (println)
+                             (println "Allocating VMID from Proxmox...")
+                             (let [default-vmid (pve-ssh cfg "pvesh get /cluster/nextid")]
+                               (loop []
+                                 (let [in (prompt/ask "Enter Proxmox VMID:" default-vmid)
+                                       v (if (str/blank? in) default-vmid in)
+                                       existing (existing-of v)]
+                                   (if (and (not (str/blank? existing)) (not= existing name))
+                                     (do (println (format "VMID %s is already in use by '%s'. Choose a different ID." v existing))
+                                         (recur))
+                                     (do (println (format "VMID: %s" v)) v)))))))))]
       ;; ── summary ──
       (println)
       (println "Configuration summary:")

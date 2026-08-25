@@ -459,6 +459,7 @@ export NIXOS_VM_BRIDGE=vmbr0
 export NIXOS_VM_STATIC_IP=192.168.1.1/24    # router's LAN-side IP on vmbr0
 export NIXOS_VM_GATEWAY=none                # router IS the gateway; no upstream on this NIC
 export NIXOS_VM_DNS=cloudflare              # or google / gateway
+export PVE_VMID=101                         # skip VMID prompt (100 is admin)
 
 pve create router
 ```
