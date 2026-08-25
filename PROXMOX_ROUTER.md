@@ -443,19 +443,27 @@ The [`nftables`](profiles/nftables.nix) profile loads its ruleset from
 in [PROXMOX.md](PROXMOX.md#gpu-passthrough), filtered to
 network-class devices).
 
-From admin:
+From admin, pre-set env vars for the non-interactive prompts, then
+run the wizard — only the PCI picker fires:
 
 ```bash
 ssh pve-admin
 cd ~/nixos-vm-template
+
+export NIXOS_VM_MUTABILITY=immutable
+export NIXOS_VM_PROFILE=nftables
+export NIXOS_VM_MEMORY=4G
+export NIXOS_VM_VCPUS=2
+export NIXOS_VM_DISK_SIZE=20G
+export NIXOS_VM_BRIDGE=vmbr0
+
 pve create router
 ```
 
-In the wizard, select:
-
-- **Profile:** `nftables`
-- **Network:** `bridge:vmbr0` (router's virtio NIC on the prod bridge)
-- **PCI passthrough:** pick both onboard NICs (WAN + LAN) from the list
+At the PCI passthrough prompt, pick the physical NICs (WAN + LAN)
+you want handed to the router VM. The virtio NIC on `vmbr0` is the
+router's port into the prod network (that's where future prod VMs
+find it as their gateway).
 
 Before starting the VM, wire the two remaining router-specific bits
 into `machines/router/`:
