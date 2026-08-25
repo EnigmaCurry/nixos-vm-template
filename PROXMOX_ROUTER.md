@@ -471,11 +471,16 @@ The virtio NIC on `vmbr0` is the router's port into the prod network
 (that's where future prod VMs find it as their gateway — hence the
 `192.168.1.1/24` static IP above).
 
-Before starting the VM, wire the two remaining router-specific bits
-into `machines/router/`:
+`pve create` already started the router VM, but the nftables ruleset
+is empty — the loader unit short-circuits when
+`/var/identity/nftables.conf` doesn't exist, so the kernel ruleset
+stays flushed. The wizard seeded a placeholder in the machine dir:
 
-**`machines/router/nftables.conf`** — NAT + forward skeleton (adjust
-to your policy):
+```
+~/.config/nixos-vm-template/machines/proxmox/pve-router/router/nftables.conf
+```
+
+Edit it with a NAT + forward skeleton (adjust to your policy):
 
 ```nft
 table inet filter {
@@ -503,25 +508,23 @@ table inet nat {
 }
 ```
 
-**`machines/router/default.nix`** — `systemd.link` files to pin
-`wan0`/`lan0` names by MAC (the values you saved in step 5):
-
-```nix
-systemd.network.links."10-wan0" = {
-  matchConfig.MACAddress = "aa:bb:cc:dd:ee:01";
-  linkConfig.Name = "wan0";
-};
-systemd.network.links."10-lan0" = {
-  matchConfig.MACAddress = "aa:bb:cc:dd:ee:02";
-  linkConfig.Name = "lan0";
-};
-```
-
-Start:
+Push the ruleset to the VM and reload:
 
 ```bash
-pve start router
+pve sync-identity router
+ssh admin@192.168.1.1 sudo systemctl reload nftables-identity
 ```
+
+(admin needs a NIC on `vmbr0` to reach `192.168.1.1` — that happens
+in step 9. Until then, use `ssh pve qm terminal 101` from admin for a
+serial console into the router VM.)
+
+**NIC naming — TBD.** The rules above reference `wan0`/`lan0` but the
+router VM's kernel will name the passed-through NICs `enp1s0`/`enp2s0`
+etc. based on PCI slot. Check the actual names inside the VM (`ip
+-br link`) and update the ruleset, or add systemd.link files to pin
+`wan0`/`lan0` by MAC — MAC-based pinning isn't in the nftables
+profile yet.
 
 ## 8. DHCP + DNS for prod VMs (TBD)
 
