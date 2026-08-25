@@ -457,17 +457,14 @@ export NIXOS_VM_VCPUS=2
 export NIXOS_VM_DISK_SIZE=20G
 export NIXOS_VM_BRIDGE=vmbr0
 export NIXOS_VM_STATIC_IP=192.168.1.1/24    # router's LAN-side IP on vmbr0
+export NIXOS_VM_GATEWAY=none                # router IS the gateway; no upstream on this NIC
 export NIXOS_VM_DNS=cloudflare              # or google / gateway
 
 pve create router
 ```
 
-Two prompts still fire:
-
-- **PCI passthrough** — pick the physical NICs (WAN + LAN) you want
-  handed to the router VM.
-- **Gateway** — press Enter to leave blank. The router's own gateway
-  is upstream via `wan0`, not on the virtio-vmbr0 interface.
+Only the **PCI passthrough** prompt fires — pick the physical NICs
+(WAN + LAN) you want handed to the router VM.
 
 The virtio NIC on `vmbr0` is the router's port into the prod network
 (that's where future prod VMs find it as their gateway — hence the

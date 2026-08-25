@@ -285,7 +285,13 @@ done 2>/dev/null"]
             _ (when (str/blank? addr0) (err-exit "Error: IP address is required for static IP configuration."))
             addr (if (str/includes? addr0 "/") addr0
                      (let [m (or bcidr "24")] (println (format "  (using /%s subnet mask)" m)) (str addr0 "/" m)))
-            gwv (or env-gw (prompt/ask "Enter gateway IP:" dg))
+            ;; NIXOS_VM_GATEWAY=none is a sentinel for "no gateway on this
+            ;; interface" — useful for router VMs where the LAN-side NIC
+            ;; is the gateway rather than going through one.
+            gwv (cond
+                  (= "none" (some-> env-gw str/lower-case)) ""
+                  env-gw env-gw
+                  :else (prompt/ask "Enter gateway IP:" dg))
             _ (println (format "Static IP: %s (gateway: %s)" addr (if (str/blank? gwv) "none" gwv)))
             _ (println)
             [d1 d2] (prompt-dns cfg name gwv)]
