@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Inputs safe to auto-update. opencode is intentionally pinned to a release tag.
-INPUTS=(nixpkgs home-manager sway-home nix-flatpak nifty-filter)
+INPUTS=(nixpkgs home-manager sway-home nix-flatpak)
 
 echo "Updating flake inputs: ${INPUTS[*]}"
 for input in "${INPUTS[@]}"; do

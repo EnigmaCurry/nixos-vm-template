@@ -17,10 +17,6 @@
       url = "github:AnomalyCo/opencode/v1.4.11";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nifty-filter = {
-      url = "github:EnigmaCurry/nifty-filter/dev";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     # Pinned to v0.3.2 — the pod is loaded via a local binary path (see
     # src/vm/prompt.clj) because babashka.pods doesn't support :url and
     # this version isn't in the babashka pod-registry yet.
@@ -30,7 +26,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, nifty-filter, script-wizard, ... }@inputs:
+  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, script-wizard, ... }@inputs:
     let
       lib = nixpkgs.lib;
 
@@ -43,7 +39,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "nifty-services" "step-ca" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "semi-mutable" "mutable" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "semi-mutable" "mutable" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
@@ -87,7 +83,7 @@
 
           nixosConfig = nixpkgs.lib.nixosSystem {
             specialArgs = {
-              inherit sway-home nix-flatpak opencode nifty-filter imageVersion;
+              inherit sway-home nix-flatpak opencode imageVersion;
               swayHomeInputs = sway-home.inputs;
             };
             modules = coreModules ++ [
@@ -130,7 +126,7 @@
         in
         (nixpkgs.lib.nixosSystem {
           specialArgs = {
-            inherit sway-home nix-flatpak opencode nifty-filter imageVersion;
+            inherit sway-home nix-flatpak opencode imageVersion;
             swayHomeInputs = sway-home.inputs;
           };
           modules = coreModules ++ [
@@ -162,7 +158,7 @@
       mkNixosConfig = system: profile: { mutable ? false, nixOverlay ? false }:
         nixpkgs.lib.nixosSystem {
           specialArgs = {
-            inherit sway-home nix-flatpak opencode nifty-filter imageVersion;
+            inherit sway-home nix-flatpak opencode imageVersion;
             swayHomeInputs = sway-home.inputs;
           };
           modules = coreModules ++ [
