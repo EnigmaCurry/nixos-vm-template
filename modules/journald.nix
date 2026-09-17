@@ -4,11 +4,11 @@
   # Configure journald for persistent storage on /var
   services.journald = {
     storage = "persistent";
-    extraConfig = ''
-      SystemMaxUse=500M
-      SystemKeepFree=1G
-      MaxRetentionSec=1month
-    '';
+    settings.Journal = {
+      SystemMaxUse = "500M";
+      SystemKeepFree = "1G";
+      MaxRetentionSec = "1month";
+    };
   };
 
   # Ensure journal directory exists
