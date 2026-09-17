@@ -329,11 +329,11 @@
       },
       "locked": {
         "dir": "home-manager",
-        "lastModified": 1789626590,
-        "narHash": "sha256-zE27uNDEx9SLypydwXDtWTztLQsyeBj4KclaKRWqaCs=",
+        "lastModified": 1789626913,
+        "narHash": "sha256-O7CLaeF1yUPgP0MHd7bPrFqQl9yQkI9RsogXBd7q7EI=",
         "owner": "EnigmaCurry",
         "repo": "sway-home",
-        "rev": "886213d3b4023cf05f475354e93ac9f363e19d29",
+        "rev": "368b9d13996f6a5fd8618d75aa31cd08631320fd",
         "type": "github"
       },
       "original": {
