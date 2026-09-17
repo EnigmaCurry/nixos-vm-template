@@ -60,6 +60,7 @@
     users.users.traefik = {
       isSystemUser = true;
       group = "traefik";
+      extraGroups = [ "docker" ];
     };
     users.groups.traefik = {};
   };
