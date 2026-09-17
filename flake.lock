@@ -145,27 +145,6 @@
         "type": "github"
       }
     },
-    "nifty-filter": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1781025510,
-        "narHash": "sha256-EQv0ccru1MzqxHk9bl5atZNwEyqitZGSPhe1h+G6wt4=",
-        "owner": "EnigmaCurry",
-        "repo": "nifty-filter",
-        "rev": "f3416e916e625a5e3096fe9f1c7bfdb8b2fcc1e4",
-        "type": "github"
-      },
-      "original": {
-        "owner": "EnigmaCurry",
-        "ref": "dev",
-        "repo": "nifty-filter",
-        "type": "github"
-      }
-    },
     "nix-flatpak": {
       "locked": {
         "lastModified": 1789496567,
@@ -284,7 +263,6 @@
     "root": {
       "inputs": {
         "home-manager": "home-manager",
-        "nifty-filter": "nifty-filter",
         "nix-flatpak": "nix-flatpak",
         "nixpkgs": "nixpkgs",
         "opencode": "opencode",
@@ -351,11 +329,11 @@
       },
       "locked": {
         "dir": "home-manager",
-        "lastModified": 1789625758,
-        "narHash": "sha256-Xm3Jt+NVNUAUzd22WgN/ajWaO2OcWlmSEMk9vW3dtr0=",
+        "lastModified": 1789626590,
+        "narHash": "sha256-zE27uNDEx9SLypydwXDtWTztLQsyeBj4KclaKRWqaCs=",
         "owner": "EnigmaCurry",
         "repo": "sway-home",
-        "rev": "40c0f3611a450da797daea33e541df1b41c8a9b8",
+        "rev": "886213d3b4023cf05f475354e93ac9f363e19d29",
         "type": "github"
       },
       "original": {
