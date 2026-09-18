@@ -374,10 +374,21 @@ done 2>/dev/null"]
 ;; ── lxc: host ZFS bind-mount selection (introspected from the PVE node) ───────
 
 (defn- zfs-pools
-  "ZFS pool names on the PVE node (empty if introspection fails)."
+  "Candidate roots for shared ZFS datasets: raw pool names from `zpool list`
+  plus underlying datasets of any PVE `zfspool` storage entry (e.g. `local-zfs`
+  -> `rpool/data`). Both are valid ancestors for `zfs create <root>/<child>`.
+  Empty if introspection fails."
   [cfg]
-  (->> (str/split-lines (pve-ssh cfg "zpool list -H -o name 2>/dev/null"))
-       (map str/trim) (remove str/blank?) vec))
+  (let [raw (->> (str/split-lines (pve-ssh cfg "zpool list -H -o name 2>/dev/null"))
+                 (map str/trim) (remove str/blank?))
+        pve (try (->> (json/parse-string
+                       (pve-ssh cfg "pvesh get /storage --output-format json 2>/dev/null")
+                       true)
+                      (filter #(= "zfspool" (:type %)))
+                      (map (comp str/trim :pool))
+                      (remove str/blank?))
+                 (catch Exception _ nil))]
+    (->> (concat raw pve) distinct vec)))
 
 (defn- zfs-subvols
   "Datasets under `pool` (excluding the pool root and Proxmox-managed guest

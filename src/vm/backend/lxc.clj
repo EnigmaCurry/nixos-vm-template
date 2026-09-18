@@ -198,10 +198,34 @@
 
 ;; ─── ZFS host bind mounts (`pct set -mpN`) ───────────────────────────────────
 
+(defn- pve-zfspool-underlying
+  "If `head` names a PVE `zfspool` storage entry, return its underlying ZFS
+  dataset (the storage's `pool` attribute). Otherwise nil."
+  [cfg head]
+  (try
+    (let [out (pc/pve-ssh cfg (format "pvesh get /storage/%s --output-format json 2>/dev/null" head))
+          data (json/parse-string out true)]
+      (when (= "zfspool" (:type data))
+        (not-empty (str/trim (or (:pool data) "")))))
+    (catch Exception _ nil)))
+
+(defn- resolve-zfs-dataset
+  "Translate `<pve-storage>[/child]` -> `<real-pool-or-dataset>[/child]` when the
+  head is a PVE zfspool entry. Passes through unchanged for real pool names."
+  [cfg host-spec]
+  (let [[head child] (str/split host-spec #"/" 2)]
+    (if-let [real (pve-zfspool-underlying cfg head)]
+      (let [resolved (if (str/blank? child) real (str real "/" child))]
+        (println (format "Resolved Proxmox storage '%s' -> ZFS dataset '%s'" head real))
+        resolved)
+      host-spec)))
+
 (defn- apply-mounts!
   "Bind-mount host ZFS datasets/paths into the container. Each `mounts` line is
   `<host-dataset-or-path>:<container-path>`. A bare dataset (no leading /) is
-  `zfs create`d if missing, then its mountpoint is bind-mounted."
+  `zfs create`d if missing, then its mountpoint is bind-mounted. A head that
+  names a PVE `zfspool` storage entry (e.g. `local-zfs`) is translated to its
+  underlying dataset (e.g. `rpool/data`) before touching ZFS."
   [cfg name vmid]
   (let [lines (pc/port-lines (str (machine/machine-dir cfg name) "/mounts"))]
     (doseq [[i spec] (map-indexed vector lines)]
@@ -211,10 +235,11 @@
           (let [hostpath
                 (if (str/starts-with? host-spec "/")
                   host-spec
-                  (do (when-not (pc/pve-ssh-ok? cfg (format "zfs list -H -o name %s" host-spec))
-                        (println (format "Creating ZFS dataset %s..." host-spec))
-                        (pc/pve-ssh! cfg (format "zfs create %s" host-spec)))
-                      (str/trim (pc/pve-ssh cfg (format "zfs get -H -o value mountpoint %s" host-spec)))))]
+                  (let [dataset (resolve-zfs-dataset cfg host-spec)]
+                    (when-not (pc/pve-ssh-ok? cfg (format "zfs list -H -o name %s" dataset))
+                      (println (format "Creating ZFS dataset %s..." dataset))
+                      (pc/pve-ssh! cfg (format "zfs create %s" dataset)))
+                    (str/trim (pc/pve-ssh cfg (format "zfs get -H -o value mountpoint %s" dataset)))))]
             (println (format "Bind mount: %s -> %s (mp%d)" hostpath ctpath i))
             (pc/pve-ssh! cfg (format "pct set %s -mp%d %s,mp=%s" vmid i hostpath ctpath))))))))
 
