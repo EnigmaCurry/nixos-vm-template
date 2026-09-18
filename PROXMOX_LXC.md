@@ -19,8 +19,7 @@ host-native ZFS dataset, which is exactly what the built-in `nas` profile does.
 The tradeoff: a container shares the host kernel, so this backend is
 **mutable-only** — there is no bootloader and the root filesystem is read-write.
 The immutable / semi-mutable modes of the KVM backends do not apply here. See
-[MODES.md](MODES.md) for the mode model and `spike/README.md` for the
-proof-of-concept that validated this backend end to end.
+[MODES.md](MODES.md) for the mode model.
 
 ## Additional Requirements
 
@@ -175,8 +174,7 @@ smbclient -L nas.local -N          # list shares by name
 
 Because kernel `nfsd` does not work in an unprivileged container, the `nas`
 profile automatically runs the container **privileged** and appends
-`lxc.apparmor.profile: unconfined` to its `pct` config. See `spike/README.md` for
-the validation matrix (NFS + Samba serving a host ZFS dataset).
+`lxc.apparmor.profile: unconfined` to its `pct` config.
 
 ### Per-user access (`nas_passwd` + `nas_acl`) — Samba **and** copyparty
 

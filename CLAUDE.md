@@ -144,8 +144,7 @@ option which guards off `boot.nix`/disks/initrd); `create` is `pct create` plus
 host ZFS **bind mounts** (`pct set -mpN <dataset>:<ctpath>`, dataset created if
 missing); identity + the `/etc/nixos` flake are injected into the stopped rootfs
 via `pct mount`. The LXC-only **`nas`** profile (NFS + Samba over `/srv/nas`)
-forces a privileged container with apparmor-unconfined for kernel `nfsd`. See
-`spike/README.md` for the proof-of-concept that validated this end to end.
+forces a privileged container with apparmor-unconfined for kernel `nfsd`.
 
 ## Technology Stack
 

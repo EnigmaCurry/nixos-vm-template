@@ -113,7 +113,7 @@
       # module, sets vm.container (which guards off boot.nix/disks/initrd) and
       # vm.mutable (an LXC rootfs is read-write; nixos-rebuild runs inside), and
       # outputs config.system.build.tarball (a tar.xz for `pct create`). Container
-      # networking matches the validated spike: systemd-networkd DHCP on eth0.
+      # networking: systemd-networkd DHCP on eth0.
       lxcProfiles = [ "core" "docker" "nas" ];
       mkLxcImage = system: profileList:
         let
