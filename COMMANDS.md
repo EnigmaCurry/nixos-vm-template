@@ -87,8 +87,13 @@ just upgrade webserver                    # Rebuild and apply changes (preserves
 
 `just clone <source> <dest>` duplicates a VM by copying its `/var` disk
 (preserving all data, home directories, and application state) while
-generating fresh identity files (machine-id, MAC address, UUID, hostname,
-SSH host key). The source VM must be shut off.
+generating fresh identity files (machine-id, MAC address, UUID, hostname).
+The source VM must be shut off.
+
+The source's SSH host key is wiped from the clone; the clone generates its
+own on first boot. To pin a specific key on the destination, populate
+`machines/<dest>/ssh_host_ed25519_key` and run `just recreate <dest>` — clone
+itself will not install a host key (see [SSH Host Key](CONFIGURATION.md#ssh-host-key)).
 
 ```bash
 just clone webserver webserver2              # Clone with default resources

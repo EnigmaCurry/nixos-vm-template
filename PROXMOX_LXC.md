@@ -128,6 +128,28 @@ sudo nixos-rebuild switch   # /etc/nixos is seeded at create time
 "upgrade from inside" message). To reset a container to a fresh image, use
 `just recreate` (rebuilds the rootfs, re-injects identity).
 
+### SSH Host Key on Recreate
+
+`just recreate <name>` wipes the rootfs, which includes `/etc/ssh/`. By default
+openssh generates a **new** host key on first start, so SSH clients will see a
+key-changed warning after every recreate. To pin a stable host key across
+recreates, generate one on the workstation and let create/recreate install it:
+
+```bash
+cd machines/proxmox-lxc/<host>/<name>
+ssh-keygen -t ed25519 -N '' -f ssh_host_ed25519_key   # overwrites the template
+BACKEND=proxmox-lxc just recreate <name>
+```
+
+The machine dir ships with a `#`-comment-only template for `ssh_host_ed25519_key`
+(mode 0600) and `ssh_host_ed25519_key.pub`. Comment/blank lines are stripped
+when installing, so a comment-only template acts as absent — the container
+generates its own key and the workstation holds no copy.
+
+Only `create`/`recreate` apply the workstation-provided key. `sync-identity` /
+`clone` never rotate a running container's host key; if the machine dir contains
+a real key at that moment, they print a WARNING pointing to `just recreate`.
+
 ## Host ZFS Bind Mounts
 
 The container's distinguishing feature. Mounts are stored one per line in

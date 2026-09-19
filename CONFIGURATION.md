@@ -9,7 +9,7 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `uuid` - VM UUID (preserves DHCP lease across upgrades)
 - `mac-address` - Network MAC address
 - `network` - Network mode (`nat` or `bridge:<name>`)
-- `ssh_host_ed25519_key` - SSH host key
+- `ssh_host_ed25519_key` / `.pub` - Optional pinned SSH host key. Absent (or `#`-comment-only template) → VM generates its own on first boot. See [SSH Host Key](#ssh-host-key).
 - `admin_authorized_keys` - SSH public keys for admin user
 - `user_authorized_keys` - SSH public keys for regular user
 - `tcp_ports` - TCP ports to open in firewall (one per line)
@@ -67,3 +67,25 @@ just upgrade myvm             # Apply the change
 
 The password hash is stored in `machines/<name>/root_password_hash`.
 When this file is empty, root password login is disabled.
+
+## SSH Host Key
+
+Each machine dir ships with `ssh_host_ed25519_key` (0600) and
+`ssh_host_ed25519_key.pub` as `#`-comment-only templates. Left as-is, the VM
+generates its own key on first boot and the workstation holds no copy.
+
+To pin a stable key across `just recreate`, overwrite the template:
+
+```bash
+cd machines/<name>
+ssh-keygen -t ed25519 -N '' -f ssh_host_ed25519_key
+just recreate <name>
+```
+
+Comment (`#`) and blank lines are stripped on install, so a real key with a
+header comment still installs cleanly.
+
+Only `create` and `recreate` apply the workstation-provided key. `sync-identity`
+/ `upgrade` / `clone` never rotate a running VM's host key; they print a
+WARNING when a real key is sitting in the machine dir unused, pointing to
+`just recreate`.
