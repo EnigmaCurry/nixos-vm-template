@@ -5,3 +5,4 @@
 .env
 .env-*
 .claude/settings.local.json
+/wireguard-*

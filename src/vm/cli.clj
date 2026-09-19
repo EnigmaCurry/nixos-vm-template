@@ -8,6 +8,7 @@
             [vm.profile :as profile]
             [vm.net :as net]
             [vm.wizard :as wizard]
+            [vm.wireguard :as wg]
             [vm.proc :as proc]
             [vm.backend :as b]
             [vm.backend.libvirt :as lv]
@@ -170,6 +171,8 @@
                                           :vcpus (arg a 3 "2") :var-size (arg a 4 "30G")
                                           :network (arg a 5 "nat") :static-ip (arg a 6 "")})
       "network-config" (net/network-config-interactive cfg (arg a 0 nil) (arg a 1 ""))
+      "wireguard-init" (wg/wizard cfg)
+      "wireguard-add-peer" (wg/add-peer-wizard cfg (arg a 0 nil))
       "passwd"        (machine/set-password cfg (arg a 0 nil))
       "set-profile"   (machine/set-profile cfg (arg a 0 nil) (str/join "," (rest a)))
       "list-machines" (cmd-list-machines cfg)

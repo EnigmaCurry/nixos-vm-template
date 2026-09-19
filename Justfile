@@ -79,6 +79,20 @@ clone source dest memory="" vcpus="" network="":
 network-config name network="":
     @{{VM_CLI}} network-config "{{name}}" "{{network}}"
 
+# Interactive WireGuard config wizard: mints keypairs and per-peer wg-quick
+# configs for a hub-and-spoke or full-mesh VPN into an output directory. Offers
+# to copy each config into machines/<name>/wireguard.conf if the peer name
+# matches an existing machine.
+wireguard-init:
+    @{{VM_CLI}} wireguard-init
+
+# Add one peer to an existing wireguard-init output directory. Backs up the
+# previous files, regenerates every peer's config so the new peer is fully
+# connected, and offers to apply changed configs to matching machines.
+# out_dir defaults to the newest ./wireguard-*/ in the current directory.
+wireguard-add-peer out_dir="":
+    @{{VM_CLI}} wireguard-add-peer "{{out_dir}}"
+
 # Start a VM
 start name:
     @{{VM_CLI}} start "{{name}}"
