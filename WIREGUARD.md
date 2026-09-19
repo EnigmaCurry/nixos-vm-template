@@ -143,6 +143,39 @@ See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
   change reverts on next recreate unless `machines/<name>/wireguard.conf` is
   updated too.
 
+## Linux NetworkManager client
+
+Import `<peer>.conf` as a system connection so the NM applet lists it as a
+toggleable VPN:
+
+```bash
+sudo nmcli connection import type wireguard file <peer>.conf
+```
+
+The connection id and interface name both take the filename stem. To rename
+both (the applet displays the interface name, not the connection id):
+
+```bash
+sudo nmcli connection modify <peer> connection.id NAS
+sudo nmcli connection down NAS 2>/dev/null
+sudo nmcli connection modify NAS connection.interface-name nas
+sudo nmcli connection up NAS
+```
+
+Interface name: ≤ 15 chars, `[a-z0-9_-]`.
+
+- **Autostart on boot:** `sudo nmcli connection modify NAS connection.autoconnect yes`
+- **Caveat:** NM ignores `PreUp`/`PostUp`/`PreDown`/`PostDown` hooks in `.conf`.
+  Use `wg-quick@wg0.service` if you need those.
+
+Verify:
+
+```bash
+nmcli connection show NAS
+ip link show nas
+sudo wg show
+```
+
 ## Windows / macOS client
 
 The official [WireGuard](https://www.wireguard.com/install/) client (Windows:
