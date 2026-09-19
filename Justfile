@@ -111,6 +111,19 @@ recreate name var_size="30G" network="":
 update:
     nix flake update
 
+# Push this repo, then bump its rev in ../sway-home's flake.lock.
+push-sway-home sway_home="../sway-home":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ -z "$(git status --porcelain)" ] || { echo "commit first"; exit 1; }
+    if [ "$(git rev-list @{u}..HEAD --count 2>/dev/null || echo 0)" -gt 0 ]; then
+      git push
+    else
+      echo "already pushed"
+    fi
+    (cd "{{sway_home}}" && nix flake update nixos-vm-template)
+    echo "Now in {{sway_home}}: admin upgrade"
+
 # Upgrade a VM to a new image (preserves /var data)
 upgrade name:
     @{{VM_CLI}} upgrade "{{name}}"
