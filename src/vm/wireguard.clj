@@ -359,13 +359,27 @@
 
 ;; ─── main entrypoints ────────────────────────────────────────────────────────
 
+(defn- invocation-cwd
+  "Directory to use as the default output location. Prefer $PWD (set by bash),
+  fall back to Java's user.dir. Rewrite to $HOME (or /tmp) when the result
+  lands under /nix/store — that happens when bb is launched via `nix develop
+  --command` from a flake pinned in the store (e.g. `just -d $NIXOS_VM_TEMPLATE`
+  where NIXOS_VM_TEMPLATE points at a store path), and the store is read-only."
+  []
+  (let [candidate (or (some-> (System/getenv "PWD") not-empty)
+                      (System/getProperty "user.dir"))]
+    (if (str/starts-with? (or candidate "") "/nix/store/")
+      (or (some-> (System/getenv "HOME") not-empty) "/tmp")
+      candidate)))
+
 (defn- default-out-dir []
-  (str (System/getProperty "user.dir") "/wireguard-" (ts-stamp)))
+  (str (invocation-cwd) "/wireguard-" (ts-stamp)))
 
 (defn- detect-latest-out-dir
-  "Newest ./wireguard-*/ in the CWD that carries a .wg-state.edn, or nil."
+  "Newest ./wireguard-*/ in the invocation CWD that carries a .wg-state.edn,
+  or nil."
   []
-  (let [cwd (System/getProperty "user.dir")]
+  (let [cwd (invocation-cwd)]
     (some->> (fs/glob cwd "wireguard-*")
              (filter fs/directory?)
              (filter #(fs/exists? (state-path (str %))))
