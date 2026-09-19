@@ -179,7 +179,7 @@
              "[Interface]"
              (format "PrivateKey = %s" private)
              "Address    = 10.0.0.2/24"
-             "# ListenPort = 51820"
+             "ListenPort = 51820"
              ""
              "# [Peer]"
              "# PublicKey  = <peer-public-key>"
