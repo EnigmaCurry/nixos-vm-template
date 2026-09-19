@@ -8,7 +8,8 @@
             [babashka.fs :as fs]
             [vm.proc :as proc]
             [vm.machine :as machine]
-            [vm.profile :as profile]))
+            [vm.profile :as profile]
+            [vm.identity :as identity]))
 
 (defn generate-mutable-flake
   "flake.nix content for an /etc/nixos mutable VM (nixos-rebuild)."
@@ -73,6 +74,59 @@
     "x86_64" "x86_64-linux"
     "aarch64" "aarch64-linux"
     "x86_64-linux"))
+
+(defn- find-nixos-dev [cfg disk-path]
+  (let [dev (proc/capture (concat (:guestfish cfg) ["--ro" "-a" disk-path])
+                          {:in "run\nfindfs-label nixos\n"
+                           :extra-env {"LIBGUESTFS_BACKEND" (:libguestfs-backend cfg)}})]
+    (when (str/blank? dev)
+      (println "Error: Could not find nixos partition")
+      (System/exit 1))
+    dev))
+
+(def ^:private wipe-host-key-cmds
+  (mapcat #(c "rm-f" %)
+          ["/etc/ssh/ssh_host_ed25519_key"
+           "/etc/ssh/ssh_host_ed25519_key.pub"
+           "/etc/ssh/ssh_host_rsa_key"
+           "/etc/ssh/ssh_host_rsa_key.pub"
+           "/etc/ssh/ssh_host_ecdsa_key"
+           "/etc/ssh/ssh_host_ecdsa_key.pub"]))
+
+(defn wipe-ssh-host-keys!
+  "Delete any /etc/ssh/ssh_host_*_key* on `disk-path`. Called on clone to strip
+  the source VM's host key from the freshly-copied disk; openssh will generate
+  a new key on first boot when the machine dir does not provide one."
+  [cfg disk-path]
+  (let [nixos-dev (find-nixos-dev cfg disk-path)]
+    (gf! cfg disk-path
+         (concat ["run"] (c "mount" nixos-dev "/")
+                 (c "mkdir-p" "/etc/ssh")
+                 wipe-host-key-cmds))))
+
+(defn install-ssh-host-key!
+  "Wipe any existing /etc/ssh/ssh_host_*_key* on `disk-path`, then write
+  machines/<name>/ssh_host_ed25519_key(.pub) into /etc/ssh/ (with `#`-comment
+  and blank lines stripped) when they carry real content. Called only from
+  create/recreate paths (prepare-disk!). Absent/template-only workstation
+  files -> openssh regenerates on first boot."
+  [cfg name disk-path]
+  (let [md (machine/machine-dir cfg name)
+        priv (identity/filter-key-content (str md "/ssh_host_ed25519_key"))
+        pub  (identity/filter-key-content (str md "/ssh_host_ed25519_key.pub"))
+        nixos-dev (find-nixos-dev cfg disk-path)]
+    (gf! cfg disk-path
+         (concat ["run"] (c "mount" nixos-dev "/")
+                 (c "mkdir-p" "/etc/ssh")
+                 wipe-host-key-cmds
+                 (when priv
+                   (concat (c "write" "/etc/ssh/ssh_host_ed25519_key" priv)
+                           (c "chmod" "0600" "/etc/ssh/ssh_host_ed25519_key")
+                           (c "chown" "0" "0" "/etc/ssh/ssh_host_ed25519_key")))
+                 (when pub
+                   (concat (c "write" "/etc/ssh/ssh_host_ed25519_key.pub" pub)
+                           (c "chmod" "0644" "/etc/ssh/ssh_host_ed25519_key.pub")
+                           (c "chown" "0" "0" "/etc/ssh/ssh_host_ed25519_key.pub")))))))
 
 (defn prepare-disk!
   "Copy the profile base image to disk-path, resize, and populate identity and
@@ -187,6 +241,7 @@
                      (c "copy-in" (str tmp "/profiles") "/etc/nixos/")
                      (c "chmod" "0644" "/etc/nixos/flake.nix")
                      (c "chmod" "0644" "/etc/nixos/flake.lock")))
+        (install-ssh-host-key! cfg name disk-path)
         (fs/delete-tree tmp)))))
 
 (defn inject-template-flake!

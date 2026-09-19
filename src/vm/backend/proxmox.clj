@@ -440,6 +440,7 @@
                                   (when-not (fs/exists? (str md "/static_ip"))
                                     (pve-ssh-soft cfg (format "rm -f %s/identity/static_ip" mp)))))
                 (finally (fs/delete-tree tmp))))))
+        (identity/warn-host-key-not-synced! cfg name)
         (println "Identity files synced.")
         (sync-firewall! cfg name)
         (apply-pci-passthrough! cfg name)
@@ -813,15 +814,18 @@
               (with-nbd-mount cfg disk-path "p2" "/mnt/nixos-clone-identity" false
                               (fn [mp]
                                 (pve-ssh cfg (format "echo '%s' > %s/etc/hostname" hostname mp))
-                                (pve-ssh cfg (format "echo '%s' > %s/etc/machine-id" machine-id mp))))))
+                                (pve-ssh cfg (format "echo '%s' > %s/etc/machine-id" machine-id mp))
+                                (pve-ssh cfg (format "rm -f %s/etc/ssh/ssh_host_ed25519_key %s/etc/ssh/ssh_host_ed25519_key.pub %s/etc/ssh/ssh_host_rsa_key %s/etc/ssh/ssh_host_rsa_key.pub %s/etc/ssh/ssh_host_ecdsa_key %s/etc/ssh/ssh_host_ecdsa_key.pub"
+                                                     mp mp mp mp mp mp))))
+              (identity/warn-host-key-not-synced! cfg dest)))
           (do
-            (b/sync-identity this cfg dest)
-            (println "Removing SSH host keys (will be regenerated on first boot)...")
+            (println "Wiping SSH host key inherited from source...")
             (let [var-ref (disk-ref (pve-ssh cfg (format "qm config %s" dest-vmid)) "virtio1")
                   var-path (pve-ssh cfg (format "pvesm path '%s'" var-ref))]
               (with-nbd-mount cfg var-path "p1" "/mnt/nixos-ssh-cleanup" false
                               (fn [mp]
-                                (pve-ssh-soft cfg (format "rm -f %s/identity/ssh_host_ed25519_key %s/identity/ssh_host_ed25519_key.pub" mp mp)))))))
+                                (pve-ssh-soft cfg (format "rm -f %s/identity/ssh_host_ed25519_key %s/identity/ssh_host_ed25519_key.pub" mp mp)))))
+            (b/sync-identity this cfg dest)))
         (println)
         (println (format "VM '%s' cloned from '%s' (VMID: %s)." dest source dest-vmid))
         (println (format "Start with: BACKEND=proxmox just start %s" dest))))))

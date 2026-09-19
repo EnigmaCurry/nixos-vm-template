@@ -4,6 +4,7 @@
   (backend_create_disks) and the proxmox rsync-staging + remote-chmod plan
   (backend_sync_identity)."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [vm.machine :as machine]))
 
 (def identity-files
@@ -12,7 +13,10 @@
   :ensure :touch  - copy when non-empty, else create an empty placeholder
                     (admin/user authorized_keys are always present).
   :ensure :always - always copy, even when empty (root_password_hash).
-  (default)       - copy + chmod only when the source file is non-empty."
+  (default)       - copy + chmod only when the source file is non-empty.
+  :filter :strip-comments - read the source, drop `#`-prefixed and blank lines,
+                            and inline the remainder via `guestfish write` so
+                            template files can carry `#` header commentary."
   [{:file "admin_authorized_keys" :mode "0644" :ensure :touch}
    {:file "user_authorized_keys"  :mode "0644" :ensure :touch}
    {:file "tcp_ports"   :mode "0644"}
@@ -24,10 +28,34 @@
    {:file "root_password_hash" :mode "0600" :ensure :always}
    {:file "woodpecker.env" :mode "0600"}
    {:file "samba_credentials"    :mode "0600"}
-   {:file "samba_client_shares"  :mode "0644"}])
+   {:file "samba_client_shares"  :mode "0644"}
+   {:file "ssh_host_ed25519_key"     :mode "0600" :filter :strip-comments}
+   {:file "ssh_host_ed25519_key.pub" :mode "0644" :filter :strip-comments}])
 
 (defn- non-empty-file? [path]
   (and (fs/regular-file? path) (pos? (fs/size path))))
+
+(defn filter-key-content
+  "Read `path` and return its content with `#`-prefixed and blank lines removed.
+  Returns nil when nothing meaningful remains. Lets SSH host key template files
+  carry `#` header commentary without confusing openssh."
+  [path]
+  (when (fs/regular-file? path)
+    (let [body (->> (str/split-lines (slurp path))
+                    (remove #(or (str/starts-with? % "#") (str/blank? %)))
+                    (str/join "\n"))]
+      (when-not (str/blank? body) (str body "\n")))))
+
+(defn warn-host-key-not-synced!
+  "Print a WARNING when `machines/<name>/ssh_host_ed25519_key` has real (non-
+  comment) content but the caller is a sync/upgrade/clone path that won't
+  apply it. SSH host keys are populated only at create/recreate time by design."
+  [cfg name]
+  (let [priv (str (machine/machine-dir cfg name) "/ssh_host_ed25519_key")]
+    (when (filter-key-content priv)
+      (println (format "WARNING: %s exists but will NOT be applied here." priv))
+      (println "         SSH host keys are populated only at create/recreate time.")
+      (println (format "         Run 'just recreate %s' to rotate the host key." name)))))
 
 (defn- deploy-keys
   "Sorted seq of deploy-key files in machine-dir/deploy_keys, or nil if empty."
@@ -45,20 +73,29 @@
   (cons ":" (map str toks)))
 
 (defn- identity-file-cmds
-  "Guestfish tokens for one identity-table entry (copy/touch + chmod + chown)."
-  [machine-dir {:keys [file mode ensure]}]
+  "Guestfish tokens for one identity-table entry (copy/touch + chmod + chown).
+  With `:filter :strip-comments`, the source is read on the workstation, `#`
+  comment and blank lines are dropped, and the remainder is inlined via
+  guestfish `write` — so template files with header commentary work."
+  [machine-dir {:keys [file mode ensure filter]}]
   (let [src (str machine-dir "/" file)
         dst (str "/identity/" file)
-        present (non-empty-file? src)]
+        filtered (when (= filter :strip-comments) (filter-key-content src))
+        present (if (= filter :strip-comments)
+                  (some? filtered)
+                  (non-empty-file? src))
+        write-cmds (if (= filter :strip-comments)
+                     (cmd "write" dst filtered)
+                     (cmd "copy-in" src "/identity/"))]
     (case ensure
-      :touch (concat (if present (cmd "copy-in" src "/identity/") (cmd "touch" dst))
+      :touch (concat (if present write-cmds (cmd "touch" dst))
                      (cmd "chmod" mode dst)
                      (cmd "chown" "0" "0" dst))
-      :always (concat (cmd "copy-in" src "/identity/")
+      :always (concat write-cmds
                       (cmd "chmod" mode dst)
                       (cmd "chown" "0" "0" dst))
       (when present
-        (concat (cmd "copy-in" src "/identity/")
+        (concat write-cmds
                 (cmd "chmod" mode dst)
                 (cmd "chown" "0" "0" dst))))))
 
@@ -145,8 +182,10 @@
 ;; ─── proxmox: rsync staging + remote chmod plan ──────────────────────────────
 
 (def proxmox-staging-files
-  "Identity files copied into the proxmox rsync staging dir (SSH host keys are
-  excluded — regenerated on first boot). Note `allowed_cidrs` is included here."
+  "Identity files copied into the proxmox rsync staging dir. `allowed_cidrs` is
+  included here. SSH host keys are excluded on purpose: they are populated only
+  at create/recreate time from the identity-files table; sync-identity leaves
+  the running VM's key intact."
   ["admin_authorized_keys" "user_authorized_keys" "tcp_ports" "udp_ports"
    "resolv.conf" "hosts" "root_password_hash" "static_ip" "allowed_cidrs"
    "ca-cert.pem" "woodpecker.env" "samba_credentials" "samba_client_shares"])

@@ -192,6 +192,33 @@
             (println (format "No %s authorized_keys configured (%s SSH login will be disabled)"
                              account account))))))))
 
+(defn- seed-ssh-host-key-templates!
+  "Drop `#`-comment-only ssh_host_ed25519_key(.pub) templates in the machine
+  dir. Users populate them BEFORE `just create` / `just recreate` to pin a
+  stable host key; sync-identity / upgrade / clone leave the VM's key alone
+  (and warn if a real key is sitting here unused)."
+  [md name]
+  (when-not (fs/exists? (str md "/ssh_host_ed25519_key"))
+    (spit (str md "/ssh_host_ed25519_key")
+          (str/join "\n"
+                    [(format "# ed25519 SSH host private key for VM '%s'." name)
+                     "# Populate BEFORE 'just create'/'just recreate' to pin the host key."
+                     "# Absent (or `#`-comment-only) -> openssh regenerates on first boot."
+                     "# Generate with:"
+                     (format "#   ssh-keygen -t ed25519 -N '' -f %s/ssh_host_ed25519_key" md)
+                     "# `#` comment and blank lines are stripped when installed."
+                     ""]))
+    (fs/set-posix-file-permissions (str md "/ssh_host_ed25519_key") "rw-------")
+    (println (format "Created: %s/ssh_host_ed25519_key (template - openssh will regen if left as-is)" md)))
+  (when-not (fs/exists? (str md "/ssh_host_ed25519_key.pub"))
+    (spit (str md "/ssh_host_ed25519_key.pub")
+          (str/join "\n"
+                    [(format "# ed25519 SSH host public key for VM '%s' (companion to the private key)." name)
+                     "# Optional: openssh can derive the public key from the private, so shipping"
+                     "# this is only useful for out-of-band verification."
+                     ""]))
+    (println (format "Created: %s/ssh_host_ed25519_key.pub (template)" md))))
+
 (defn init-machine
   "Initialize a machine config directory, creating identity files if absent.
   opts: :profile :network :ssh-key-mode (\"agent\"|\"skip\"|nil) :admin-keys :user-keys."
@@ -255,6 +282,8 @@
                              (format "# Add one public key per line. Run 'just upgrade %s' to apply changes." name)
                              ""]
                             ssh-key-mode user-keys)
+    ;; SSH host key templates (populate BEFORE create/recreate to pin the key)
+    (seed-ssh-host-key-templates! md name)
     ;; tcp_ports — seeded once at creation; the nas / moonshine-nvidia /
     ;; sunshine-plasma-nvidia profiles add their service ports here (not in the
     ;; image) so they stay visible/editable. Remove any you don't want exposed.
@@ -369,6 +398,7 @@
     (println (format "Created: %s/hostname" dst))
     (when (fs/exists? (str dst "/root_password_hash"))
       (fs/set-posix-file-permissions (str dst "/root_password_hash") "rw-------"))
+    (seed-ssh-host-key-templates! dst dest)
     (println (format "Machine config ready: %s/ (cloned from %s)" dst source))))
 
 (defn- save-resource!

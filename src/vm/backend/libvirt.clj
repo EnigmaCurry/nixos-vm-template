@@ -149,6 +149,7 @@
         (System/exit 1))
       (println (format "Syncing identity files from %s/ to /var disk" (machine/machine-dir cfg name)))
       (proc/run! (concat (:guestfish cfg) ["-a" var-disk] (identity/guestfish-sync-cmds cfg name)) (gf-env cfg))
+      (identity/warn-host-key-not-synced! cfg name)
       (println "Identity files synced.")))
 
   (generate-config [_ cfg name memory vcpus] (generate-config! cfg name memory vcpus))
@@ -358,17 +359,20 @@
             (proc/run! (concat (:guestfish cfg) ["-a" (str dst-vd "/disk.qcow2")])
                        (merge {:in (format "run\nmount %s /\nwrite /etc/hostname \"%s\"\nwrite /etc/machine-id \"%s\"\n"
                                            nixos-dev hostname machine-id)}
-                              (gf-env cfg)))))
+                              (gf-env cfg)))
+            (println "Wiping SSH host key inherited from source...")
+            (mutable/wipe-ssh-host-keys! cfg (str dst-vd "/disk.qcow2"))
+            (identity/warn-host-key-not-synced! cfg dest)))
         (do
           (println "Copying /var disk...")
           (proc/run! (concat (:cp cfg) [(str src-vd "/var.qcow2") (str dst-vd "/var.qcow2")]))
-          (b/sync-identity this cfg dest)
-          (println "Removing SSH host keys (will be regenerated on first boot)...")
+          (println "Wiping SSH host key inherited from source...")
           (proc/run! (concat (:guestfish cfg) ["-a" (str dst-vd "/var.qcow2")
                                                "run" ":" "mount" "/dev/sda1" "/"
                                                ":" "rm-f" "/identity/ssh_host_ed25519_key"
                                                ":" "rm-f" "/identity/ssh_host_ed25519_key.pub"])
                      (gf-env cfg))
+          (b/sync-identity this cfg dest)
           (let [prof (machine/read-field cfg dest "profile")
                 img (profile-image cfg prof)]
             (when-not (fs/regular-file? img)

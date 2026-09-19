@@ -11,6 +11,7 @@
             [vm.proc :as proc]
             [vm.machine :as machine]
             [vm.profile :as profile]
+            [vm.identity :as identity]
             [vm.wizard :as wizard]
             [vm.backend :as b]
             [vm.backend.pve-common :as pc]))
@@ -116,8 +117,11 @@
 (defn- stage-rootfs-etc!
   "Build a local temp dir holding the /etc tree to rsync into the container
   rootfs: hostname, machine-id, ssh keys, firewall-ports, network-config, root
-  password hash, and the /etc/nixos flake (+ modules/profiles). Returns the dir."
-  [cfg name]
+  password hash, and the /etc/nixos flake (+ modules/profiles). Returns the dir.
+  When `install-host-key?` is true and the machine dir provides
+  ssh_host_ed25519_key(.pub), those are staged too; otherwise they are omitted
+  so the rsync leaves any existing rootfs host key intact."
+  [cfg name install-host-key?]
   (let [tmp (str (fs/create-temp-dir))
         etc (str tmp "/etc")
         md (machine/machine-dir cfg name)
@@ -135,6 +139,16 @@
     ;; SSH authorized keys -> /etc/ssh/authorized_keys.d/{admin,user}
     (key-filter (str md "/admin_authorized_keys") (str etc "/ssh/authorized_keys.d/admin"))
     (key-filter (str md "/user_authorized_keys") (str etc "/ssh/authorized_keys.d/user"))
+    ;; SSH host key (optional, create/recreate only): if the workstation
+    ;; provides one, ship it so the container keeps a stable host key across
+    ;; recreate. `#`-comment and blank lines are stripped so template files can
+    ;; carry header commentary. Absent/template-only -> openssh regenerates on
+    ;; first start.
+    (when install-host-key?
+      (when-let [priv (identity/filter-key-content (str md "/ssh_host_ed25519_key"))]
+        (spit (str etc "/ssh/ssh_host_ed25519_key") priv))
+      (when-let [pub (identity/filter-key-content (str md "/ssh_host_ed25519_key.pub"))]
+        (spit (str etc "/ssh/ssh_host_ed25519_key.pub") pub)))
     ;; firewall ports
     (cp (str md "/tcp_ports") (str etc "/firewall-ports/tcp_ports"))
     (cp (str md "/udp_ports") (str etc "/firewall-ports/udp_ports"))
@@ -164,6 +178,8 @@
    (format "chmod 0444 %s/etc/machine-id 2>/dev/null || true" root)
    (format "chmod 0755 %s/etc/ssh/authorized_keys.d 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/ssh/authorized_keys.d/* 2>/dev/null || true" root)
+   (format "chmod 0600 %s/etc/ssh/ssh_host_ed25519_key 2>/dev/null || true" root)
+   (format "chmod 0644 %s/etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null || true" root)
    (format "chmod 0755 %s/etc/firewall-ports %s/etc/network-config 2>/dev/null || true" root root)
    (format "chmod 0644 %s/etc/firewall-ports/* %s/etc/network-config/* 2>/dev/null || true" root root)
    (format "chmod 0600 %s/etc/root_password_hash 2>/dev/null || true" root)
@@ -177,9 +193,12 @@
            root root root root root root root)])
 
 (defn- inject-rootfs!
-  "Inject identity + /etc/nixos flake into a STOPPED container's rootfs."
-  [cfg name vmid]
-  (let [staged (stage-rootfs-etc! cfg name)
+  "Inject identity + /etc/nixos flake into a STOPPED container's rootfs.
+  `install-host-key?` gates whether the workstation's ssh_host_ed25519_key(.pub)
+  is shipped: true for create/recreate, false for sync-identity (so a running
+  container's host key is not silently rotated)."
+  [cfg name vmid install-host-key?]
+  (let [staged (stage-rootfs-etc! cfg name install-host-key?)
         root (format "/var/lib/lxc/%s/rootfs" vmid)]
     (try
       (println "Injecting identity into container rootfs...")
@@ -282,7 +301,7 @@
           (pc/pve-ssh-soft cfg (format (str "grep -q 'lxc.apparmor.profile' /etc/pve/lxc/%s.conf "
                                             "|| echo 'lxc.apparmor.profile: unconfined' >> /etc/pve/lxc/%s.conf")
                                        vmid vmid)))
-        (inject-rootfs! cfg name vmid)
+        (inject-rootfs! cfg name vmid true)
         (pc/sync-firewall! cfg name "lxc")
         (pc/pve-ssh-soft cfg (format "rm -f %s" tmpl))
         (println (format "Created LXC '%s' (VMID: %s)." name vmid))
@@ -304,7 +323,8 @@
         (println "Stopping container for identity sync...")
         (b/force-stop this cfg name)
         (loop [n 0] (when (and (b/running? this cfg name) (< n 30)) (Thread/sleep 1000) (recur (inc n)))))
-      (inject-rootfs! cfg name vmid)
+      (inject-rootfs! cfg name vmid false)
+      (identity/warn-host-key-not-synced! cfg name)
       (pc/sync-firewall! cfg name "lxc")
       (println "Identity files synced.")
       (when was-running (println "Restarting container...") (b/start this cfg name))))
@@ -508,6 +528,13 @@
                                  source-vmid dest-vmid dest (:pve-storage cfg)))
         (pc/pve-ssh! cfg (format "pct set %s --net0 name=eth0,bridge=%s,hwaddr=%s,ip=dhcp,firewall=%s" dest-vmid bridge mac (:pve-firewall cfg)))
         (pc/pve-ssh! cfg (format "pct set %s --memory %s --cores %s" dest-vmid memory vcpus))
+        (println "Wiping SSH host key inherited from source...")
+        (pc/pve-ssh-soft cfg (format "pct unmount %s 2>/dev/null || true" dest-vmid))
+        (pc/pve-ssh cfg (format "pct mount %s" dest-vmid))
+        (let [root (format "/var/lib/lxc/%s/rootfs" dest-vmid)]
+          (pc/pve-ssh-soft cfg (format "rm -f %s/etc/ssh/ssh_host_ed25519_key %s/etc/ssh/ssh_host_ed25519_key.pub %s/etc/ssh/ssh_host_rsa_key %s/etc/ssh/ssh_host_rsa_key.pub %s/etc/ssh/ssh_host_ecdsa_key %s/etc/ssh/ssh_host_ecdsa_key.pub"
+                                       root root root root root root)))
+        (pc/pve-ssh-soft cfg (format "pct unmount %s" dest-vmid))
         (b/sync-identity this cfg dest)
         (println (format "Container '%s' cloned from '%s' (VMID: %s)." dest source dest-vmid))
         (println (format "Start with: BACKEND=proxmox-lxc just start %s" dest))))))
