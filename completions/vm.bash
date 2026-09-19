@@ -57,6 +57,11 @@ nixos-vm-template-alias() {
 }
 
 # Dispatch for functions defined by nixos-vm-template-alias.
+#
+# __ETC_BASHRC_SOURCED=1 is set for the just invocation so NixOS's /etc/bashrc
+# (auto-sourced via BASH_ENV in non-interactive bash) short-circuits its guard
+# instead of erroring under just's `bash -euo pipefail -c` shell — its line 4
+# tests `$__ETC_BASHRC_SOURCED` without a default, which trips `-u`.
 _vm_dispatch() {
     local name="$1"; shift
     local root="${_VM_ROOTS[$name]}"
@@ -64,10 +69,10 @@ _vm_dispatch() {
     if [[ "${1:-}" == cd ]]; then
         shift
         local dir
-        dir=$(just -f "$root/Justfile" -d "$root" -E "$env" machine-dir "$@") || return
+        dir=$(__ETC_BASHRC_SOURCED=1 just -f "$root/Justfile" -d "$root" -E "$env" machine-dir "$@") || return
         cd "$dir"
     else
-        just -f "$root/Justfile" -d "$root" -E "$env" "$@"
+        __ETC_BASHRC_SOURCED=1 just -f "$root/Justfile" -d "$root" -E "$env" "$@"
     fi
 }
 
