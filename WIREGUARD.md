@@ -9,11 +9,20 @@ file, so `recreate` and `upgrade` preserve the tunnel identity.
 The fastest path is `just wireguard-init`, which mints all keys and configs at
 once. The [By hand](#by-hand) appendix keeps the manual steps as a fallback.
 
+This walkthrough uses the Proxmox LXC backend because the hub is built on the
+[`nas`](PROFILES.md#available-profiles) profile (Samba + NFS), which is
+LXC-only. WireGuard itself is backend-agnostic — the `wireguard` profile works
+the same way on any libvirt or Proxmox KVM VM. On KVM, skip the nas/Samba
+sections below and use a plain `wireguard` VM as the hub (or any other
+profile that suits the services you want to expose over the tunnel).
+
 ## Preconditions
 
 - Proxmox LXC backend configured — see [PROXMOX_LXC.md](PROXMOX_LXC.md).
-- The Proxmox host kernel has the `wireguard` module (`modprobe wireguard` on
-  the host if `lsmod | grep -q wireguard` is empty).
+  (Not needed if you're only running WireGuard on KVM VMs.)
+- On Proxmox LXC: the Proxmox host kernel has the `wireguard` module
+  (`modprobe wireguard` on the host if `lsmod | grep -q wireguard` is empty).
+  KVM guests bring their own kernel, so this doesn't apply there.
 - A reachable endpoint for the hub — public IP or DDNS name with UDP 51820
   forwarded through any NAT.
 
