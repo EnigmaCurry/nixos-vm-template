@@ -165,6 +165,10 @@
       (cp (str md "/nas_passwd") (str etc "/nas/nas_passwd"))
       (cp (str md "/nas_acl") (str etc "/nas/nas_acl"))
       (cp (str md "/nfs_clients") (str etc "/nas/nfs_clients")))
+    ;; wireguard.conf -> /etc/wireguard/wg0.conf (wg-quick default path)
+    (when (non-empty? (str md "/wireguard.conf"))
+      (fs/create-dirs (str etc "/wireguard"))
+      (proc/run! ["cp" (str md "/wireguard.conf") (str etc "/wireguard/wg0.conf")]))
     ;; /etc/nixos flake for in-guest nixos-rebuild
     (spit (str etc "/nixos/flake.nix")
           (generate-lxc-flake hostname (detect-system) prof (privileged? cfg name)))
@@ -186,11 +190,13 @@
    (format "chmod 0700 %s/etc/nas 2>/dev/null || true" root)
    (format "chmod 0600 %s/etc/nas/nas_passwd 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nfs_clients 2>/dev/null || true" root root)
+   (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
+   (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/nixos/flake.nix %s/etc/nixos/flake.lock 2>/dev/null || true" root root)
    ;; chown the whole /etc/ssh dir (not just authorized_keys.d): sshd StrictModes
    ;; checks every parent directory of the authorized_keys file.
-   (format "chown -R 0:0 %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/nixos 2>/dev/null || true"
-           root root root root root root root)])
+   (format "chown -R 0:0 %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/wireguard %s/etc/nixos 2>/dev/null || true"
+           root root root root root root root root)])
 
 (defn- inject-rootfs!
   "Inject identity + /etc/nixos flake into a STOPPED container's rootfs.

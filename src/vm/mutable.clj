@@ -228,6 +228,19 @@
                          (c "copy-in" rph "/etc/")
                          (c "chmod" "0600" "/etc/root_password_hash")
                          (c "chown" "0" "0" "/etc/root_password_hash")))))
+        ;; chain 2b: wireguard.conf -> /etc/wireguard/wg0.conf (renamed at
+        ;; staging so guestfish copy-in produces the right basename).
+        (let [wg (str md "/wireguard.conf")]
+          (when (non-empty? wg)
+            (proc/run! ["cp" wg (str tmp "/wg0.conf")])
+            (gf! cfg disk-path
+                 (concat ["run"] (c "mount" nixos-dev "/")
+                         (c "mkdir-p" "/etc/wireguard")
+                         (c "copy-in" (str tmp "/wg0.conf") "/etc/wireguard/")
+                         (c "chmod" "0700" "/etc/wireguard")
+                         (c "chmod" "0600" "/etc/wireguard/wg0.conf")
+                         (c "chown" "0" "0" "/etc/wireguard")
+                         (c "chown" "0" "0" "/etc/wireguard/wg0.conf")))))
         ;; chain 3: /etc/nixos flake + modules + profiles
         (spit (str tmp "/flake.nix") (generate-mutable-flake hostname (detect-system) prof))
         (proc/run! ["cp" (str repo "/flake.lock") (str tmp "/flake.lock")])
