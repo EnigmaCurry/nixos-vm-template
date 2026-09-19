@@ -80,8 +80,9 @@ wg-quick up wg0` for generic clients).
 
 - **A VM in this repo** — copy `<peer>.conf` to
   `machines/<peer>/wireguard.conf` (the wizard offers to do this for you) and
-  run `just upgrade <peer>`. The nas hub also needs `nas` in its profile and
-  UDP `51820` (or your `ListenPort`) in `machines/<peer>/udp_ports`.
+  run `just upgrade <peer>`. The hub also needs UDP `51820` (or your
+  `ListenPort`) in `machines/<peer>/udp_ports`. Profile choice is made at
+  `just create` time — see [By hand § 1](#1-create-the-nas--wireguard-container).
 - **A generic Linux client** — write it to `/etc/wireguard/wg0.conf`
   (mode 0600), then `sudo wg-quick up wg0` and `sudo systemctl enable
   wg-quick@wg0`.
@@ -207,8 +208,18 @@ piece by piece, or need to add a single peer to an existing deployment.
 ### 1. Create the nas + wireguard container
 
 ```bash
-just create mynas nas,wireguard
+just create mynas nas,wireguard,wireguard-hub
 ```
+
+Profile split (set once at create time; not changed by `just upgrade`):
+
+- **`wireguard`** — client / spoke role. Every peer that runs a tunnel
+  gets this. A roaming laptop or phone-adjacent VM uses **only** this.
+- **`wireguard-hub`** — server / hub role. Adds IPv4 forwarding so
+  spoke-to-spoke traffic transits this peer. Add **in addition to**
+  `wireguard`, and **only** on the peer(s) acting as hub. Do not add to
+  roaming clients: forwarding on a multi-homed spoke turns it into an
+  unintended router.
 
 Seeds `machines/mynas/wireguard.conf` (fresh keypair, `Address = 10.0.0.2/24`,
 `ListenPort = 51820`, commented `[Peer]` template) plus `udp_ports` (`51820`
