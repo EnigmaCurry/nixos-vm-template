@@ -151,6 +151,43 @@
              "#   /var/mnt/scratch //nas.local/scratch  uid=0,gid=0,file_mode=0666,dir_mode=0777,noperm"
              ""]))
 
+(defn- generate-wg-keypair!
+  "Generate a fresh WireGuard keypair via `nix run nixpkgs#wireguard-tools`.
+  Returns {:private <base64> :public <base64>}."
+  [cfg]
+  (let [priv (proc/capture (concat (:nix cfg) ["run" "nixpkgs#wireguard-tools" "--" "genkey"]))
+        pub  (proc/capture (concat (:nix cfg) ["run" "nixpkgs#wireguard-tools" "--" "pubkey"])
+                           {:in priv})]
+    {:private priv :public pub}))
+
+(defn- wireguard-template
+  "wg-quick config seeded on first create when the wireguard profile is
+  selected. The private key stays pinned in this file, so recreate/upgrade
+  reuse the same VPN identity (the file is copied verbatim from
+  machines/<name>/wireguard.conf)."
+  [name {:keys [private public]}]
+  (str/join "\n"
+            [(format "# WireGuard config for VM '%s' (interface wg0)." name)
+             "# Read at boot by wg-quick from /var/identity/wireguard.conf."
+             "# Standard wg-quick format: one [Interface] + any number of [Peer] sections."
+             "#"
+             (format "# Apply changes with:  just sync-identity %s   (or  just upgrade %s)" name name)
+             "# If you set ListenPort, also add the UDP port to udp_ports (WireGuard is UDP-only)."
+             "#"
+             (format "# Public key (share with peers): %s" public)
+             ""
+             "[Interface]"
+             (format "PrivateKey = %s" private)
+             "Address    = 10.0.0.2/24"
+             "# ListenPort = 51820"
+             ""
+             "# [Peer]"
+             "# PublicKey  = <peer-public-key>"
+             "# Endpoint   = hub.example.com:51820"
+             "# AllowedIPs = 10.0.0.0/24"
+             "# PersistentKeepalive = 25"
+             ""]))
+
 (defn- write-authorized-keys!
   "Port of init_machine's per-account authorized_keys handling. `account` is
   \"admin\" or \"user\"; `header-lines` are the comment header; `preset` are
@@ -290,6 +327,7 @@
     (let [profs (set (map str/trim (str/split (or profile "") #",")))
           nas? (contains? profs "nas")
           samba-mount? (contains? profs "samba-mount")
+          wireguard? (contains? profs "wireguard")
           moonshine? (contains? profs "moonshine-nvidia")
           sunshine? (contains? profs "sunshine-plasma-nvidia")
           ;; Both Moonlight-protocol servers use the same well-known ports and
@@ -325,10 +363,14 @@
                                        [(format "# %s — Moonlight video (47998), control (47999), audio (48000):"
                                                 streaming-label)
                                         "47998" "47999" "48000"])
+                                     (when wireguard?
+                                       ["# wireguard profile — default ListenPort:"
+                                        "51820"])
                                      [""])))
         (println (format "Created: %s/udp_ports%s" md
                          (str/join "" [(when nas? " (nas)")
-                                       (when streaming? (str " (" streaming-label ")"))]))))
+                                       (when streaming? (str " (" streaming-label ")"))
+                                       (when wireguard? " (wireguard)")]))))
       ;; pci_devices — seeded for the streaming profiles (Proxmox GPU passthrough).
       ;; Users can also add this file for any Proxmox VM to pass through PCI
       ;; devices without a streaming profile.
@@ -356,7 +398,17 @@
           (println (format "Created: %s/samba_credentials (edit to add mount.cifs credentials)" md)))
         (when-not (fs/exists? (str md "/samba_client_shares"))
           (spit (str md "/samba_client_shares") samba-client-shares-template)
-          (println (format "Created: %s/samba_client_shares (edit to add CIFS mounts)" md)))))
+          (println (format "Created: %s/samba_client_shares (edit to add CIFS mounts)" md))))
+      ;; wireguard — generate a keypair once and pin it in wireguard.conf.
+      ;; Preserved across recreate/upgrade because the file lives here and is
+      ;; copied verbatim to /var/identity by identity sync.
+      (when (and wireguard? (not (fs/exists? (str md "/wireguard.conf"))))
+        (println (format "Generating WireGuard keypair for %s..." name))
+        (let [kp (generate-wg-keypair! cfg)
+              path (str md "/wireguard.conf")]
+          (spit path (wireguard-template name kp))
+          (fs/set-posix-file-permissions path "rw-------")
+          (println (format "Created: %s/wireguard.conf (public key: %s)" md (:public kp))))))
     ;; resolv.conf
     (when-not (fs/exists? (str md "/resolv.conf"))
       (spit (str md "/resolv.conf")

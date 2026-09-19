@@ -29,6 +29,7 @@
    {:file "woodpecker.env" :mode "0600"}
    {:file "samba_credentials"    :mode "0600"}
    {:file "samba_client_shares"  :mode "0644"}
+   {:file "wireguard.conf"       :mode "0600"}
    {:file "ssh_host_ed25519_key"     :mode "0600" :filter :strip-comments}
    {:file "ssh_host_ed25519_key.pub" :mode "0644" :filter :strip-comments}])
 
@@ -169,6 +170,7 @@
       (present "woodpecker.env" "0600")
       (present "samba_credentials" "0600")
       (present "samba_client_shares" "0644")
+      (present "wireguard.conf" "0600")
       (when-let [keys (deploy-keys machine-dir)]
         (concat (cmd "mkdir-p" "/identity/deploy_keys")
                 (mapcat (fn [k]
@@ -188,7 +190,8 @@
   the running VM's key intact."
   ["admin_authorized_keys" "user_authorized_keys" "tcp_ports" "udp_ports"
    "resolv.conf" "hosts" "root_password_hash" "static_ip" "allowed_cidrs"
-   "ca-cert.pem" "woodpecker.env" "samba_credentials" "samba_client_shares"])
+   "ca-cert.pem" "woodpecker.env" "samba_credentials" "samba_client_shares"
+   "wireguard.conf"])
 
 (defn stage-identity!
   "Populate a fresh temp dir with hostname/machine-id (no trailing newline) plus
@@ -228,6 +231,7 @@
      (chmod "0600" "woodpecker.env")
      (chmod "0600" "samba_credentials")
      (chmod "0644" "samba_client_shares")
+     (chmod "0600" "wireguard.conf")
      (format "chmod 0700 %s/deploy_keys 2>/dev/null || true" id)
      (format "find %s/deploy_keys -type f -exec chmod 0600 {} + 2>/dev/null || true" id)
      (format "chown -R 0:0 %s/" id)]))
