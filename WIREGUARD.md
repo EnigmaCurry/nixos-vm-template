@@ -143,6 +143,26 @@ See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
   change reverts on next recreate unless `machines/<name>/wireguard.conf` is
   updated too.
 
+## Windows / macOS client
+
+The official [WireGuard](https://www.wireguard.com/install/) client (Windows:
+installer or Microsoft Store; macOS: Mac App Store) lives in the system tray
+/ menu bar. "Import tunnel(s) from file" ingests `<peer>.conf` from the
+wizard's output directory; each tunnel then gets an Activate/Deactivate
+toggle from the tray/menu icon.
+
+- **Auto-start on boot / login:**
+  - Windows: the installer registers a `WireGuardTunnel$<name>` service per
+    tunnel — set it to Automatic (or tick "Enable on boot" in the client).
+  - macOS: tick "On-Demand" (or "Include this tunnel when enabling
+    On-Demand") per tunnel; the NetworkExtension keeps it up across reboots
+    and can auto-activate on specific Wi-Fi/Ethernet networks.
+- **Split vs full tunnel:** a spoke config from the wizard uses
+  `AllowedIPs = <subnet>`, so only that subnet routes through the tunnel.
+  For full-tunnel VPN, edit the tunnel and change `AllowedIPs` to
+  `0.0.0.0/0, ::/0`.
+- **macOS requirement:** 10.14+ (uses NetworkExtension; no kernel extension).
+
 ## By hand
 
 The wizard automates these steps; use them if you'd rather build the config
