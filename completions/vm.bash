@@ -28,12 +28,21 @@
 # Each call defines the alias AND wires its completion to the same env file, so
 # you can run e.g. `vm create web`, `pve create db`, and `pve-lxc create nas`,
 # and each tab-completes against its own backend.
+#
+# The alias is a shell function (not a bash alias), so it also handles a
+# shell-side `cd` subcommand that changes into the backend's machines dir:
+#
+#     pve-lxc cd          # -> machines/proxmox-lxc/$PVE_NODE
+#     pve-lxc cd nas      # -> machines/proxmox-lxc/$PVE_NODE/nas
 
 # alias name -> (repo root, env file)
 declare -gA _VM_ROOTS _VM_ENVS
 
 # nixos-vm-template-alias <alias> <env-file> [repo-root]
-# Defines the alias and registers its completion against the given env file.
+# Defines a shell function for the alias and registers its completion against
+# the given env file. The function intercepts `cd` as a shell-side subcommand
+# (change into the machines dir for this backend/host); anything else falls
+# through to `just`.
 nixos-vm-template-alias() {
     local name="$1" env="$2"
     local root="${3:-${NIXOS_VM_TEMPLATE:-$HOME/nixos-vm-template}}"
@@ -43,8 +52,23 @@ nixos-vm-template-alias() {
     fi
     _VM_ROOTS["$name"]="$root"
     _VM_ENVS["$name"]="$env"
-    alias "$name"="just -f '$root/Justfile' -d '$root' -E '$env'"
+    eval "$(printf '%s() { _vm_dispatch %q "$@"; }' "$name" "$name")"
     complete -F _vm "$name"
+}
+
+# Dispatch for functions defined by nixos-vm-template-alias.
+_vm_dispatch() {
+    local name="$1"; shift
+    local root="${_VM_ROOTS[$name]}"
+    local env="${_VM_ENVS[$name]}"
+    if [[ "${1:-}" == cd ]]; then
+        shift
+        local dir
+        dir=$(just -f "$root/Justfile" -d "$root" -E "$env" machine-dir "$@") || return
+        cd "$dir"
+    else
+        just -f "$root/Justfile" -d "$root" -E "$env" "$@"
+    fi
 }
 
 # Run just against a given root/env (matching what the alias does).
@@ -69,14 +93,26 @@ _vm() {
     env="${_VM_ENVS[$cmd]:-${VM_ENV:-$HOME/.config/nixos-vm-template/env}}"
 
     # First token: the recipe name (private `_` recipes aren't in --summary).
+    # `cd` is a shell-side subcommand added by nixos-vm-template-alias.
     if (( COMP_CWORD == 1 )); then
         local recipes
         recipes=$(_vm_run "$root" "$env" --summary 2>/dev/null | tr ' ' '\n' | grep -v '^_')
-        COMPREPLY=( $(compgen -W "$recipes" -- "$cur") )
+        COMPREPLY=( $(compgen -W "$recipes cd" -- "$cur") )
         return
     fi
 
     recipe="${COMP_WORDS[1]}"
+
+    # `cd` takes an optional machine name and is handled shell-side.
+    if [[ "$recipe" == cd ]]; then
+        if (( COMP_CWORD == 2 )); then
+            local names
+            names=$(_vm_run "$root" "$env" _completion_name 2>/dev/null)
+            COMPREPLY=( $(compgen -W "$names" -- "$cur") )
+        fi
+        return
+    fi
+
     local arg_index=$(( COMP_CWORD - 2 ))   # 0-based positional argument
 
     # Pull the recipe's signature line and split it into parameter tokens.

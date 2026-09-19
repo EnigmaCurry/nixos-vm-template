@@ -174,6 +174,10 @@ profile name +profiles:
 list-machines:
     @{{VM_CLI}} list-machines
 
+# Print the machines dir for this backend (optionally suffixed with a machine name)
+machine-dir name="":
+    @if [ -z "{{name}}" ]; then echo "{{MACHINES_DIR}}"; else echo "{{MACHINES_DIR}}/{{name}}"; fi
+
 # Show VM console
 console name:
     @{{VM_CLI}} console "{{name}}"
