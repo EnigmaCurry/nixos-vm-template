@@ -175,6 +175,7 @@
       "wireguard-add-peer" (wg/add-peer-wizard cfg (arg a 0 nil))
       "passwd"        (machine/set-password cfg (arg a 0 nil))
       "set-profile"   (machine/set-profile cfg (arg a 0 nil) (str/join "," (rest a)))
+      "seed-config"   (machine/seed-config cfg (arg a 0 nil))
       "list-machines" (cmd-list-machines cfg)
       ;; lifecycle (per-backend composites)
       "create"        ((cf cfg :create-vm) @B cfg (arg a 0 nil))

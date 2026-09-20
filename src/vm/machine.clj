@@ -202,6 +202,7 @@
              ""
              "  # ── Examples: allow specific wg peers to reach services on THIS VM"
              "  # ip saddr $laptop tcp dport 22   accept   # SSH from laptop"
+             "  # ip saddr $laptop tcp dport 443  accept   # HTTPS from laptop"
              "  # ip saddr $laptop tcp dport 445  accept   # Samba from laptop"
              "  # ip saddr $laptop tcp dport 3923 accept   # copyparty (web + WebDAV)"
              "  # ip saddr $phone  tcp dport 445  accept   # Samba from phone"
@@ -215,10 +216,17 @@
              "  # Reply traffic — do not remove:"
              "  ct state established,related accept"
              ""
-             "  # ── Examples: allow spoke-to-spoke traffic through this hub"
-             "  # ip saddr $laptop ip daddr $nas accept"
-             "  # ip saddr $phone  ip daddr $nas accept"
-             "  # ip saddr $laptop ip daddr $nas tcp dport 445 accept"
+             "  # ── Ping between peers through this hub"
+             "  # ip saddr $laptop ip daddr $nas   icmp   type echo-request accept"
+             "  # ip saddr $laptop ip daddr $nas   icmpv6 type echo-request accept"
+             ""
+             "  # ── Per-peer, per-service forwarding (spoke -> spoke via this hub)"
+             "  # ip saddr $laptop ip daddr $nas   tcp dport 22  accept   # laptop SSH to nas"
+             "  # ip saddr $phone  ip daddr $nas   tcp dport 443 accept   # phone HTTPS to nas"
+             "  # ip saddr $laptop ip daddr $phone tcp dport 22  accept   # laptop SSH to phone"
+             ""
+             "  # ── One peer allowed to reach everything on wg0 through this hub"
+             "  # ip saddr $admin accept"
              ""
              "  # ── Unrestricted spoke-to-spoke (uncomment to disable the ACL)"
              "  # accept"
@@ -577,6 +585,22 @@
       (println (format "VM '%s' configured (profile: %s, memory: %sM, vcpus: %s, var: %s)"
                        name (read-field cfg name "profile") memory vcpus var-size))
       (println (format "To create the VM, run: just create %s" name)))))
+
+(defn seed-config
+  "Fill in any missing per-VM config files under machines/<name>/ based on
+  the VM's *current* profile. Reads machines/<name>/profile from disk and
+  re-runs init-machine, which is idempotent for files that already exist —
+  only genuinely missing templates (e.g. wireguard.nft on a VM that
+  predates the peer-ACL feature) get created. Non-interactive: SSH-key
+  prompts are skipped, so run `just config <name>` if authorized_keys is
+  missing and needs populating."
+  [cfg name]
+  (when-not (exists? cfg name)
+    (println (format "Error: machine '%s' does not exist under %s/" name (:machines-dir cfg)))
+    (System/exit 1))
+  (let [profile (or (read-field cfg name "profile") "core")]
+    (println (format "Seeding missing config files for '%s' (profile: %s)..." name profile))
+    (init-machine cfg name {:profile profile :ssh-key-mode "skip"})))
 
 (defn set-profile
   "Set the profile(s) for an existing VM (the `just profile` recipe). `profiles`

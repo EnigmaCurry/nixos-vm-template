@@ -170,6 +170,12 @@ passwd name:
 profile name +profiles:
     @{{VM_CLI}} set-profile "{{name}}" {{profiles}}
 
+# Seed any missing config-file templates for a VM based on its current profile
+# (e.g. adds machines/<name>/wireguard.nft if the profile has wireguard but
+# the file predates that template). Existing files are left untouched.
+seed-config name:
+    @{{VM_CLI}} seed-config "{{name}}"
+
 # List all machine configs
 list-machines:
     @{{VM_CLI}} list-machines
