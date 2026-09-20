@@ -159,12 +159,15 @@
     ;; root password hash
     (cp (str md "/root_password_hash") (str etc "/root_password_hash"))
     ;; nas profile config (shared by Samba + copyparty): nas_passwd (plaintext
-    ;; `user password`, 0600), nas_acl (`user share access`), nfs_clients (CIDRs).
-    (when (some non-empty? [(str md "/nas_passwd") (str md "/nas_acl") (str md "/nfs_clients")])
+    ;; `user password`, 0600), nas_acl (`user share access`), nfs_clients (CIDRs),
+    ;; nas_share_hosts (per-share host scoping when combined with wireguard).
+    (when (some non-empty? [(str md "/nas_passwd") (str md "/nas_acl")
+                            (str md "/nfs_clients") (str md "/nas_share_hosts")])
       (fs/create-dirs (str etc "/nas"))
       (cp (str md "/nas_passwd") (str etc "/nas/nas_passwd"))
       (cp (str md "/nas_acl") (str etc "/nas/nas_acl"))
-      (cp (str md "/nfs_clients") (str etc "/nas/nfs_clients")))
+      (cp (str md "/nfs_clients") (str etc "/nas/nfs_clients"))
+      (cp (str md "/nas_share_hosts") (str etc "/nas/nas_share_hosts")))
     ;; wireguard.conf -> /etc/wireguard/wg0.conf (wg-quick default path)
     (when (non-empty? (str md "/wireguard.conf"))
       (fs/create-dirs (str etc "/wireguard"))
@@ -193,7 +196,7 @@
    (format "chmod 0600 %s/etc/root_password_hash 2>/dev/null || true" root)
    (format "chmod 0700 %s/etc/nas 2>/dev/null || true" root)
    (format "chmod 0600 %s/etc/nas/nas_passwd 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nfs_clients 2>/dev/null || true" root root)
+   (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nfs_clients %s/etc/nas/nas_share_hosts 2>/dev/null || true" root root root)
    (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
    (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)

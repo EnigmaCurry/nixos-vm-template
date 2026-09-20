@@ -105,6 +105,39 @@
              "#   192.168.1.50 ro    # a single host, read-only"
              ""]))
 
+(def ^:private nas-share-hosts-template
+  "Commented per-share host allowlist seeded for nas containers. All-commented
+  = no scoping (default policy applies). Literal CIDR restrictions work whether
+  wireguard is enabled or not; wg: tokens require the wireguard profile."
+  (str/join "\n"
+            ["# NAS per-share host allowlist (Samba + NFS)."
+             "#"
+             "# One line per SCOPED share:   <share>  <host-token>..."
+             "# A share may appear on at most one line — put all its tokens together."
+             "#"
+             "# Tokens:"
+             "#   <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32"
+             "#   wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)"
+             "#   wg:*        all wg peers currently in wireguard.conf"
+             "#"
+             "# The wg: tokens require the 'wireguard' profile to also be enabled"
+             "# on this VM. Literal CIDRs work regardless."
+             "#"
+             "# Shares NOT listed here get the default policy:"
+             "#   - wg enabled  → LAN-accessible, wg subnet denied"
+             "#   - wg disabled → no restriction"
+             "#"
+             "# Apply changes with:  just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   media-store      192.168.1.0/24                # LAN subnet only"
+             "#   backups          192.168.1.10/32 192.168.1.11/32   # two hosts"
+             "#   mike-private     wg:mike                       # only mike's wg IP"
+             "#   family-shared    wg:mike wg:sarah wg:kids      # a few wg peers"
+             "#   mixed-share      192.168.1.0/24 wg:mike        # LAN + mike's wg IP"
+             "#   public-over-wg   192.168.1.0/24 wg:*           # LAN + every wg peer"
+             ""]))
+
 (defn- choose-d
   "choose with an optional 0-based default index (passed to the pod as the value)."
   [msg options idx]
@@ -760,7 +793,13 @@ done 2>/dev/null"]
           (println (format "Created: %s/nas_acl (NAS ACL — edit to grant access)" md)))
         (when (and nas? (not (fs/exists? (str md "/nfs_clients"))))
           (spit (str md "/nfs_clients") nfs-clients-template)
-          (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md))))
+          (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md)))
+        ;; nas: seed nas_share_hosts (all-commented = no scoping). Works with
+        ;; literal CIDR restrictions even without wireguard; wg: tokens in the
+        ;; template become active once the wireguard profile is added.
+        (when (and nas? (not (fs/exists? (str md "/nas_share_hosts"))))
+          (spit (str md "/nas_share_hosts") nas-share-hosts-template)
+          (println (format "Created: %s/nas_share_hosts (per-share host scoping — edit to restrict shares)" md))))
       ;; PCI passthrough — overwrite the placeholder init-machine seeded when
       ;; the streaming wizard picker actually chose devices.
       (when (and streaming? (= backend "proxmox") (seq pci-selected))

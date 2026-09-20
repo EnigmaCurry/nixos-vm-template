@@ -150,6 +150,51 @@ sudo mount -t cifs //<hub-tunnel-address>/nas /mnt -o username=alice,uid=$(id -u
 
 See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
 
+### Restricting shares to specific wg peers
+
+`nas_acl` gates *who* can access each share (per-user, password-checked).
+By default all authenticated grants are reachable from any allowed
+network. To also gate *where* a share can be reached from — so a peer
+can't even attempt to open a share intended for someone else — use
+`machines/<hub>/nas_share_hosts`.
+
+One line per scoped share, whitespace-separated tokens:
+
+```
+# <share>  <host-token>...
+#
+# wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)
+# wg:*        every wg peer currently in wireguard.conf
+# <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32
+
+mike-private     wg:mike                    # only reachable from mike's wg IP
+family-shared    wg:mike wg:sarah wg:kids   # a few wg peers
+media-store      192.168.1.0/24             # explicit LAN-only
+mixed-share      192.168.1.0/24 wg:mike     # LAN + mike over wg
+```
+
+- A share may appear on **at most one line** — put all tokens together.
+- Shares NOT listed default to LAN-only when wireguard is enabled
+  (wg subnet denied) or unrestricted when it isn't.
+- Emits Samba `hosts allow`/`hosts deny` per share, and substitutes
+  the NFS export's client list to match.
+- Password auth (`nas_acl`) still applies on top — this is a network
+  gate underneath, not a replacement.
+
+Apply:
+
+```bash
+just upgrade <hub>
+```
+
+Validation is pre-flight and strict: a duplicate share name, unknown
+`wg:` peer, unknown token, or a `wg:` token when wireguard isn't
+enabled fails the `nas-shares` unit before any config is written.
+Samba/NFS/copyparty are `BindsTo`-coupled to `nas-shares`, so a bad
+file **stops the file server** rather than serving stale/partial
+config — you'll see the error inline in `just upgrade` output. See
+[NAS_SHARE_HOSTS.md](NAS_SHARE_HOSTS.md) for the full policy table.
+
 ### Peer ACL on the hub
 
 The wg-side firewall on the hub is default-deny. Drop something like this into
