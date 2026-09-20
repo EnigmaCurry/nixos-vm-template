@@ -257,15 +257,23 @@
              "[Interface]"
              (format "# hostname: %s" name)
              (format "PrivateKey = %s" private)
+             "# Address can be specified multiple times:"
              "Address    = 10.0.0.2/24"
+             "# Address  = fd00:0:0::2/64"
              "ListenPort = 51820"
+             "# DNS = 10.0.0.1                     # push DNS through the tunnel"
+             "# MTU = 1420                         # lower (1280/1380) if the path drops large packets"
              ""
              "# [Peer]"
              "# hostname: <peer-name>"
-             "# PublicKey  = <peer-public-key>"
-             "# Endpoint   = hub.example.com:51820"
+             "# PublicKey    = <peer-public-key>"
+             "# PresharedKey = <optional PSK — `wg genpsk` — extra hardening on top of the keypair>"
+             "# Endpoint     = hub.example.com:51820"
+             "# AllowedIPs can be specified multiple times."
+             "# Set to `0.0.0.0/0, ::/0` on a spoke's [Peer] to full-tunnel through it."
              "# AllowedIPs = 10.0.0.0/24"
-             "# PersistentKeepalive = 25"
+             "# AllowedIPs = fd00:0:0::/64"
+             "# PersistentKeepalive = 25           # send a keepalive every N sec when this peer is behind NAT"
              ""]))
 
 (defn- write-authorized-keys!
