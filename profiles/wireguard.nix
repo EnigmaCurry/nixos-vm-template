@@ -105,7 +105,15 @@ let
       # Address = A.B.C.D/N line; [Peer] uses AllowedIPs = A.B.C.D/N (first
       # entry). Missing hostname -> that peer has no define and can only
       # be referenced by bare IP.
+      #
+      # Peer names may contain characters (`-`, `.`) that are legal in wg /
+      # DNS naming but illegal in nftables identifiers. We translate those
+      # to `_` for the define name and print the original as a `# peer:`
+      # comment so the mapping is discoverable in `nft list table inet
+      # wireguard`. Reference the translated form in your rules
+      # (e.g. peer `mike-xps13` → `$mike_xps13`).
       ${pkgs.gawk}/bin/awk '
+        function nft_id(s,   r) { r = s; gsub(/[^A-Za-z0-9_]/, "_", r); return r }
         BEGIN { name = "" }
         /^\[/ { name = "" }
         /^#[[:space:]]*hostname:[[:space:]]*/ {
@@ -117,7 +125,9 @@ let
           ip = parts[2];
           gsub(/[[:space:]]/, "", ip);
           sub(/\/.*/, "", ip);
-          printf "  define %s = %s\n", name, ip;
+          id = nft_id(name);
+          if (id != name) printf "  # peer: %s\n", name;
+          printf "  define %s = %s\n", id, ip;
           name = "";
         }
         /^AllowedIPs[[:space:]]*=/ && name != "" {
@@ -126,7 +136,9 @@ let
           gsub(/[[:space:]]/, "", ip);
           sub(/,.*/, "", ip);
           sub(/\/.*/, "", ip);
-          printf "  define %s = %s\n", name, ip;
+          id = nft_id(name);
+          if (id != name) printf "  # peer: %s\n", name;
+          printf "  define %s = %s\n", id, ip;
           name = "";
         }
       ' "$wg_conf"

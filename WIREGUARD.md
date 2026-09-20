@@ -282,6 +282,15 @@ block) and emits nftables `define <name> = <ipv4>` variables. Reference
 them as `$name` in rules. The wizard writes these comments; hand-written
 configs need to add them (or reference peers by bare IP).
 
+nftables identifiers only accept `[A-Za-z0-9_]`, so `-` and `.` in peer
+names are translated to `_` when the `define` is emitted — e.g. a peer
+named `mike-xps13` becomes `$mike_xps13` in rules. The original name is
+kept as a `# peer:` comment above the `define` so the mapping is
+visible in `nft list table inet wireguard`. If two peer names collapse
+to the same identifier (e.g. `mike-xps13` + `mike.xps13`), the
+`nft -f` load fails on the duplicate `define` — rename one peer via
+`just wireguard <hub>` to fix it.
+
 **Rule syntax.** Standard nftables expressions (see `man nft`). Reply
 traffic is handled by conntrack — only describe *new* connections to
 permit. `wg-input` and `wg-forward` end with `drop`.
