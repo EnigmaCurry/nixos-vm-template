@@ -24,11 +24,19 @@ read-write NixOS system. Mutable VMs provide:
 - You want to experiment with NixOS configuration interactively
 - You need full `nix` command access
 - You're doing NixOS development or testing
+- You're using the LXC backend which requires mutable mode.
 
 **Tradeoffs:**
 - No thin provisioning (each VM gets a full disk copy)
 - Cannot use `just upgrade` from the host (must upgrade inside VM)
 - Loses the corruption-resistance of a read-only root
+
+You can still treat a mutable VM as stateless -- if you attach a
+remote NAS drive to the VM and store all your important state there,
+the VM itself can disposed of and recreated at will (discarding
+everything not already stored on the NAS), and then you would just
+need to re-attach the NAS on the fresh instance, to restore that
+state.
 
 Use `just mutable` to toggle mutable mode for an existing machine config:
 
