@@ -138,6 +138,10 @@ let
         echo ""
         echo "  chain wg-input {"
         echo "    ct state established,related accept"
+        # Ping always allowed in the default case (reachability check).
+        # Users writing their own wg-input can drop these lines to block it.
+        echo "    icmp   type echo-request accept"
+        echo "    icmpv6 type echo-request accept"
         echo "    drop"
         echo "  }"
       fi
