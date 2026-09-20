@@ -274,24 +274,18 @@ sudo nft list table inet wireguard    # sees $peer defines + both chains
 
 ## Linux NetworkManager client
 
-Import `<peer>.conf` as a system connection so the NM applet lists it as a
-toggleable VPN:
+The connection id and interface name both take the filename stem, so rename
+the `.conf` before importing to whatever you want the NM applet to show. On a
+client `flux` connecting to a hub `NAS`, the wizard hands you `flux.conf`
+(this client's identity); rename it to `NAS.conf` (the tunnel's name) before
+import:
 
 ```bash
-sudo nmcli connection import type wireguard file <peer>.conf
+cp flux.conf NAS.conf
+sudo nmcli connection import type wireguard file NAS.conf
 ```
 
-The connection id and interface name both take the filename stem. To rename
-both (the applet displays the interface name, not the connection id):
-
-```bash
-sudo nmcli connection modify <peer> connection.id NAS
-sudo nmcli connection down NAS 2>/dev/null
-sudo nmcli connection modify NAS connection.interface-name nas
-sudo nmcli connection up NAS
-```
-
-Interface name: ≤ 15 chars, `[a-z0-9_-]`.
+Interface name: ≤ 15 chars; letters, digits, `_`, `-` all fine.
 
 - **Autostart on boot:** `sudo nmcli connection modify NAS connection.autoconnect yes`
 - **Caveat:** NM ignores `PreUp`/`PostUp`/`PreDown`/`PostDown` hooks in `.conf`.
@@ -301,7 +295,7 @@ Verify:
 
 ```bash
 nmcli connection show NAS
-ip link show nas
+ip link show NAS
 sudo wg show
 ```
 
