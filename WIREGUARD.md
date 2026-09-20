@@ -6,8 +6,9 @@ in `machines/<name>/wireguard.conf` (mode 0600) on the workstation and is
 synced into the guest at create/upgrade time. The private key is pinned in that
 file, so `recreate` and `upgrade` preserve the tunnel identity.
 
-The fastest path is `just wireguard-init`, which mints all keys and configs at
-once. The [By hand](#by-hand) appendix keeps the manual steps as a fallback.
+The fastest path is `just wireguard-init <hub>`, which mints all keys and
+configs at once under `machines/<hub>/wireguard/`. The [By hand](#by-hand)
+appendix keeps the manual steps as a fallback.
 
 This walkthrough uses the Proxmox LXC backend because the hub is built on the
 [`nas`](PROFILES.md#available-profiles) profile (Samba + NFS), which is
@@ -29,46 +30,45 @@ profile that suits the services you want to expose over the tunnel).
 ## 1. Run the wizard
 
 ```bash
-just wireguard-init
+just wireguard-init <hub>
 ```
 
-It prompts for:
+`<hub>` must be an existing machine (create it first with
+`just create <hub> wireguard`). The wizard prompts for:
 
 - **Subnet** — CIDR of the VPN, default `10.0.0.0/24`.
-- **Topology** — hub-and-spoke (one listener, spokes route through it) or
-  full mesh (every peer connects to every other).
-- **Peers** — for each: name, role (listener with a public Endpoint vs
-  roaming client), `ListenPort` and Endpoint if listener, and the peer's
-  tunnel address (auto-suggested for `/24` subnets).
+- **Hub peer** — `ListenPort` (default `51820`), public `Endpoint` (host or
+  IP that spokes dial), and tunnel address (default `.1` on a `/24`). The
+  hub's peer name is fixed to `<hub>`.
+- **Spoke peers** — for each: name and tunnel address (auto-suggested for
+  `/24` subnets).
 
-It writes to `./wireguard-YYYYMMDD-HHMMSS/` (path is prompted, so you can
-change it) — one `.key` / `.pub` / `.conf` per peer plus a `README.txt`.
+It writes to `machines/<hub>/wireguard/` — one `.key` / `.pub` / `.conf` per
+peer plus `README.txt` and `.wg-state.edn` — and copies the hub's config
+to `machines/<hub>/wireguard.conf` so `just upgrade <hub>` picks it up.
 
-If any peer name matches an existing entry under
+If any spoke peer name matches another entry under
 `$XDG_CONFIG_HOME/nixos-vm-template/machines/<backend>/<host>/`, the wizard
-offers to copy that peer's `.conf` straight into
-`machines/<name>/wireguard.conf` and reminds you to `just upgrade <name>`.
+offers to copy that spoke's `.conf` straight into
+`machines/<spoke>/wireguard.conf` and reminds you to `just upgrade <spoke>`.
 
-The wizard also writes `.wg-state.edn` alongside the configs — a small
-metadata file (subnet, topology, per-peer name/address/pubkey/endpoint) used
-by `wireguard-add-peer` to add a peer later. Private keys stay in
-`<peer>.key`, never in the state file.
+Private keys stay in `<peer>.key`, never in the state file.
 
 ## 2. Add a peer later
 
 ```bash
-just wireguard-add-peer                       # newest ./wireguard-*/ in CWD
-just wireguard-add-peer ./wireguard-20260101-120000
+just wireguard-add-peer <hub>
 ```
 
-Reads `.wg-state.edn`, prompts for one new peer (name, role, address,
-endpoint), then:
+Reads `machines/<hub>/wireguard/.wg-state.edn`, prompts for one new spoke
+peer (name, address), then:
 
 - Moves every existing `.conf`/`.key`/`.pub`/`README.txt`/`.wg-state.edn`
-  into `<out-dir>/backup-<timestamp>/`.
+  plus `machines/<hub>/wireguard.conf` into
+  `machines/<hub>/wireguard/backup-<timestamp>/`.
 - Regenerates **every** peer's config so the new peer is fully connected.
-- Rewrites `.wg-state.edn`.
-- Offers to copy any changed config into `machines/<name>/wireguard.conf`
+- Rewrites `.wg-state.edn` and `machines/<hub>/wireguard.conf`.
+- Offers to copy any changed spoke config into `machines/<name>/wireguard.conf`
   for matching peers.
 
 Because existing peers' configs change too (they gain a `[Peer]` block for
@@ -78,13 +78,15 @@ wg-quick up wg0` for generic clients).
 
 ## 3. Deploy each peer's config
 
-- **A VM in this repo** — copy `<peer>.conf` to
-  `machines/<peer>/wireguard.conf` (the wizard offers to do this for you) and
-  run `just upgrade <peer>`. The hub also needs UDP `51820` (or your
-  `ListenPort`) in `machines/<peer>/udp_ports`, and any peer that expects
-  inbound wg traffic needs allow rules in `machines/<peer>/wireguard.nft`
-  (see [Peer ACL](#peer-acl-wireguardnft) — default is deny). Profile
-  choice is made at `just create` time — see [By hand § 1](#1-create-the-nas--wireguard-container).
+- **The hub** — `just upgrade <hub>`. UDP `51820` (or your `ListenPort`) is
+  already in `machines/<hub>/udp_ports` from the `wireguard` profile. Any
+  peer that expects inbound wg traffic needs allow rules in
+  `machines/<peer>/wireguard.nft` (see [Peer ACL](#peer-acl-wireguardnft) —
+  default is deny).
+- **Another VM in this repo** — the wizard offers to copy `<peer>.conf` to
+  `machines/<peer>/wireguard.conf` for you; then `just upgrade <peer>`.
+  Profile choice is made at `just create` time — see
+  [By hand § 1](#1-create-the-nas--wireguard-container).
 - **A generic Linux client** — write it to `/etc/wireguard/wg0.conf`
   (mode 0600), then `sudo wg-quick up wg0` and `sudo systemctl enable
   wg-quick@wg0`.
@@ -127,6 +129,46 @@ sudo mount -t cifs //<hub-tunnel-address>/nas /mnt -o username=alice,uid=$(id -u
 ```
 
 See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
+
+### Peer ACL on the hub
+
+The wg-side firewall on the hub is default-deny. Drop something like this into
+`machines/<hub>/wireguard.nft`, replace the peer names to match the ones you
+gave the wizard, then re-run `just upgrade <hub>`:
+
+```nft
+# Group the peers allowed to reach hub services.
+# Names come from `# hostname: <name>` in machines/<hub>/wireguard.conf.
+set nas_clients {
+  type ipv4_addr
+  elements = { $flux, $appleM1, $pixel6 }
+}
+
+# Traffic from wg0 hitting THIS hub's services.
+chain wg-input {
+  ct state established,related accept
+  # 22 = SSH, 445 = Samba, 3923 = copyparty (WebDAV).
+  # (:443 for these peers is redirected to :3923 in wg-prerouting below,
+  #  so it doesn't need a rule here — the rewrite fires before input.)
+  ip saddr @nas_clients tcp dport { 22, 445, 3923 } accept
+  drop
+}
+
+# Spoke-to-spoke traffic through the hub. Empty (only reply traffic) —
+# spokes cannot reach each other unless you add allow rules here.
+chain wg-forward {
+  ct state established,related accept
+  drop
+}
+
+# Optional: redirect wg-side :443 to a local reverse proxy on :3923.
+# The rewritten dport still has to be allowed in wg-input above.
+chain wg-prerouting {
+  ip saddr @nas_clients tcp dport 443 redirect to :3923
+}
+```
+
+See [Peer ACL](#peer-acl-wireguardnft) for the full chain reference.
 
 ## Peer ACL (`wireguard.nft`)
 
@@ -364,13 +406,3 @@ Endpoint            = nas.example.com:51820
 AllowedIPs          = 10.0.0.0/24
 PersistentKeepalive = 25
 ```
-
-### Full mesh
-
-The wizard emits full-mesh configs directly; the manual differences are:
-
-- Every peer has a `[Peer]` block for every other peer.
-- Set `Endpoint = <host>:<port>` on each block where that peer accepts inbound
-  connections; omit it for roaming clients that only dial out.
-- Keep `AllowedIPs` narrow (`10.0.0.X/32`) per peer so the routing table stays
-  unambiguous.
