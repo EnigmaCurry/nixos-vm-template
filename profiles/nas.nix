@@ -524,46 +524,72 @@
 
         resolve_acl "$name"
 
-        # ── Samba (deny-by-default: empty valid users ⇒ no access) ──
+        # ── Samba ──
+        # CRITICAL: Samba interprets `valid users =` (empty) as "any user
+        # may login" — the opposite of deny-by-default. So if a share has
+        # no nas_acl grants and no guest access, skip the [share] block
+        # entirely rather than emitting an empty valid users. Missing block
+        # = the share doesn't exist to Samba (no browse, no tconx, no auth
+        # attempts possible).
         valid="$ro_users$rw_users"
         { [ "$guest_r" = yes ] || [ "$guest_rw" = yes ]; } && valid="$valid nobody"
         write="$rw_users"; [ "$guest_rw" = yes ] && write="$write nobody"
-        {
-          echo "[$name]"
-          echo "  path = $d"
-          echo "  browseable = yes"
-          echo "  force user = nas"
-          echo "  force group = nas"
-          echo "  create mask = 0664"
-          echo "  directory mask = 2775"
-          echo "  read only = yes"
-          echo "  valid users =$valid"
-          [ -n "$write" ] && echo "  write list =$write"
-          if [ "$guest_r" = yes ] || [ "$guest_rw" = yes ]; then
-            echo "  guest ok = yes"
-          else
-            echo "  guest ok = no"
-          fi
-          [ -n "$smb_hosts_allow" ] && echo "  hosts allow = $smb_hosts_allow"
-          [ -n "$smb_hosts_deny" ] && echo "  hosts deny = $smb_hosts_deny"
-        } >> "$smbinc"
+        smb_emitted=no
+        if [ -n "$valid" ]; then
+          smb_emitted=yes
+          {
+            echo "[$name]"
+            echo "  path = $d"
+            echo "  browseable = yes"
+            echo "  force user = nas"
+            echo "  force group = nas"
+            echo "  create mask = 0664"
+            echo "  directory mask = 2775"
+            echo "  read only = yes"
+            echo "  valid users =$valid"
+            [ -n "$write" ] && echo "  write list =$write"
+            if [ "$guest_r" = yes ] || [ "$guest_rw" = yes ]; then
+              echo "  guest ok = yes"
+            else
+              echo "  guest ok = no"
+            fi
+            [ -n "$smb_hosts_allow" ] && echo "  hosts allow = $smb_hosts_allow"
+            [ -n "$smb_hosts_deny" ] && echo "  hosts deny = $smb_hosts_deny"
+          } >> "$smbinc"
+        fi
 
-        # ── copyparty volume (deny-by-default: no grants ⇒ no access) ──
+        # ── copyparty volume ──
+        # Same reasoning: emit no volume block for shares with no accs, so
+        # they don't appear in copyparty's volume tree at all.
         r_list="$ro_users"; [ "$guest_r" = yes ] && r_list="$r_list *"
         rwmd_list="$rw_users"; [ "$guest_rw" = yes ] && rwmd_list="$rwmd_list *"
-        {
-          echo "[/$name]"
-          echo "  $d"
-          echo "  accs:"
-          [ -n "$r_list" ] && echo "    r: $(commafy "$r_list")"
-          [ -n "$rwmd_list" ] && echo "    rwmd: $(commafy "$rwmd_list")"
-        } >> "$cpconf"
+        cp_emitted=no
+        if [ -n "$r_list" ] || [ -n "$rwmd_list" ]; then
+          cp_emitted=yes
+          {
+            echo "[/$name]"
+            echo "  $d"
+            echo "  accs:"
+            [ -n "$r_list" ] && echo "    r: $(commafy "$r_list")"
+            [ -n "$rwmd_list" ] && echo "    rwmd: $(commafy "$rwmd_list")"
+          } >> "$cpconf"
+        fi
 
+        # Report: list protocols the share is actually exposed on.
+        protos=""
+        [ "$smb_emitted" = yes ] && protos="$protos smb"
+        [ "$cp_emitted" = yes ]  && protos="$protos web"
+        [ -n "$share_nfs_spec" ] && protos="$protos nfs"
+        protos="''${protos# }"
         case "$scoped" in
           yes)    scope_tag=" [scoped: ''${share_allow[$name]}]" ;;
           denied) scope_tag=" [DENIED — add a rule to $hosts_file]" ;;
         esac
-        echo "nas-shares: serving '$name' (smb + web$([ -n "$share_nfs_spec" ] && echo ' + nfs'))$scope_tag"
+        if [ -z "$protos" ]; then
+          echo "nas-shares: skipping '$name' — no nas_acl grants and no nas_hosts entry (nothing to expose)$scope_tag"
+        else
+          echo "nas-shares: serving '$name' ($protos)$scope_tag"
+        fi
       done
 
       # Return the Samba parser to [global] after the share sections (the include
