@@ -164,19 +164,20 @@ every share that host is granted access to.
 ```
 # <host-token>   <share>...
 #
-# *           any host (fully unrestricted network layer)
+# <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32
+# 0.0.0.0/0   any IPv4 host (fully open network layer)
 # wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)
 # wg:*        every wg peer currently in wireguard.conf
-# <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32
 #
 # The share list may be a specific share, or `*` = every /srv/* mount.
+# Bare `*` is NOT accepted as a host — use 0.0.0.0/0 or wg:*.
 
 wg:mike           mike-private family-shared mixed-share
 wg:sarah          family-shared
 wg:kids           family-shared
 wg:*              public-over-wg
 192.168.1.0/24    media-store mixed-share public-over-wg
-*                 guest pubdocs
+0.0.0.0/0         guest pubdocs
 wg:admin          *
 ```
 

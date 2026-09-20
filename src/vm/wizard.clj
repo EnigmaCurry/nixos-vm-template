@@ -85,26 +85,6 @@
              "#   *      media  r      # guests: read-only on 'media'"
              ""]))
 
-(def ^:private nfs-clients-template
-  "Commented NFS client allowlist seeded for nas containers. All-commented = no
-  NFS export (deny by default)."
-  (str/join "\n"
-            ["# NFS client allowlist for the nas profile."
-             "# Each line:  <cidr-or-host> [ro]      (default is read-write)"
-             "#"
-             "# NFS has no per-user auth (sec=sys), so access is HOST-based and"
-             "# DENY-BY-DEFAULT: until you add an entry, NFS exports nothing to anyone"
-             "# (Samba is unaffected). All client users map to the shared 'nas' owner"
-             "# (all_squash), so any user on an allowed host can read/write every file —"
-             "# list only hosts you trust."
-             "#"
-             "# Apply changes with:  just sync-identity <name>"
-             "#"
-             "# Examples:"
-             "#   10.13.0.0/16       # a LAN subnet, read-write"
-             "#   192.168.1.50 ro    # a single host, read-only"
-             ""]))
-
 (def ^:private nas-hosts-template
   "Required per-host share allowlist seeded for nas containers. A blank/all-
   commented file is DENY-ALL — nothing reachable over Samba/NFS until at least
@@ -124,7 +104,7 @@
              "#"
              "# Host tokens:"
              "#   <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32"
-             "#   *           any host (fully unrestricted at the network layer)"
+             "#   0.0.0.0/0   any IPv4 address (fully open at the network layer)"
              "#   wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)"
              "#   wg:*        every wg peer currently in wireguard.conf"
              "#"
@@ -132,15 +112,17 @@
              "#   <name>      a specific share name (a bind-mount basename under /srv)"
              "#   *           every share currently under /srv (expanded at emit time)"
              "#"
+             "# Bare `*` is NOT accepted as a host — it is ambiguous between \"any"
+             "# IP\" and \"every wg peer\". Use 0.0.0.0/0 or wg:* to disambiguate."
              "# The wg: tokens require the 'wireguard' profile to also be enabled"
-             "# on this VM. Literal CIDRs and * work regardless."
+             "# on this VM. Literal CIDRs and 0.0.0.0/0 work regardless."
              "#"
              "# Apply changes with:  just sync-identity <name>"
              "#"
              "# ── Quick-start: pick one of these to open things up ──"
              "#"
              "# Fully open (matches today's pre-nas_hosts behaviour, no restrictions):"
-             "#   * *"
+             "#   0.0.0.0/0         *"
              "#"
              "# LAN-accessible to every share (replace with your LAN CIDR):"
              "#   192.168.0.0/16    *"
@@ -150,10 +132,10 @@
              "#   wg:mike           mike-private family-shared mixed-share"
              "#   wg:sarah          family-shared"
              "#   wg:kids           family-shared"
-             "#   wg:*              public-over-wg"
+             "#   wg:*              public-over-wg           # every wg peer"
              "#   192.168.1.0/24    media-store mixed-share public-over-wg"
              "#   192.168.1.10/32   backups                 # a single LAN host"
-             "#   *                 guest pubdocs           # world-readable shares"
+             "#   0.0.0.0/0         guest pubdocs           # world-readable shares"
              ""]))
 
 (defn- choose-d
@@ -809,9 +791,6 @@ done 2>/dev/null"]
         (when (and nas? (not (fs/exists? (str md "/nas_acl"))))
           (spit (str md "/nas_acl") nas-acl-template)
           (println (format "Created: %s/nas_acl (NAS ACL — edit to grant access)" md)))
-        (when (and nas? (not (fs/exists? (str md "/nfs_clients"))))
-          (spit (str md "/nfs_clients") nfs-clients-template)
-          (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md)))
         ;; nas: seed nas_hosts (REQUIRED file, all-commented = deny-all).
         ;; The nas profile serves nothing over Samba/NFS until at least one
         ;; active rule is added here; the template includes commented

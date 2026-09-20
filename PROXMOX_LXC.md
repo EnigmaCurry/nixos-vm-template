@@ -254,21 +254,23 @@ http://<ip>:3923/<share>      # a share; also the WebDAV URL
 It runs as the `nas` user, so uploads are `nas`-owned like everything else. Port
 3923 is seeded into `tcp_ports` (firewall) alongside the SMB/NFS ports.
 
-### NFS access (`nfs_clients`)
+### NFS access (`nas_hosts`)
 
 NFS has **no per-user authentication** (`sec=sys` — the client just asserts its
-uid), so its access control is **host-based** and **deny-by-default**. Add the
-allowed clients to `nfs_clients` in the machine config — one `<cidr-or-host> [ro]`
-per line (default read-write):
+uid), so its access control is **host-based** and **deny-by-default**. NFS
+shares the same allowlist file as Samba: `nas_hosts` (see
+[NAS_HOSTS.md](NAS_HOSTS.md) for the full grammar). Grant a share to a host
+and it becomes reachable over both protocols.
 
 ```
-10.13.0.0/16       # a LAN subnet, read-write
-192.168.1.50 ro    # a single host, read-only
+# machines/<name>/nas_hosts
+10.13.0.0/16       nas media           # LAN subnet, read-write on both shares
+192.168.1.50/32    nas                 # a single host on one share
 ```
 
-- With **no entries, NFS exports nothing** to anyone (Samba is unaffected). A
-  fresh `nas` is seeded with an all-commented template, so NFS is off until you
-  add a CIDR.
+- With **no entries, no share is exported** over NFS (Samba is also denied —
+  `nas_hosts` is the network-layer gate for both). A fresh `nas` is seeded with
+  an all-commented template, so both are off until you add a rule.
 - **Flat shared access:** exports use `all_squash`, mapping *every* client UID
   (and root) to a single unprivileged **`nas`** owner (uid/gid 1500). Samba does
   the same via `force user = nas`, and the share dirs are `nas:nas` `2775`. So any

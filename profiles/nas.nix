@@ -3,7 +3,7 @@
 # Serves every host ZFS dataset bind-mounted under /srv/<name> (via the backend's
 # `pct set -mpN`) over THREE access methods sharing the same files and the same
 # users/permissions:
-#   - NFS    (kernel nfsd, v4-only)            — host-allowlisted (nfs_clients)
+#   - NFS    (kernel nfsd, v4-only)            — host-allowlisted (nas_hosts)
 #   - Samba  (SMB)                             — per-user (nas_passwd + nas_acl)
 #   - copyparty (web UI + WebDAV, port 3923)   — per-user (nas_passwd + nas_acl)
 # The set of datasets is runtime data (the backend mounts them; they're not known
@@ -189,7 +189,6 @@
       set -u
       passwd=/etc/nas/nas_passwd
       acl=/etc/nas/nas_acl
-      nfs_clients=/etc/nas/nfs_clients
       hosts_file=/etc/nas/nas_hosts
       wg_conf=/etc/wireguard/wg0.conf
 
@@ -299,8 +298,10 @@
       # template to open things up.
       #
       # Wildcards:
-      #   host `*`   any host (unrestricted network layer for those shares)
       #   share `*`  every /srv/* bind mount (expanded at emit time)
+      # For "any host" use `0.0.0.0/0` (all IPv4) or `wg:*` (all wg peers).
+      # Bare `*` is NOT accepted in the host slot — the two are semantically
+      # different and we require the explicit form for clarity.
       #
       # Processed whether wg is enabled or not — literal CIDR restrictions
       # are useful on LAN-only deployments too. wg: tokens error out if wg
@@ -309,7 +310,6 @@
       declare -A share_seen=()         # share -> 1 if any host line references it
       declare -A share_has_wg=()       # share -> 1 if a wg: host referenced it
       declare -A share_has_net=()      # share -> 1 if a literal-CIDR host referenced it
-      declare -A share_unrestricted=() # share -> 1 if `*` host referenced it
       declare -A host_seen=()          # host token -> 1 (duplicate detection)
       declare -a star_hosts=()         # "kind|ips" for hosts whose share list contained `*`
       errors=""
@@ -339,12 +339,11 @@
 
           # Resolve the host token to IPs/CIDRs and remember its flavor.
           host_ips=""
-          host_kind=""  # "wg", "net", or "any"
+          host_kind=""  # "wg" or "net"
           case "$host" in
             \*)
-              host_kind=any
-              # No IPs; a marker only. When applied to a share it removes
-              # network restrictions on that share entirely.
+              errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: bare '*' is not accepted as a host — use '0.0.0.0/0' (any IPv4) or 'wg:*' (all wg peers) to disambiguate"
+              continue
               ;;
             wg:\*)
               if [ "$wg_enabled" != yes ]; then
@@ -393,12 +392,10 @@
             fi
             share_seen[$share]=1
             case "$host_kind" in
-              any) share_unrestricted[$share]=1 ;;
-              wg)  share_has_wg[$share]=1
-                   share_allow[$share]="''${share_allow[$share]:-}$host_ips" ;;
-              net) share_has_net[$share]=1
-                   share_allow[$share]="''${share_allow[$share]:-}$host_ips" ;;
+              wg)  share_has_wg[$share]=1 ;;
+              net) share_has_net[$share]=1 ;;
             esac
+            share_allow[$share]="''${share_allow[$share]:-}$host_ips"
           done
           if [ "$has_star_share" = yes ]; then
             star_hosts+=("$host_kind|$host_ips")
@@ -441,20 +438,9 @@
         done < <(clean "$passwd")
       fi
 
-      # NFS client allowlist (host-based, deny-by-default). Each line: "<cidr> [ro]"
-      # (default rw). all_squash maps every client UID to the shared 'nas' owner.
-      # Space-separated string of "<cidr>(opts)" entries; used as fallback when a
-      # share isn't in nas_hosts.
-      nfs_spec=""
-      if [ -f "$nfs_clients" ]; then
-        while read -r c mode rest; do
-          [ -z "$c" ] && continue
-          rw=rw; [ "$mode" = ro ] && rw=ro
-          nfs_spec="$nfs_spec $c($rw,sync,no_subtree_check,all_squash,anonuid=1500,anongid=1500)"
-        done < <(clean "$nfs_clients")
-      fi
-
-      # Build a "$cidr(opts)..." string for a set of CIDRs (used by scoped shares).
+      # Build a "$cidr(opts)..." string for a set of CIDRs. nas_hosts drives
+      # NFS export CIDRs per-share; all_squash maps every client UID to the
+      # shared 'nas' owner.
       nfs_spec_from_cidrs() {
         out=""
         for c in $1; do
@@ -479,8 +465,8 @@
       }
 
       # Apply any deferred `*` share expansions now that we know which
-      # /srv/* mounts exist. For every star_hosts entry, add its IPs (or
-      # unrestricted marker) to every discovered share.
+      # /srv/* mounts exist. For every star_hosts entry, add its IPs to
+      # every discovered share.
       if [ "''${#star_hosts[@]}" -gt 0 ]; then
         for d in /srv/*; do
           [ -d "$d" ] || continue
@@ -491,12 +477,10 @@
             ips="''${entry#*|}"
             share_seen[$name]=1
             case "$kind" in
-              any) share_unrestricted[$name]=1 ;;
-              wg)  share_has_wg[$name]=1
-                   share_allow[$name]="''${share_allow[$name]:-}$ips" ;;
-              net) share_has_net[$name]=1
-                   share_allow[$name]="''${share_allow[$name]:-}$ips" ;;
+              wg)  share_has_wg[$name]=1 ;;
+              net) share_has_net[$name]=1 ;;
             esac
+            share_allow[$name]="''${share_allow[$name]:-}$ips"
           done
         done
         # Re-trim any allow lists we just extended.
@@ -514,18 +498,13 @@
         chmod 2775 "$d" 2>/dev/null || true
 
         # ── Compute per-share host scoping ──
-        # New default policy: DENY-ALL for shares not listed in nas_hosts.
-        # `share_unrestricted` (from a `*` host) removes hosts allow/deny.
+        # Default policy: DENY-ALL for shares not listed in nas_hosts.
         # See NAS_HOSTS.md policy table.
         smb_hosts_allow=""
         smb_hosts_deny=""
         share_nfs_spec=""
         scoped=no
-        if [ -n "''${share_unrestricted[$name]:-}" ]; then
-          # `*` host: no network restriction at all. nas_acl still applies.
-          scoped=any
-          share_nfs_spec="$nfs_spec"   # fall back to global nfs_clients list
-        elif [ -n "''${share_seen[$name]:-}" ]; then
+        if [ -n "''${share_seen[$name]:-}" ]; then
           scoped=yes
           smb_hosts_allow="127.0.0.1 ''${share_allow[$name]}"
           # Mixed (wg + net) tokens: deny wg subnet so wg peers outside the
@@ -581,7 +560,6 @@
         } >> "$cpconf"
 
         case "$scoped" in
-          any)    scope_tag=" [scoped: *]" ;;
           yes)    scope_tag=" [scoped: ''${share_allow[$name]}]" ;;
           denied) scope_tag=" [DENIED — add a rule to $hosts_file]" ;;
         esac
