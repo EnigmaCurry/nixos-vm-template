@@ -181,6 +181,10 @@ served over **NFS, Samba, and copyparty** (web UI + WebDAV) — a boot service
 (`nas-shares`) discovers the mountpoints and generates the config for all three.
 Add another dataset → you automatically get another share on every protocol.
 
+**Required setup:** every share is deny-all until you grant network access in
+`machines/<name>/nas_hosts` (see below). A fresh `nas` container serves nothing
+over Samba/NFS/copyparty until at least one rule is added there.
+
 **Discovery (browse without an IP):** the profile advertises the server via
 **WS-Discovery** (`wsdd` — shows up in Windows "Network" and modern Linux file
 managers) and **mDNS** (`avahi` — `<hostname>.local` resolution and macOS Finder /
@@ -197,6 +201,42 @@ smbclient -L nas.local -N          # list shares by name
 Because kernel `nfsd` does not work in an unprivileged container, the `nas`
 profile automatically runs the container **privileged** and appends
 `lxc.apparmor.profile: unconfined` to its `pct` config.
+
+### Required: `nas_hosts` (network-layer scoping)
+
+**Every share is deny-all until you write a rule in `nas_hosts`.** This is
+the network-layer gate that sits underneath the per-user gate (`nas_acl`)
+and governs **all three protocols** — Samba, NFS, and copyparty. Without it,
+no share is reachable no matter what `nas_passwd`/`nas_acl` say.
+
+The file lives at `machines/<name>/nas_hosts` and is seeded on `just create
+<name> nas` with commented quick-start examples. One line per host, listing
+every share that host is allowed to reach:
+
+```
+# <host-token>   <share>...
+#
+#   <cidr>      literal CIDR (e.g. 192.168.1.0/24 or 10.0.0.5/32)
+#   0.0.0.0/0   any IPv4 host (fully open network layer)
+#   wg:<peer>   that wg peer's tunnel IP(s) — requires the wireguard profile
+#   wg:*        every wg peer currently in wireguard.conf
+#
+# Share token `*` = every /srv/* mount (expanded at emit time).
+
+192.168.0.0/16    *              # every share reachable from the LAN
+wg:mike           media backups  # mike (over wg) sees two shares
+wg:*              nas            # every wg peer reaches the 'nas' share
+```
+
+To get the pre-`nas_hosts` "open on the LAN" behaviour, uncomment the
+`0.0.0.0/0  *` or `<lan-cidr>  *` line the wizard seeds. To lock things
+down per peer, list peers with the specific shares they need. Validation
+is pre-flight and strict: any error stops Samba/NFS/copyparty rather than
+letting them start with a partial or stale config. See
+[NAS_HOSTS.md](NAS_HOSTS.md) for the full grammar, policy table, and
+error/warning reference.
+
+Apply edits with `just sync-identity <name>`.
 
 ### Per-user access (`nas_passwd` + `nas_acl`) — Samba **and** copyparty
 
@@ -237,7 +277,8 @@ bob      nas     r           # bob: read-only on share 'nas'
 > `nas_passwd` holds **plaintext** passwords (0600) on the workstation and inside
 > the container. Everything runs as the unprivileged `nas` user; files are
 > `nas`-owned (access is gated, not per-file ownership). The ACL governs Samba +
-> copyparty; **NFS access is separate** (host-based, see below). Homelab-grade.
+> copyparty per-user; **NFS has no per-user auth** — see [NFS access](#nfs-access)
+> below. Homelab-grade.
 
 ### Web UI + WebDAV (copyparty)
 
@@ -254,30 +295,24 @@ http://<ip>:3923/<share>      # a share; also the WebDAV URL
 It runs as the `nas` user, so uploads are `nas`-owned like everything else. Port
 3923 is seeded into `tcp_ports` (firewall) alongside the SMB/NFS ports.
 
-### NFS access (`nas_hosts`)
+### NFS access
 
 NFS has **no per-user authentication** (`sec=sys` — the client just asserts its
-uid), so its access control is **host-based** and **deny-by-default**. NFS
-shares the same allowlist file as Samba: `nas_hosts` (see
-[NAS_HOSTS.md](NAS_HOSTS.md) for the full grammar). Grant a share to a host
-and it becomes reachable over both protocols.
+uid), so its access control is entirely host-based and comes from the same
+`nas_hosts` file described above. Every host granted a share via `nas_hosts`
+gets an NFS export line generated for that share; no rules → no exports.
 
-```
-# machines/<name>/nas_hosts
-10.13.0.0/16       nas media           # LAN subnet, read-write on both shares
-192.168.1.50/32    nas                 # a single host on one share
-```
-
-- With **no entries, no share is exported** over NFS (Samba is also denied —
-  `nas_hosts` is the network-layer gate for both). A fresh `nas` is seeded with
-  an all-commented template, so both are off until you add a rule.
 - **Flat shared access:** exports use `all_squash`, mapping *every* client UID
   (and root) to a single unprivileged **`nas`** owner (uid/gid 1500). Samba does
   the same via `force user = nas`, and the share dirs are `nas:nas` `2775`. So any
   user on an allowed host — and any Samba user — can read/write **every** file
   regardless of their own UID, and ownership never causes permission surprises.
-- Apply edits with `just sync-identity <name>`. Clients then mount by full path:
-  `mount <ip>:/srv/nas /mnt`.
+- Clients mount by full path: `mount <ip>:/srv/<share> /mnt`.
+- Because `nas_hosts` is the single gate for both SMB and NFS, granting a share
+  to a host there opens it on both protocols at once. There is no built-in way
+  to grant SMB but not NFS (or vice versa) — that split would need the
+  container firewall (`tcp_ports`/`udp_ports`) to block the other protocol's
+  port for everyone, or a separate share.
 
 > [!NOTE]
 > If a share already holds files owned by someone other than `nas` (e.g. earlier
