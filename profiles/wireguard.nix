@@ -151,24 +151,26 @@ let
       fi
 
       # Hook chains — always installed so the ACL is authoritative.
-      # priority filter + 1: run AFTER nixos-fw so our drop overrides its
-      # accept (wg0 is in trustedInterfaces so nixos-fw waves it through).
+      # priority 1: run AFTER nixos-fw (which hooks at priority 0) so our
+      # drop overrides its accept (wg0 is in trustedInterfaces so nixos-fw
+      # waves it through). Numeric priority is used instead of the `filter`
+      # keyword because some nftables builds reject the keyword form here.
       #
       # ICMP echo-request is accepted here (before the jump to wg-input) so
       # ping/reachability testing always works regardless of user rules.
       echo ""
       echo "  chain input {"
-      echo "    type filter hook input priority filter + 1;"
+      echo "    type filter hook input priority 1;"
       echo "    iifname \"wg0\" icmp   type echo-request accept"
       echo "    iifname \"wg0\" icmpv6 type echo-request accept"
       echo "    iifname \"wg0\" jump wg-input"
       echo "  }"
 
-      # priority filter (0): nixos-fw doesn't hook forward, so this owns
-      # the wg0->wg0 decision outright.
+      # priority 0: nixos-fw doesn't hook forward, so this owns the
+      # wg0->wg0 decision outright.
       echo ""
       echo "  chain forward {"
-      echo "    type filter hook forward priority filter;"
+      echo "    type filter hook forward priority 0;"
       echo "    iifname \"wg0\" oifname \"wg0\" jump wg-forward"
       echo "  }"
 
