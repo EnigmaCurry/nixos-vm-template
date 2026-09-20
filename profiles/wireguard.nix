@@ -206,7 +206,41 @@ let
       echo "}"
     } > "$ruleset"
 
-    ${pkgs.nftables}/bin/nft -f "$ruleset"
+    # Fail closed: if the user's wireguard.nft has a syntax error (or any
+    # other reason nft rejects the ruleset), install a minimal drop-only
+    # `wireguard` table so wg0 traffic is *not* left unfiltered. Without
+    # this, a failed load leaves either the previous table intact OR — on
+    # fresh boot — no `wireguard` table at all, which combined with wg0
+    # being a trustedInterface means nixos-fw waves everything through.
+    # That's how a typo in wireguard.nft silently opens the wg surface.
+    #
+    # We still exit 1 so the unit is `failed` and shows up red in
+    # `systemctl status` / `just upgrade` output — the operator sees the
+    # nft error above, fixes wireguard.nft, and re-runs.
+    if ! ${pkgs.nftables}/bin/nft -f "$ruleset"; then
+      echo "wireguard-nft: RULESET LOAD FAILED — installing fail-closed drop-everything table on wg0" >&2
+      echo "wireguard-nft: fix wireguard.nft syntax errors above, then: sudo systemctl restart wireguard-nft" >&2
+      failclosed=$(mktemp)
+      cat > "$failclosed" <<'FAILCLOSED'
+add table inet wireguard
+delete table inet wireguard
+table inet wireguard {
+  chain input {
+    type filter hook input priority 1;
+    iifname "wg0" drop
+  }
+  chain forward {
+    type filter hook forward priority 0;
+    iifname "wg0" drop
+  }
+}
+FAILCLOSED
+      if ! ${pkgs.nftables}/bin/nft -f "$failclosed"; then
+        echo "wireguard-nft: fail-closed fallback ALSO failed to load — wg0 filtering is in an unknown state" >&2
+      fi
+      rm -f "$failclosed"
+      exit 1
+    fi
   '';
 in
 {
