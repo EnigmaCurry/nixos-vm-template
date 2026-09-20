@@ -153,10 +153,10 @@ See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
 ### Restricting shares to specific wg peers
 
 `nas_acl` gates *who* can access each share (per-user, password-checked).
-By default all authenticated grants are reachable from any allowed
-network. To also gate *where* a share can be reached from — so a peer
-can't even attempt to open a share intended for someone else — use
-`machines/<hub>/nas_hosts`.
+`nas_hosts` is the required network-layer gate underneath — a blank
+file is **deny-all** (no share reachable). Every access is listed
+explicitly, so a peer can't even attempt to open a share intended for
+someone else.
 
 One line per host, whitespace-separated: the host token followed by
 every share that host is granted access to.
@@ -164,21 +164,28 @@ every share that host is granted access to.
 ```
 # <host-token>   <share>...
 #
+# *           any host (fully unrestricted network layer)
 # wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)
 # wg:*        every wg peer currently in wireguard.conf
 # <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32
+#
+# The share list may be a specific share, or `*` = every /srv/* mount.
 
 wg:mike           mike-private family-shared mixed-share
 wg:sarah          family-shared
 wg:kids           family-shared
+wg:*              public-over-wg
 192.168.1.0/24    media-store mixed-share public-over-wg
+*                 guest pubdocs
+wg:admin          *
 ```
 
 - A host may appear on **at most one line** — put all of its shares
   together. Multiple hosts may reference the same share; the share's
   allow list is the union of every host that mentions it.
-- Shares NOT mentioned by any line default to LAN-only when wireguard
-  is enabled (wg subnet denied) or unrestricted when it isn't.
+- **Deny-all default.** Shares no line mentions are unreachable (Samba
+  `hosts allow = 127.0.0.1` only, no NFS export). Uncomment one of the
+  quick-start examples in the seeded template to open things up.
 - Emits Samba `hosts allow`/`hosts deny` per share, and substitutes
   the NFS export's client list to match.
 - Password auth (`nas_acl`) still applies on top — this is a network

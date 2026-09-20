@@ -105,12 +105,17 @@
              "#   192.168.1.50 ro    # a single host, read-only"
              ""]))
 
-(def ^:private nas-share-hosts-template
-  "Commented per-host share allowlist seeded for nas containers. All-commented
-  = no scoping (default policy applies). Literal CIDR restrictions work whether
-  wireguard is enabled or not; wg: tokens require the wireguard profile."
+(def ^:private nas-hosts-template
+  "Required per-host share allowlist seeded for nas containers. A blank/all-
+  commented file is DENY-ALL — nothing reachable over Samba/NFS until at least
+  one active rule grants access. Uncomment one of the LAN/open examples to
+  restore today's LAN-accessible-by-default behaviour."
   (str/join "\n"
             ["# NAS per-host share allowlist (Samba + NFS)."
+             "#"
+             "# REQUIRED FILE — a blank / all-commented file DENIES EVERY SHARE."
+             "# Every access must be listed explicitly here. The nas_acl user gate"
+             "# still applies on top; this is the network-layer gate underneath."
              "#"
              "# One line per HOST:   <host-token>  <share>..."
              "# A host may appear on at most one line — put all its shares together."
@@ -119,25 +124,36 @@
              "#"
              "# Host tokens:"
              "#   <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32"
+             "#   *           any host (fully unrestricted at the network layer)"
              "#   wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)"
-             "#   wg:*        all wg peers currently in wireguard.conf"
+             "#   wg:*        every wg peer currently in wireguard.conf"
+             "#"
+             "# Share tokens:"
+             "#   <name>      a specific share name (a bind-mount basename under /srv)"
+             "#   *           every share currently under /srv (expanded at emit time)"
              "#"
              "# The wg: tokens require the 'wireguard' profile to also be enabled"
-             "# on this VM. Literal CIDRs work regardless."
-             "#"
-             "# Shares NOT mentioned by any line get the default policy:"
-             "#   - wg enabled  → LAN-accessible, wg subnet denied"
-             "#   - wg disabled → no restriction"
+             "# on this VM. Literal CIDRs and * work regardless."
              "#"
              "# Apply changes with:  just sync-identity <name>"
              "#"
-             "# Examples:"
+             "# ── Quick-start: pick one of these to open things up ──"
+             "#"
+             "# Fully open (matches today's pre-nas_hosts behaviour, no restrictions):"
+             "#   * *"
+             "#"
+             "# LAN-accessible to every share (replace with your LAN CIDR):"
+             "#   192.168.0.0/16    *"
+             "#"
+             "# ── Realistic per-host examples ──"
+             "#"
              "#   wg:mike           mike-private family-shared mixed-share"
              "#   wg:sarah          family-shared"
              "#   wg:kids           family-shared"
              "#   wg:*              public-over-wg"
              "#   192.168.1.0/24    media-store mixed-share public-over-wg"
              "#   192.168.1.10/32   backups                 # a single LAN host"
+             "#   *                 guest pubdocs           # world-readable shares"
              ""]))
 
 (defn- choose-d
@@ -796,12 +812,13 @@ done 2>/dev/null"]
         (when (and nas? (not (fs/exists? (str md "/nfs_clients"))))
           (spit (str md "/nfs_clients") nfs-clients-template)
           (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md)))
-        ;; nas: seed nas_hosts (all-commented = no scoping). Works with
-        ;; literal CIDR restrictions even without wireguard; wg: tokens in the
-        ;; template become active once the wireguard profile is added.
+        ;; nas: seed nas_hosts (REQUIRED file, all-commented = deny-all).
+        ;; The nas profile serves nothing over Samba/NFS until at least one
+        ;; active rule is added here; the template includes commented
+        ;; quick-start examples for LAN-open or fully-open configurations.
         (when (and nas? (not (fs/exists? (str md "/nas_hosts"))))
-          (spit (str md "/nas_hosts") nas-share-hosts-template)
-          (println (format "Created: %s/nas_hosts (per-share host scoping — edit to restrict shares)" md))))
+          (spit (str md "/nas_hosts") nas-hosts-template)
+          (println (format "Created: %s/nas_hosts (REQUIRED — blank file denies every share; uncomment examples to open access)" md))))
       ;; PCI passthrough — overwrite the placeholder init-machine seeded when
       ;; the streaming wizard picker actually chose devices.
       (when (and streaming? (= backend "proxmox") (seq pci-selected))
