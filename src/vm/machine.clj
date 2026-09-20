@@ -151,6 +151,94 @@
              "#   /var/mnt/scratch //nas.local/scratch  uid=0,gid=0,file_mode=0666,dir_mode=0777,noperm"
              ""]))
 
+(def ^:private nas-passwd-template
+  "Commented NAS users file (mode 0600) seeded for nas containers. Shared by
+  Samba and copyparty."
+  (str/join "\n"
+            ["# NAS users (Samba + copyparty) — one per line: <user> <password>"
+             "# Plaintext (this file is mode 0600). Apply changes with:"
+             "#   just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   alice  s3cret"
+             "#   bob    hunter2"
+             ""]))
+
+(def ^:private nas-acl-template
+  "Commented NAS ACL seeded for nas containers. Shared by Samba and copyparty;
+  deny-by-default (no rule = no access)."
+  (str/join "\n"
+            ["# NAS per-user ACL (Samba + copyparty web/WebDAV)."
+             "#"
+             "# One rule per line:   <user> <share> <access>"
+             "#   access = r | rw   (r = read-only, rw = read-write)"
+             "#   user   = a name (must be defined in nas_passwd), or * for guest/anonymous"
+             "#   share  = a share name (bind-mount basename, e.g. nas), or * for ALL shares"
+             "#"
+             "# DENY BY DEFAULT: a user/guest gets only what an explicit rule grants;"
+             "# no rule means no access (over both Samba and copyparty)."
+             "#"
+             "# Apply changes with:  just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   alice  *      rw     # alice: read-write on every share"
+             "#   bob    nas    r      # bob: read-only on share 'nas'"
+             "#   *      media  r      # guests: read-only on 'media'"
+             ""]))
+
+(def ^:private nas-hosts-template
+  "Required per-host share allowlist seeded for nas containers. A blank/all-
+  commented file is DENY-ALL — nothing reachable over Samba/NFS until at least
+  one active rule grants access. Uncomment one of the LAN/open examples to
+  restore today's LAN-accessible-by-default behaviour."
+  (str/join "\n"
+            ["# NAS per-host share allowlist (Samba + NFS)."
+             "#"
+             "# REQUIRED FILE — a blank / all-commented file DENIES EVERY SHARE."
+             "# Every access must be listed explicitly here. The nas_acl user gate"
+             "# still applies on top; this is the network-layer gate underneath."
+             "#"
+             "# One line per HOST:   <host-token>  <share>..."
+             "# A host may appear on at most one line — put all its shares together."
+             "# Multiple hosts may list the same share; the share's allow list is"
+             "# the union of every host that mentions it."
+             "#"
+             "# Host tokens:"
+             "#   <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32"
+             "#   0.0.0.0/0   any IPv4 address (fully open at the network layer)"
+             "#   wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)"
+             "#   wg:*        every wg peer currently in wireguard.conf"
+             "#"
+             "# Share tokens:"
+             "#   <name>      a specific share name (a bind-mount basename under /srv)"
+             "#   *           every share currently under /srv (expanded at emit time)"
+             "#"
+             "# Bare `*` is NOT accepted as a host — it is ambiguous between \"any"
+             "# IP\" and \"every wg peer\". Use 0.0.0.0/0 or wg:* to disambiguate."
+             "# The wg: tokens require the 'wireguard' profile to also be enabled"
+             "# on this VM. Literal CIDRs and 0.0.0.0/0 work regardless."
+             "#"
+             "# Apply changes with:  just sync-identity <name>"
+             "#"
+             "# ── Quick-start: pick one of these to open things up ──"
+             "#"
+             "# Fully open (matches today's pre-nas_hosts behaviour, no restrictions):"
+             "#   0.0.0.0/0         *"
+             "#"
+             "# LAN-accessible to every share (replace with your LAN CIDR):"
+             "#   192.168.0.0/16    *"
+             "#"
+             "# ── Realistic per-host examples ──"
+             "#"
+             "#   wg:mike           mike-private family-shared mixed-share"
+             "#   wg:sarah          family-shared"
+             "#   wg:kids           family-shared"
+             "#   wg:*              public-over-wg           # every wg peer"
+             "#   192.168.1.0/24    media-store mixed-share public-over-wg"
+             "#   192.168.1.10/32   backups                 # a single LAN host"
+             "#   0.0.0.0/0         guest pubdocs           # world-readable shares"
+             ""]))
+
 (defn- generate-wg-keypair!
   "Generate a fresh WireGuard keypair via `nix run nixpkgs#wireguard-tools`.
   Returns {:private <base64> :public <base64>}."
@@ -521,6 +609,20 @@
         (when-not (fs/exists? (str md "/samba_client_shares"))
           (spit (str md "/samba_client_shares") samba-client-shares-template)
           (println (format "Created: %s/samba_client_shares (edit to add CIFS mounts)" md))))
+      ;; nas — seed commented Samba users + ACL + host allowlist. All-commented
+      ;; nas_hosts is deny-all; users edit it to grant access. nas_passwd is
+      ;; optional (empty file works — a user simply can't authenticate).
+      (when nas?
+        (when-not (fs/exists? (str md "/nas_passwd"))
+          (spit (str md "/nas_passwd") nas-passwd-template)
+          (fs/set-posix-file-permissions (str md "/nas_passwd") "rw-------")
+          (println (format "Created: %s/nas_passwd (NAS users — edit to add credentials)" md)))
+        (when-not (fs/exists? (str md "/nas_acl"))
+          (spit (str md "/nas_acl") nas-acl-template)
+          (println (format "Created: %s/nas_acl (NAS ACL — edit to grant per-user access)" md)))
+        (when-not (fs/exists? (str md "/nas_hosts"))
+          (spit (str md "/nas_hosts") nas-hosts-template)
+          (println (format "Created: %s/nas_hosts (REQUIRED — blank file denies every share; uncomment examples to open access)" md))))
       ;; wireguard — generate a keypair once and pin it in wireguard.conf.
       ;; Preserved across recreate/upgrade because the file lives here and is
       ;; copied verbatim to /var/identity by identity sync.
