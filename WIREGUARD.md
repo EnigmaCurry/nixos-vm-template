@@ -6,9 +6,14 @@ in `machines/<name>/wireguard.conf` (mode 0600) on the workstation and is
 synced into the guest at create/upgrade time. The private key is pinned in that
 file, so `recreate` and `upgrade` preserve the tunnel identity.
 
-The fastest path is `just wireguard-init <hub>`, which mints all keys and
-configs at once under `machines/<hub>/wireguard/`. The [By hand](#by-hand)
-appendix keeps the manual steps as a fallback.
+The fastest path is `just wireguard <hub>`. First run mints all keys and
+configs at once under `machines/<hub>/wireguard/`; subsequent runs open a
+menu (add peer, change endpoint, edit addresses, rename, remove). The
+[By hand](#by-hand) appendix keeps the manual steps as a fallback.
+
+**Do not hand-edit the generated `.conf` files.** They are regenerated
+from `machines/<hub>/wireguard/.wg-state.edn` every time `just wireguard`
+runs and any manual edits will be discarded. Use the menu instead.
 
 This walkthrough uses the Proxmox LXC backend because the hub is built on the
 [`nas`](PROFILES.md#available-profiles) profile (Samba + NFS), which is
@@ -30,11 +35,14 @@ profile that suits the services you want to expose over the tunnel).
 ## 1. Run the wizard
 
 ```bash
-just wireguard-init <hub>
+just wireguard <hub>
 ```
 
 `<hub>` must be an existing machine (create it first with
-`just create <hub> wireguard`). The wizard prompts for:
+`just create <hub> wireguard`).
+
+**First run** — with no state in `machines/<hub>/wireguard/`, the command
+prompts for:
 
 - **Subnet** — CIDR of the VPN, default `10.0.0.0/24`.
 - **Hub peer** — `ListenPort` (default `51820`), public `Endpoint` (host or
@@ -54,27 +62,39 @@ offers to copy that spoke's `.conf` straight into
 
 Private keys stay in `<peer>.key`, never in the state file.
 
-## 2. Add a peer later
+## 2. Add or edit peers later
+
+Run the same command:
 
 ```bash
-just wireguard-add-peer <hub>
+just wireguard <hub>
 ```
 
-Reads `machines/<hub>/wireguard/.wg-state.edn`, prompts for one new spoke
-peer (name, address), then:
+With existing state it drops into a menu:
+
+- **Add spoke peer** — mints a keypair and appends the peer.
+- **Add / remove address** — manage the multi-address list on any peer
+  (add IPv6, add a secondary v4, etc.).
+- **Rename a spoke**.
+- **Remove a spoke**.
+- **Change hub endpoint** or **listen-port**.
+- **Apply changes and regenerate** — commits the queued changes.
+- **Quit without saving**.
+
+Changes are queued in memory; nothing on disk moves until you pick Apply.
+When you do:
 
 - Moves every existing `.conf`/`.key`/`.pub`/`README.txt`/`.wg-state.edn`
   plus `machines/<hub>/wireguard.conf` into
   `machines/<hub>/wireguard/backup-<timestamp>/`.
-- Regenerates **every** peer's config so the new peer is fully connected.
+- Regenerates **every** peer's config so the new topology is consistent.
 - Rewrites `.wg-state.edn` and `machines/<hub>/wireguard.conf`.
 - Offers to copy any changed spoke config into `machines/<name>/wireguard.conf`
   for matching peers.
 
-Because existing peers' configs change too (they gain a `[Peer]` block for
-the newcomer), redeploy any peer you didn't apply through the wizard
-(`just upgrade <name>` for repo VMs, `sudo wg-quick down wg0 && sudo
-wg-quick up wg0` for generic clients).
+Because existing peers' configs change too, redeploy any peer you didn't
+apply through the wizard (`just upgrade <name>` for repo VMs, `sudo
+wg-quick down wg0 && sudo wg-quick up wg0` for generic clients).
 
 ## 3. Deploy each peer's config
 

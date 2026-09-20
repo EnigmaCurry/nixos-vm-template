@@ -79,19 +79,13 @@ clone source dest memory="" vcpus="" network="":
 network-config name network="":
     @{{VM_CLI}} network-config "{{name}}" "{{network}}"
 
-# Interactive WireGuard config wizard for a hub-and-spoke VPN. Mints keypairs
-# and per-peer wg-quick configs into machines/<hub>/wireguard/, and copies the
-# hub's config to machines/<hub>/wireguard.conf. For spoke peer names that
-# match other machine dirs, offers to apply their configs too.
-wireguard-init hub:
-    @{{VM_CLI}} wireguard-init "{{hub}}"
-
-# Add one spoke peer to an existing wireguard-init deployment. Reads
-# machines/<hub>/wireguard/.wg-state.edn, backs up the previous files,
-# regenerates every peer's config so the new peer is fully connected, and
-# offers to apply changed configs to matching machines.
-wireguard-add-peer hub:
-    @{{VM_CLI}} wireguard-add-peer "{{hub}}"
+# Interactive WireGuard manager for a hub-and-spoke VPN centered on <hub>.
+# First run: prompts for subnet + hub + spoke peers, mints keypairs, and
+# writes machines/<hub>/wireguard/<peer>.{key,pub,conf} plus the hub's
+# wireguard.conf. Subsequent runs open a menu (add peer, change endpoint,
+# edit addresses, rename, remove) that regenerates every .conf on Apply.
+wireguard hub:
+    @{{VM_CLI}} wireguard "{{hub}}"
 
 # Start a VM
 start name:
