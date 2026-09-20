@@ -177,22 +177,28 @@ Every VM with the `wireguard` profile loads an nftables table
 The rules body lives at `machines/<name>/wireguard.nft` and is seeded
 (all-commented) by `just create` alongside `wireguard.conf`.
 
-**Two chains, both default-drop.**
+**Three chains.**
 
 - **`wg-input`** — traffic from wg0 hitting **this peer's** own services
   (SSH, Samba, NFS, whatever the VM runs). Applies to every peer,
   including hubs. Because `wg0` is set trusted, this chain is the sole
   authority for wg-side port exposure — `tcp_ports`/`udp_ports` do
-  **not** apply to wg traffic.
+  **not** apply to wg traffic. Default-drop.
 - **`wg-forward`** — traffic transiting between wg peers through this
   peer. Only meaningful when this peer is a hub; on spokes leave the
-  chain with only its `drop` rule.
+  chain with only its `drop` rule. Default-drop.
+- **`wg-prerouting`** — optional NAT prerouting for wg0 traffic
+  (`redirect to :PORT`, `dnat to ADDR:PORT`). Fires before `wg-input`,
+  so rewrites are visible to it. Only installed if this chain is present;
+  unmatched packets fall through unchanged (no default deny).
 
-**Default is deny-everything.** If `wireguard.nft` is missing, or a
-chain body is missing here, the service synthesizes a drop-only chain
-for that direction. A VM with the `wireguard` profile but no ACL file
-has wg0 fully locked down — you *have* to write accept rules to reach
-this peer over the tunnel. Delete a chain to keep it locked down.
+**Default is deny-everything on the filter chains.** If `wireguard.nft`
+is missing, or a `wg-input`/`wg-forward` chain body is missing here, the
+service synthesizes a drop-only chain for that direction. A VM with the
+`wireguard` profile but no ACL file has wg0 fully locked down — you
+*have* to write accept rules to reach this peer over the tunnel. Delete
+a chain to keep it locked down. `wg-prerouting` is opt-in: omit it and no
+prerouting rewrites happen.
 
 **Peer names.** The service parses `# hostname: <name>` comments in
 this VM's `wireguard.conf` (both `[Interface]` and each `[Peer]`
@@ -202,7 +208,7 @@ configs need to add them (or reference peers by bare IP).
 
 **Rule syntax.** Standard nftables expressions (see `man nft`). Reply
 traffic is handled by conntrack — only describe *new* connections to
-permit. Both chains end with `drop`.
+permit. `wg-input` and `wg-forward` end with `drop`.
 
 ```
 # machines/<peer>/wireguard.nft — examples
