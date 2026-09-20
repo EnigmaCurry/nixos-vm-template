@@ -176,8 +176,11 @@ chain wg-input {
 
 chain wg-forward {
   ct state established,related accept
-  ip saddr $laptop ip daddr $nas               accept   # laptop -> nas
-  ip saddr $phone  ip daddr $nas tcp dport 445 accept   # phone -> nas Samba
+  # wg-forward rules describe traffic passing THROUGH this hub between
+  # two other peers. Traffic destined for this VM's own services goes
+  # through wg-input instead — don't use the hub's own name here.
+  ip saddr $laptop ip daddr $homeassistant               accept
+  ip saddr $phone  ip daddr $homeassistant tcp dport 443 accept   # phone HTTPS
   drop
 }
 ```
