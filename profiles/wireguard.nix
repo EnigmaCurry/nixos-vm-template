@@ -181,7 +181,7 @@ let
   '';
 in
 {
-  environment.systemPackages = [ pkgs.wireguard-tools ];
+  environment.systemPackages = [ pkgs.wireguard-tools pkgs.nftables ];
 
   # Enable IP forwarding so this peer can act as a hub when wg-forward
   # rules permit. See the "Forwarding note" in the header.
