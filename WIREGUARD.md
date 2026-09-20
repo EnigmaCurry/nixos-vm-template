@@ -166,8 +166,8 @@ permit. Both chains end with `drop`.
 # machines/<peer>/wireguard.nft — examples
 chain wg-input {
   ct state established,related accept
-  icmp   type echo-request accept          # ping (delete to block)
-  icmpv6 type echo-request accept
+  # ICMP echo-request is auto-accepted by the hook chain before this
+  # chain runs, so ping always works regardless of the rules below.
   ip saddr $laptop tcp dport 22  accept    # SSH from laptop peer
   ip saddr $laptop tcp dport 445 accept    # Samba
   ip saddr $admin                accept    # broad allow for admin peer

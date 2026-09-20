@@ -138,10 +138,6 @@ let
         echo ""
         echo "  chain wg-input {"
         echo "    ct state established,related accept"
-        # Ping always allowed in the default case (reachability check).
-        # Users writing their own wg-input can drop these lines to block it.
-        echo "    icmp   type echo-request accept"
-        echo "    icmpv6 type echo-request accept"
         echo "    drop"
         echo "  }"
       fi
@@ -157,9 +153,14 @@ let
       # Hook chains — always installed so the ACL is authoritative.
       # priority filter + 1: run AFTER nixos-fw so our drop overrides its
       # accept (wg0 is in trustedInterfaces so nixos-fw waves it through).
+      #
+      # ICMP echo-request is accepted here (before the jump to wg-input) so
+      # ping/reachability testing always works regardless of user rules.
       echo ""
       echo "  chain input {"
       echo "    type filter hook input priority filter + 1;"
+      echo "    iifname \"wg0\" icmp   type echo-request accept"
+      echo "    iifname \"wg0\" icmpv6 type echo-request accept"
       echo "    iifname \"wg0\" jump wg-input"
       echo "  }"
 
