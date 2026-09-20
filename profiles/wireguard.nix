@@ -28,25 +28,28 @@
 # preserve the key because it lives in machines/<name>/wireguard.conf.
 #
 # ── Peer ACL (wireguard.nft) ─────────────────────────────────────────────
-# machines/<name>/wireguard.nft holds two nftables chains that govern
-# wg0 traffic on this VM:
+# machines/<name>/wireguard.nft holds up to three nftables chains that
+# govern wg0 traffic on this VM:
 #
-#   chain wg-input   — traffic from wg0 hitting THIS peer's own services.
-#                      Authoritative for wg0 (bypasses tcp_ports/udp_ports
-#                      via networking.firewall.trustedInterfaces).
-#   chain wg-forward — traffic passing between wg peers through this peer.
-#                      Only meaningful if this peer is a hub.
+#   chain wg-input      — traffic from wg0 hitting THIS peer's own services.
+#                         Authoritative for wg0 (bypasses tcp_ports/udp_ports
+#                         via networking.firewall.trustedInterfaces).
+#   chain wg-forward    — traffic passing between wg peers through this peer.
+#                         Only meaningful if this peer is a hub.
+#   chain wg-prerouting — optional NAT prerouting rules for wg0 (redirect /
+#                         dnat). Only installed if defined; unmatched packets
+#                         fall through unchanged.
 #
 # Peer names come from `# hostname: <name>` comments in wireguard.conf and
-# are exposed as `$name` variables. Each chain defaults to drop; users
-# add explicit accept rules.
+# are exposed as `$name` variables. Each filter chain defaults to drop;
+# users add explicit accept rules.
 #
-# Default is deny-everything for wg0 in both directions. If wireguard.nft
-# is missing (or omits a chain body for a direction), the service
-# synthesizes a drop-only chain for that direction — so a VM with the
-# `wireguard` profile but no ACL file has wg0 fully locked down. Users
+# Default is deny-everything for wg0 in both filter directions. If
+# wireguard.nft is missing (or omits a chain body for a direction), the
+# service synthesizes a drop-only chain for that direction — so a VM with
+# the `wireguard` profile but no ACL file has wg0 fully locked down. Users
 # open traffic by writing accept rules; `just create` seeds an
-# all-commented template.
+# all-commented template. wg-prerouting has no default (NAT is opt-in).
 #
 # ── Forwarding note ──────────────────────────────────────────────────────
 # net.ipv4.ip_forward is enabled unconditionally so any peer can act as a
@@ -81,9 +84,11 @@ let
     # in machines/<name>/wireguard.nft; anything they don't allow is dropped.
     has_input=0
     has_forward=0
+    has_prerouting=0
     if [ -f "$wg_nft" ]; then
-      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-input[[:space:]]*\{'   "$wg_nft" && has_input=1 || true
-      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-forward[[:space:]]*\{' "$wg_nft" && has_forward=1 || true
+      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-input[[:space:]]*\{'      "$wg_nft" && has_input=1      || true
+      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-forward[[:space:]]*\{'    "$wg_nft" && has_forward=1    || true
+      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-prerouting[[:space:]]*\{' "$wg_nft" && has_prerouting=1 || true
     fi
 
     ruleset=$(mktemp)
@@ -173,6 +178,18 @@ let
       echo "    type filter hook forward priority 0;"
       echo "    iifname \"wg0\" oifname \"wg0\" jump wg-forward"
       echo "  }"
+
+      # NAT prerouting hook — only installed if the user defined a
+      # wg-prerouting chain. Unmatched packets fall through unchanged
+      # (no default deny here; that's wg-input's job in the filter path).
+      # priority dstnat: standard destination NAT slot, runs before routing.
+      if [ "$has_prerouting" = 1 ]; then
+        echo ""
+        echo "  chain prerouting {"
+        echo "    type nat hook prerouting priority -100;"
+        echo "    iifname \"wg0\" jump wg-prerouting"
+        echo "  }"
+      fi
 
       echo "}"
     } > "$ruleset"
