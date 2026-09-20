@@ -156,26 +156,29 @@ See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
 By default all authenticated grants are reachable from any allowed
 network. To also gate *where* a share can be reached from — so a peer
 can't even attempt to open a share intended for someone else — use
-`machines/<hub>/nas_share_hosts`.
+`machines/<hub>/nas_hosts`.
 
-One line per scoped share, whitespace-separated tokens:
+One line per host, whitespace-separated: the host token followed by
+every share that host is granted access to.
 
 ```
-# <share>  <host-token>...
+# <host-token>   <share>...
 #
 # wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)
 # wg:*        every wg peer currently in wireguard.conf
 # <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32
 
-mike-private     wg:mike                    # only reachable from mike's wg IP
-family-shared    wg:mike wg:sarah wg:kids   # a few wg peers
-media-store      192.168.1.0/24             # explicit LAN-only
-mixed-share      192.168.1.0/24 wg:mike     # LAN + mike over wg
+wg:mike           mike-private family-shared mixed-share
+wg:sarah          family-shared
+wg:kids           family-shared
+192.168.1.0/24    media-store mixed-share public-over-wg
 ```
 
-- A share may appear on **at most one line** — put all tokens together.
-- Shares NOT listed default to LAN-only when wireguard is enabled
-  (wg subnet denied) or unrestricted when it isn't.
+- A host may appear on **at most one line** — put all of its shares
+  together. Multiple hosts may reference the same share; the share's
+  allow list is the union of every host that mentions it.
+- Shares NOT mentioned by any line default to LAN-only when wireguard
+  is enabled (wg subnet denied) or unrestricted when it isn't.
 - Emits Samba `hosts allow`/`hosts deny` per share, and substitutes
   the NFS export's client list to match.
 - Password auth (`nas_acl`) still applies on top — this is a network
@@ -187,13 +190,13 @@ Apply:
 just upgrade <hub>
 ```
 
-Validation is pre-flight and strict: a duplicate share name, unknown
-`wg:` peer, unknown token, or a `wg:` token when wireguard isn't
+Validation is pre-flight and strict: a duplicate host, unknown
+`wg:` peer, unknown host token, or a `wg:` token when wireguard isn't
 enabled fails the `nas-shares` unit before any config is written.
 Samba/NFS/copyparty are `BindsTo`-coupled to `nas-shares`, so a bad
 file **stops the file server** rather than serving stale/partial
 config — you'll see the error inline in `just upgrade` output. See
-[NAS_SHARE_HOSTS.md](NAS_SHARE_HOSTS.md) for the full policy table.
+[NAS_HOSTS.md](NAS_HOSTS.md) for the full policy table.
 
 ### Peer ACL on the hub
 

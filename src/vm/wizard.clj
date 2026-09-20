@@ -106,16 +106,18 @@
              ""]))
 
 (def ^:private nas-share-hosts-template
-  "Commented per-share host allowlist seeded for nas containers. All-commented
+  "Commented per-host share allowlist seeded for nas containers. All-commented
   = no scoping (default policy applies). Literal CIDR restrictions work whether
   wireguard is enabled or not; wg: tokens require the wireguard profile."
   (str/join "\n"
-            ["# NAS per-share host allowlist (Samba + NFS)."
+            ["# NAS per-host share allowlist (Samba + NFS)."
              "#"
-             "# One line per SCOPED share:   <share>  <host-token>..."
-             "# A share may appear on at most one line — put all its tokens together."
+             "# One line per HOST:   <host-token>  <share>..."
+             "# A host may appear on at most one line — put all its shares together."
+             "# Multiple hosts may list the same share; the share's allow list is"
+             "# the union of every host that mentions it."
              "#"
-             "# Tokens:"
+             "# Host tokens:"
              "#   <cidr>      literal CIDR, e.g. 192.168.1.0/24 or 10.0.0.5/32"
              "#   wg:<peer>   that wg peer's tunnel IP(s) (from wireguard.conf)"
              "#   wg:*        all wg peers currently in wireguard.conf"
@@ -123,19 +125,19 @@
              "# The wg: tokens require the 'wireguard' profile to also be enabled"
              "# on this VM. Literal CIDRs work regardless."
              "#"
-             "# Shares NOT listed here get the default policy:"
+             "# Shares NOT mentioned by any line get the default policy:"
              "#   - wg enabled  → LAN-accessible, wg subnet denied"
              "#   - wg disabled → no restriction"
              "#"
              "# Apply changes with:  just sync-identity <name>"
              "#"
              "# Examples:"
-             "#   media-store      192.168.1.0/24                # LAN subnet only"
-             "#   backups          192.168.1.10/32 192.168.1.11/32   # two hosts"
-             "#   mike-private     wg:mike                       # only mike's wg IP"
-             "#   family-shared    wg:mike wg:sarah wg:kids      # a few wg peers"
-             "#   mixed-share      192.168.1.0/24 wg:mike        # LAN + mike's wg IP"
-             "#   public-over-wg   192.168.1.0/24 wg:*           # LAN + every wg peer"
+             "#   wg:mike           mike-private family-shared mixed-share"
+             "#   wg:sarah          family-shared"
+             "#   wg:kids           family-shared"
+             "#   wg:*              public-over-wg"
+             "#   192.168.1.0/24    media-store mixed-share public-over-wg"
+             "#   192.168.1.10/32   backups                 # a single LAN host"
              ""]))
 
 (defn- choose-d
@@ -794,12 +796,12 @@ done 2>/dev/null"]
         (when (and nas? (not (fs/exists? (str md "/nfs_clients"))))
           (spit (str md "/nfs_clients") nfs-clients-template)
           (println (format "Created: %s/nfs_clients (NFS allowlist — add a CIDR to enable NFS)" md)))
-        ;; nas: seed nas_share_hosts (all-commented = no scoping). Works with
+        ;; nas: seed nas_hosts (all-commented = no scoping). Works with
         ;; literal CIDR restrictions even without wireguard; wg: tokens in the
         ;; template become active once the wireguard profile is added.
-        (when (and nas? (not (fs/exists? (str md "/nas_share_hosts"))))
-          (spit (str md "/nas_share_hosts") nas-share-hosts-template)
-          (println (format "Created: %s/nas_share_hosts (per-share host scoping — edit to restrict shares)" md))))
+        (when (and nas? (not (fs/exists? (str md "/nas_hosts"))))
+          (spit (str md "/nas_hosts") nas-share-hosts-template)
+          (println (format "Created: %s/nas_hosts (per-share host scoping — edit to restrict shares)" md))))
       ;; PCI passthrough — overwrite the placeholder init-machine seeded when
       ;; the streaming wizard picker actually chose devices.
       (when (and streaming? (= backend "proxmox") (seq pci-selected))

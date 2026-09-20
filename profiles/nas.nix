@@ -23,14 +23,14 @@
 #   DENY BY DEFAULT (unconditional): a user/guest gets only what an explicit rule
 #   grants; no rule means no access (Samba/copyparty). There is no open fallback.
 #
-#   /etc/nas/nas_share_hosts (0644, optional) — per-share host allowlist. One
+#   /etc/nas/nas_hosts (0644, optional) — per-share host allowlist. One
 #     line per scoped share: `<share> <token>...` where tokens are `wg:<peer>`,
 #     `wg:*`, or a literal CIDR. Adds Samba `hosts allow`/`hosts deny` and
 #     substitutes the NFS export's client list. Works with or without
 #     wireguard — literal CIDR restrictions apply either way; `wg:` tokens
 #     are only meaningful when the wireguard profile is also enabled.
 #     Default policy for unlisted shares: LAN-only if wireguard is enabled
-#     (wg subnet denied); no restriction if not. See NAS_SHARE_HOSTS.md.
+#     (wg subnet denied); no restriction if not. See NAS_HOSTS.md.
 #
 # SECURITY: nas_passwd is PLAINTEXT (0600) on the workstation and in the container.
 # Samba/copyparty access is gated per-user; NFS has no per-user auth so it is
@@ -190,7 +190,7 @@
       passwd=/etc/nas/nas_passwd
       acl=/etc/nas/nas_acl
       nfs_clients=/etc/nas/nfs_clients
-      share_hosts=/etc/nas/nas_share_hosts
+      hosts_file=/etc/nas/nas_hosts
       wg_conf=/etc/wireguard/wg0.conf
 
       exports=/etc/exports.d/nas-shares.exports
@@ -287,76 +287,102 @@
         done
       fi
 
-      # ── pre-flight: parse + validate nas_share_hosts ────────────────
+      # ── pre-flight: parse + validate nas_hosts ────────────────
+      # File is host-centric: each line is `<host-token>  <share>...` — one
+      # host, all the shares that host is granted access to. Multiple lines
+      # may reference the same share; its allow list is the union of every
+      # host that mentions it. A host may appear on at most one line
+      # (duplicate host = hard error, since a duplicate is almost always a
+      # typo that would widen access).
+      #
+      # Processed whether wg is enabled or not — literal CIDR restrictions
+      # are useful on LAN-only deployments too. wg: tokens error out if wg
+      # is not enabled (no peer IPs to resolve).
       declare -A share_allow=()   # share -> space-separated resolved IPs/CIDRs
-      declare -A share_seen=()    # share -> 1 if we've resolved it (dup detection)
-      declare -A share_has_wg=()  # share -> 1 if any wg: token used
-      declare -A share_has_net=() # share -> 1 if any literal CIDR / non-wg token
+      declare -A share_seen=()    # share -> 1 if any host line references it
+      declare -A share_has_wg=()  # share -> 1 if a wg: host referenced it
+      declare -A share_has_net=() # share -> 1 if a literal-CIDR host referenced it
+      declare -A host_seen=()     # host token -> 1 (duplicate detection)
       errors=""
 
-      # Note: nas_share_hosts is processed whether wg is enabled or not — literal
-      # CIDR restrictions are useful on LAN-only deployments too. wg: tokens
-      # error out if wg is not enabled (no peer IPs to resolve).
-      if [ -f "$share_hosts" ]; then
+      if [ -f "$hosts_file" ]; then
         line_no=0
         while IFS= read -r raw || [ -n "$raw" ]; do
           line_no=$((line_no + 1))
           # strip comments + trim
           line=$(printf '%s' "$raw" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
           [ -z "$line" ] && continue
-          # positional split
+          # positional split: host + shares
           set -- $line
-          share="$1"; shift
-          if [ -z "$share" ] || [ "$#" -eq 0 ]; then
-            errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: malformed (expected: <share> <token>...)"
+          host="$1"; shift
+          if [ -z "$host" ] || [ "$#" -eq 0 ]; then
+            errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: malformed (expected: <host-token> <share>...)"
             continue
           fi
-          if [ -n "''${share_seen[$share]:-}" ]; then
-            errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: duplicate entry for share '$share' — consolidate onto a single line"
+          if [ -n "''${host_seen[$host]:-}" ]; then
+            errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: duplicate entry for host '$host' — consolidate all of its shares onto a single line"
             continue
           fi
-          share_seen[$share]=1
-          resolved=""
-          for tok in "$@"; do
-            case "$tok" in
-              wg:\*)
-                if [ "$wg_enabled" != yes ]; then
-                  errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: wg:* used but wireguard is not enabled (no $wg_conf)"
-                  continue
-                fi
-                share_has_wg[$share]=1
-                for pn in "''${wg_peer_names[@]}"; do
-                  resolved="$resolved ''${wg_peer_ips[$pn]}"
-                done
-                ;;
-              wg:*)
-                peer="''${tok#wg:}"
-                if [ "$wg_enabled" != yes ]; then
-                  errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: wg:$peer used but wireguard is not enabled (no $wg_conf)"
-                  continue
-                fi
-                if [ -z "''${wg_peer_ips[$peer]:-}" ]; then
-                  errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: wg:$peer not found in $wg_conf"
-                  continue
-                fi
-                share_has_wg[$share]=1
-                resolved="$resolved ''${wg_peer_ips[$peer]}"
-                ;;
-              [0-9]*)
-                if ! printf '%s' "$tok" | grep -qE '^[0-9]+(\.[0-9]+){3}(/[0-9]+)?$'; then
-                  errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: '$tok' is not a valid IPv4 CIDR"
-                  continue
-                fi
-                share_has_net[$share]=1
-                resolved="$resolved $tok"
-                ;;
-              *)
-                errors="$errors"$'\n'"nas-shares: ERROR: $share_hosts line $line_no: unknown token '$tok'"
-                ;;
+          host_seen[$host]=1
+
+          # Resolve the host token to a list of IPs/CIDRs and remember whether
+          # it was a wg or literal-CIDR flavor (drives the mixed-deny logic).
+          host_ips=""
+          host_kind=""  # "wg" or "net"
+          case "$host" in
+            wg:\*)
+              if [ "$wg_enabled" != yes ]; then
+                errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: wg:* used but wireguard is not enabled (no $wg_conf)"
+                continue
+              fi
+              host_kind=wg
+              for pn in "''${wg_peer_names[@]}"; do
+                host_ips="$host_ips ''${wg_peer_ips[$pn]}"
+              done
+              ;;
+            wg:*)
+              peer="''${host#wg:}"
+              if [ "$wg_enabled" != yes ]; then
+                errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: wg:$peer used but wireguard is not enabled (no $wg_conf)"
+                continue
+              fi
+              if [ -z "''${wg_peer_ips[$peer]:-}" ]; then
+                errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: wg:$peer not found in $wg_conf"
+                continue
+              fi
+              host_kind=wg
+              host_ips=" ''${wg_peer_ips[$peer]}"
+              ;;
+            [0-9]*)
+              if ! printf '%s' "$host" | grep -qE '^[0-9]+(\.[0-9]+){3}(/[0-9]+)?$'; then
+                errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: '$host' is not a valid IPv4 CIDR"
+                continue
+              fi
+              host_kind=net
+              host_ips=" $host"
+              ;;
+            *)
+              errors="$errors"$'\n'"nas-shares: ERROR: $hosts_file line $line_no: unknown host token '$host'"
+              continue
+              ;;
+          esac
+
+          # Fan out: for each share on this line, append host_ips to that
+          # share's allow list and record which token kinds contributed.
+          for share in "$@"; do
+            share_seen[$share]=1
+            share_allow[$share]="''${share_allow[$share]:-}$host_ips"
+            case "$host_kind" in
+              wg)  share_has_wg[$share]=1 ;;
+              net) share_has_net[$share]=1 ;;
             esac
           done
-          share_allow[$share]="''${resolved# }"
-        done < "$share_hosts"
+        done < "$hosts_file"
+
+        # Trim leading space from each accumulated allow list.
+        for s in "''${!share_allow[@]}"; do
+          share_allow[$s]="''${share_allow[$s]# }"
+        done
       fi
 
       if [ -n "$errors" ]; then
@@ -391,7 +417,7 @@
       # NFS client allowlist (host-based, deny-by-default). Each line: "<cidr> [ro]"
       # (default rw). all_squash maps every client UID to the shared 'nas' owner.
       # Space-separated string of "<cidr>(opts)" entries; used as fallback when a
-      # share isn't in nas_share_hosts.
+      # share isn't in nas_hosts.
       nfs_spec=""
       if [ -f "$nfs_clients" ]; then
         while read -r c mode rest; do
@@ -434,11 +460,11 @@
         chmod 2775 "$d" 2>/dev/null || true
 
         # ── Compute per-share host scoping ──
-        # scoped=yes when the share is listed in nas_share_hosts.
+        # scoped=yes when the share is listed in nas_hosts.
         scoped=no
         [ -n "''${share_seen[$name]:-}" ] && scoped=yes
 
-        # Samba hosts allow/deny — see NAS_SHARE_HOSTS.md policy table.
+        # Samba hosts allow/deny — see NAS_HOSTS.md policy table.
         smb_hosts_allow=""
         smb_hosts_deny=""
         if [ "$scoped" = yes ]; then
@@ -506,6 +532,14 @@
       # Return the Samba parser to [global] after the share sections (the include
       # sits in [global] before the other globals alphabetically).
       echo "[global]" >> "$smbinc"
+
+      # Warn about shares mentioned in nas_hosts that don't exist as
+      # bind mounts — likely a typo or a share not added yet. Non-fatal.
+      for s in "''${!share_seen[@]}"; do
+        if [ ! -d "/srv/$s" ] || ! mountpoint -q "/srv/$s"; then
+          echo "nas-shares: WARNING: $hosts_file references share '$s' but /srv/$s is not a bind mount — grants ignored." >&2
+        fi
+      done
 
       # copyparty config holds plaintext passwords → readable only by root + nas.
       chown root:nas "$cpconf" 2>/dev/null || true
