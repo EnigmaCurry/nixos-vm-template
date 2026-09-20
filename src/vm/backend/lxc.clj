@@ -169,6 +169,10 @@
     (when (non-empty? (str md "/wireguard.conf"))
       (fs/create-dirs (str etc "/wireguard"))
       (proc/run! ["cp" (str md "/wireguard.conf") (str etc "/wireguard/wg0.conf")]))
+    ;; wireguard.nft -> /etc/wireguard/wireguard.nft (peer ACL body)
+    (when (non-empty? (str md "/wireguard.nft"))
+      (fs/create-dirs (str etc "/wireguard"))
+      (proc/run! ["cp" (str md "/wireguard.nft") (str etc "/wireguard/wireguard.nft")]))
     ;; /etc/nixos flake for in-guest nixos-rebuild
     (spit (str etc "/nixos/flake.nix")
           (generate-lxc-flake hostname (detect-system) prof (privileged? cfg name)))
@@ -192,6 +196,7 @@
    (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nfs_clients 2>/dev/null || true" root root)
    (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
    (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
+   (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/nixos/flake.nix %s/etc/nixos/flake.lock 2>/dev/null || true" root root)
    ;; chown the whole /etc/ssh dir (not just authorized_keys.d): sshd StrictModes
    ;; checks every parent directory of the authorized_keys file.

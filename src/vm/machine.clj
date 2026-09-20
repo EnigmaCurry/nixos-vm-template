@@ -160,6 +160,68 @@
                            {:in priv})]
     {:private priv :public pub}))
 
+(def ^:private wireguard-nft-template
+  "Commented wireguard.nft seeded whenever the wireguard profile is selected.
+  Two chains (wg-input, wg-forward) both default-drop until users add rules."
+  (str/join "\n"
+            ["# WireGuard peer ACL — nftables rules for wg0 traffic on this VM."
+             "# Read at boot by the wireguard profile."
+             "#"
+             "# Two chains govern wg0 traffic:"
+             "#"
+             "#   wg-input   — traffic from wg0 hitting THIS peer's own services."
+             "#                Applies to every peer (including hubs). Because wg0"
+             "#                is in networking.firewall.trustedInterfaces, this"
+             "#                chain is the SOLE authority for wg-side port access;"
+             "#                tcp_ports / udp_ports do not apply to wg traffic."
+             "#"
+             "#   wg-forward — traffic passing between wg peers through this peer."
+             "#                Only meaningful when this peer acts as a hub — leave"
+             "#                the chain empty (drop only) on spokes."
+             "#"
+             "# Peer names come from `# hostname: <name>` comments in this VM's"
+             "# wireguard.conf and are exposed as $name below. Bare CIDRs work too."
+             "# Reply traffic is handled by conntrack; you only describe *new*"
+             "# connections you want to permit. Both chains end with `drop`."
+             "#"
+             "# Apply changes with:  just upgrade <name>   (or  just sync-identity"
+             "# <name> + `sudo systemctl restart wireguard-nft` inside the guest)."
+             "#"
+             "# Default is deny-everything: if this file is missing (or a chain"
+             "# body is missing here), the service synthesizes a drop-only chain"
+             "# for that direction. Delete a chain to lock wg0 down completely"
+             "# for that direction."
+             ""
+             "chain wg-input {"
+             "  # Reply traffic — do not remove:"
+             "  ct state established,related accept"
+             ""
+             "  # ── Examples: allow specific wg peers to reach services on THIS VM"
+             "  # ip saddr $laptop tcp dport 22  accept    # SSH from laptop"
+             "  # ip saddr $laptop tcp dport 445 accept    # Samba from laptop"
+             "  # ip saddr $phone  tcp dport 445 accept    # Samba from phone"
+             "  # ip saddr $admin                accept    # admin peer: full access"
+             ""
+             "  # Default deny — keep as the last rule:"
+             "  drop"
+             "}"
+             ""
+             "chain wg-forward {"
+             "  # Reply traffic — do not remove:"
+             "  ct state established,related accept"
+             ""
+             "  # ── Examples: allow spoke-to-spoke traffic through this hub"
+             "  # ip saddr $laptop ip daddr $nas accept"
+             "  # ip saddr $phone  ip daddr $nas accept"
+             "  # ip saddr $laptop ip daddr $nas tcp dport 445 accept"
+             ""
+             "  # ── Unrestricted spoke-to-spoke (uncomment to disable the ACL)"
+             "  # accept"
+             ""
+             "  drop"
+             "}"
+             ""]))
+
 (defn- wireguard-template
   "wg-quick config seeded on first create when the wireguard profile is
   selected. The private key stays pinned in this file, so recreate/upgrade
@@ -175,13 +237,18 @@
              "# If you set ListenPort, also add the UDP port to udp_ports (WireGuard is UDP-only)."
              "#"
              (format "# Public key (share with peers): %s" public)
+             "#"
+             "# The `# hostname: <name>` comments below are used by the"
+             "# wireguard profile to resolve names in wireguard.nft rules."
              ""
              "[Interface]"
+             (format "# hostname: %s" name)
              (format "PrivateKey = %s" private)
              "Address    = 10.0.0.2/24"
              "ListenPort = 51820"
              ""
              "# [Peer]"
+             "# hostname: <peer-name>"
              "# PublicKey  = <peer-public-key>"
              "# Endpoint   = hub.example.com:51820"
              "# AllowedIPs = 10.0.0.0/24"
@@ -408,7 +475,14 @@
               path (str md "/wireguard.conf")]
           (spit path (wireguard-template name kp))
           (fs/set-posix-file-permissions path "rw-------")
-          (println (format "Created: %s/wireguard.conf (public key: %s)" md (:public kp))))))
+          (println (format "Created: %s/wireguard.conf (public key: %s)" md (:public kp)))))
+      ;; wireguard.nft — peer ACL template (wg-input + wg-forward chains,
+      ;; both default-drop until the user uncomments allow rules). Seeded
+      ;; alongside wireguard.conf; users can still add or delete the file
+      ;; later by hand.
+      (when (and wireguard? (not (fs/exists? (str md "/wireguard.nft"))))
+        (spit (str md "/wireguard.nft") wireguard-nft-template)
+        (println (format "Created: %s/wireguard.nft (all-commented — edit to allow wg traffic)" md))))
     ;; resolv.conf
     (when-not (fs/exists? (str md "/resolv.conf"))
       (spit (str md "/resolv.conf")

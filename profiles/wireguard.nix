@@ -10,11 +10,13 @@
 #
 # Example:
 #   [Interface]
+#   # hostname: this-vm            # optional — read by wireguard-nft
 #   PrivateKey = <this-vm-private-key>
 #   Address    = 10.0.0.2/24
-#   # ListenPort = 51820          # only for peers that accept inbound
+#   # ListenPort = 51820           # only for peers that accept inbound
 #
 #   [Peer]
+#   # hostname: hub                # optional — exposed as $hub in wireguard.nft
 #   PublicKey  = <hub-public-key>
 #   Endpoint   = hub.example.com:51820
 #   AllowedIPs = 10.0.0.0/24
@@ -24,23 +26,193 @@
 # UDP port to udp_ports (WireGuard is UDP-only). `just create` seeds a
 # fresh keypair the first time it sees the profile; recreate/upgrade
 # preserve the key because it lives in machines/<name>/wireguard.conf.
+#
+# ── Peer ACL (wireguard.nft) ─────────────────────────────────────────────
+# machines/<name>/wireguard.nft holds two nftables chains that govern
+# wg0 traffic on this VM:
+#
+#   chain wg-input   — traffic from wg0 hitting THIS peer's own services.
+#                      Authoritative for wg0 (bypasses tcp_ports/udp_ports
+#                      via networking.firewall.trustedInterfaces).
+#   chain wg-forward — traffic passing between wg peers through this peer.
+#                      Only meaningful if this peer is a hub.
+#
+# Peer names come from `# hostname: <name>` comments in wireguard.conf and
+# are exposed as `$name` variables. Each chain defaults to drop; users
+# add explicit accept rules.
+#
+# Default is deny-everything for wg0 in both directions. If wireguard.nft
+# is missing (or omits a chain body for a direction), the service
+# synthesizes a drop-only chain for that direction — so a VM with the
+# `wireguard` profile but no ACL file has wg0 fully locked down. Users
+# open traffic by writing accept rules; `just create` seeds an
+# all-commented template.
+#
+# ── Forwarding note ──────────────────────────────────────────────────────
+# net.ipv4.ip_forward is enabled unconditionally so any peer can act as a
+# hub by writing accept rules into wg-forward. Safe on single-NIC VMs (the
+# usual case in this repo). On a multi-NIC VM (bridges, docker, wlan0+eth0),
+# non-wg forwarding paths are left at the kernel default and are NOT
+# filtered by this profile — add your own drop rules if that matters.
 
 { config, lib, pkgs, ... }:
 
 let
   mutable = config.vm.mutable;
-  path = if mutable then "/etc/wireguard/wg0.conf" else "/var/identity/wireguard.conf";
+  wgConfPath = if mutable then "/etc/wireguard/wg0.conf"       else "/var/identity/wireguard.conf";
+  wgNftPath  = if mutable then "/etc/wireguard/wireguard.nft"  else "/var/identity/wireguard.nft";
+
+  builder = pkgs.writeShellScript "wireguard-nft-build" ''
+    set -euo pipefail
+
+    wg_conf=${wgConfPath}
+    wg_nft=${wgNftPath}
+
+    # No wg config -> tear down any prior table and exit clean; wg-quick
+    # isn't running so wg0 doesn't exist and there's nothing to filter.
+    if [ ! -f "$wg_conf" ]; then
+      ${pkgs.nftables}/bin/nft "add table inet wireguard; delete table inet wireguard" || true
+      exit 0
+    fi
+
+    # ACL is default-deny. If wireguard.nft is missing OR doesn't define a
+    # chain body for a direction, we synthesize a drop-only chain for it.
+    # Users open specific traffic by writing wg-input / wg-forward chains
+    # in machines/<name>/wireguard.nft; anything they don't allow is dropped.
+    has_input=0
+    has_forward=0
+    if [ -f "$wg_nft" ]; then
+      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-input[[:space:]]*\{'   "$wg_nft" && has_input=1 || true
+      ${pkgs.gnugrep}/bin/grep -qE '^[[:space:]]*chain[[:space:]]+wg-forward[[:space:]]*\{' "$wg_nft" && has_forward=1 || true
+    fi
+
+    ruleset=$(mktemp)
+    trap 'rm -f "$ruleset"' EXIT
+
+    {
+      # Idempotent reset (all three statements run in one nft transaction).
+      echo "add table inet wireguard"
+      echo "delete table inet wireguard"
+      echo ""
+      echo "table inet wireguard {"
+
+      # Peer defines from `# hostname: X` comments. [Interface] uses the
+      # Address = A.B.C.D/N line; [Peer] uses AllowedIPs = A.B.C.D/N (first
+      # entry). Missing hostname -> that peer has no define and can only
+      # be referenced by bare IP.
+      ${pkgs.gawk}/bin/awk '
+        BEGIN { name = "" }
+        /^\[/ { name = "" }
+        /^#[[:space:]]*hostname:[[:space:]]*/ {
+          sub(/^#[[:space:]]*hostname:[[:space:]]*/, "");
+          name = $1;
+        }
+        /^Address[[:space:]]*=/ && name != "" {
+          split($0, parts, "=");
+          ip = parts[2];
+          gsub(/[[:space:]]/, "", ip);
+          sub(/\/.*/, "", ip);
+          printf "  define %s = %s\n", name, ip;
+          name = "";
+        }
+        /^AllowedIPs[[:space:]]*=/ && name != "" {
+          split($0, parts, "=");
+          ip = parts[2];
+          gsub(/[[:space:]]/, "", ip);
+          sub(/,.*/, "", ip);
+          sub(/\/.*/, "", ip);
+          printf "  define %s = %s\n", name, ip;
+          name = "";
+        }
+      ' "$wg_conf"
+
+      # User's chain bodies verbatim (indented one level), if present.
+      if [ -f "$wg_nft" ]; then
+        echo ""
+        ${pkgs.gawk}/bin/awk '{ print "  " $0 }' "$wg_nft"
+      fi
+
+      # Synthesize a drop-only chain for any direction the user didn't
+      # define. This is what makes the default deny-everything.
+      if [ "$has_input" = 0 ]; then
+        echo ""
+        echo "  chain wg-input {"
+        echo "    ct state established,related accept"
+        echo "    drop"
+        echo "  }"
+      fi
+
+      if [ "$has_forward" = 0 ]; then
+        echo ""
+        echo "  chain wg-forward {"
+        echo "    ct state established,related accept"
+        echo "    drop"
+        echo "  }"
+      fi
+
+      # Hook chains — always installed so the ACL is authoritative.
+      # priority filter + 1: run AFTER nixos-fw so our drop overrides its
+      # accept (wg0 is in trustedInterfaces so nixos-fw waves it through).
+      echo ""
+      echo "  chain input {"
+      echo "    type filter hook input priority filter + 1;"
+      echo "    iifname \"wg0\" jump wg-input"
+      echo "  }"
+
+      # priority filter (0): nixos-fw doesn't hook forward, so this owns
+      # the wg0->wg0 decision outright.
+      echo ""
+      echo "  chain forward {"
+      echo "    type filter hook forward priority filter;"
+      echo "    iifname \"wg0\" oifname \"wg0\" jump wg-forward"
+      echo "  }"
+
+      echo "}"
+    } > "$ruleset"
+
+    ${pkgs.nftables}/bin/nft -f "$ruleset"
+  '';
 in
 {
   environment.systemPackages = [ pkgs.wireguard-tools ];
 
-  networking.wg-quick.interfaces.wg0.configFile = path;
+  # Enable IP forwarding so this peer can act as a hub when wg-forward
+  # rules permit. See the "Forwarding note" in the header.
+  boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
+
+  # wg peers are already authenticated by key; skip nixos-fw for wg0 so
+  # the wg-input chain is the sole authority for wg-side port exposure.
+  # (The chain default-drops if wireguard.nft doesn't override it, so
+  # this "trust" is only relative to nixos-fw — traffic still has to
+  # pass wg-input.)
+  networking.firewall.trustedInterfaces = [ "wg0" ];
+
+  networking.wg-quick.interfaces.wg0.configFile = wgConfPath;
 
   systemd.services.wg-quick-wg0 = lib.mkMerge [
-    { unitConfig.ConditionPathExists = path; }
+    { unitConfig.ConditionPathExists = wgConfPath; }
     (lib.mkIf (!mutable) {
       unitConfig.RequiresMountsFor = "/var/identity";
       after = [ "var.mount" ];
     })
   ];
+
+  systemd.services.wireguard-nft = {
+    description = "Apply wireguard nftables ACLs";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "wg-quick-wg0.service" ] ++ lib.optional (!mutable) "var.mount";
+    partOf = [ "wg-quick-wg0.service" ];
+    unitConfig = {
+      ConditionPathExists = wgConfPath;
+    } // lib.optionalAttrs (!mutable) {
+      RequiresMountsFor = "/var/identity";
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${builder}";
+      ExecStop  = "${pkgs.nftables}/bin/nft delete table inet wireguard";
+      ExecStopPost = "${pkgs.coreutils}/bin/true";
+    };
+  };
 }

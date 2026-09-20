@@ -66,6 +66,7 @@
   (str/join "\n"
             (concat
              ["[Interface]"
+              (format "# hostname: %s" (:name self))
               (format "PrivateKey = %s" (:private self))
               (format "Address    = %s/%d" (:address self) (:prefix self))]
              (when-let [port (:listen-port self)]
@@ -81,7 +82,7 @@
     (str/join "\n"
               (concat
                ["[Peer]"
-                (format "# %s" (:name other))
+                (format "# hostname: %s" (:name other))
                 (format "PublicKey  = %s" (:public other))]
                (when listener-other?
                  [(format "Endpoint   = %s" (:endpoint other))])

@@ -81,8 +81,10 @@ wg-quick up wg0` for generic clients).
 - **A VM in this repo** — copy `<peer>.conf` to
   `machines/<peer>/wireguard.conf` (the wizard offers to do this for you) and
   run `just upgrade <peer>`. The hub also needs UDP `51820` (or your
-  `ListenPort`) in `machines/<peer>/udp_ports`. Profile choice is made at
-  `just create` time — see [By hand § 1](#1-create-the-nas--wireguard-container).
+  `ListenPort`) in `machines/<peer>/udp_ports`, and any peer that expects
+  inbound wg traffic needs allow rules in `machines/<peer>/wireguard.nft`
+  (see [Peer ACL](#peer-acl-wireguardnft) — default is deny). Profile
+  choice is made at `just create` time — see [By hand § 1](#1-create-the-nas--wireguard-container).
 - **A generic Linux client** — write it to `/etc/wireguard/wg0.conf`
   (mode 0600), then `sudo wg-quick up wg0` and `sudo systemctl enable
   wg-quick@wg0`.
@@ -126,6 +128,66 @@ sudo mount -t cifs //<hub-tunnel-address>/nas /mnt -o username=alice,uid=$(id -u
 
 See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
 
+## Peer ACL (`wireguard.nft`)
+
+Every VM with the `wireguard` profile loads an nftables table
+(`inet wireguard`) at boot that governs wg0 traffic on that peer.
+The rules body lives at `machines/<name>/wireguard.nft` and is seeded
+(all-commented) by `just create` alongside `wireguard.conf`.
+
+**Two chains, both default-drop.**
+
+- **`wg-input`** — traffic from wg0 hitting **this peer's** own services
+  (SSH, Samba, NFS, whatever the VM runs). Applies to every peer,
+  including hubs. Because `wg0` is set trusted, this chain is the sole
+  authority for wg-side port exposure — `tcp_ports`/`udp_ports` do
+  **not** apply to wg traffic.
+- **`wg-forward`** — traffic transiting between wg peers through this
+  peer. Only meaningful when this peer is a hub; on spokes leave the
+  chain with only its `drop` rule.
+
+**Default is deny-everything.** If `wireguard.nft` is missing, or a
+chain body is missing here, the service synthesizes a drop-only chain
+for that direction. A VM with the `wireguard` profile but no ACL file
+has wg0 fully locked down — you *have* to write accept rules to reach
+this peer over the tunnel. Delete a chain to keep it locked down.
+
+**Peer names.** The service parses `# hostname: <name>` comments in
+this VM's `wireguard.conf` (both `[Interface]` and each `[Peer]`
+block) and emits nftables `define <name> = <ipv4>` variables. Reference
+them as `$name` in rules. The wizard writes these comments; hand-written
+configs need to add them (or reference peers by bare IP).
+
+**Rule syntax.** Standard nftables expressions (see `man nft`). Reply
+traffic is handled by conntrack — only describe *new* connections to
+permit. Both chains end with `drop`.
+
+```
+# machines/<peer>/wireguard.nft — examples
+chain wg-input {
+  ct state established,related accept
+  ip saddr $laptop tcp dport 22  accept    # SSH from laptop peer
+  ip saddr $laptop tcp dport 445 accept    # Samba
+  ip saddr $admin               accept    # broad allow for admin peer
+  drop
+}
+
+chain wg-forward {
+  ct state established,related accept
+  ip saddr $laptop ip daddr $nas               accept   # laptop -> nas
+  ip saddr $phone  ip daddr $nas tcp dport 445 accept   # phone -> nas Samba
+  drop
+}
+```
+
+Apply changes with `just upgrade <name>` (immutable) or
+`just sync-identity <name>` + `sudo systemctl restart wireguard-nft`
+inside the guest (mutable). Verify:
+
+```bash
+sudo nft list table inet wireguard    # sees $peer defines + both chains
+```
+
 ## Troubleshooting
 
 **No handshakes** (`latest handshake:` missing in `wg show`)
@@ -137,6 +199,19 @@ See [PROXMOX_LXC.md](PROXMOX_LXC.md) for the full `nas_acl` grammar.
 **Tunnel up, Samba unreachable**
 - Confirm Samba is listening: `sudo ss -tlnp | grep :445` on the hub.
 - ACL entry missing — check `machines/<hub>/nas_acl` and re-apply.
+- Peer ACL dropping the traffic — check `sudo nft list table inet
+  wireguard` on the hub. The `wg-input` chain must explicitly allow the
+  spoke (e.g. `ip saddr $laptop tcp dport 445 accept`); see
+  [Peer ACL](#peer-acl-wireguardnft).
+
+**Spoke-to-spoke traffic silently dropped**
+- Expected when the hub's `wireguard.nft` `wg-forward` chain has no
+  matching allow rule (default is deny). Uncomment or add rules, then
+  `just upgrade <hub>` (or restart the `wireguard-nft` unit on the hub).
+- Rules using `$peer` names silently drop packets if the hub's
+  `wireguard.conf` has no matching `# hostname: <peer>` comment — check
+  with `sudo nft list table inet wireguard` and confirm the `define
+  <peer> = ...` line is present.
 
 **Config change not applied after edit**
 - `just upgrade <name>` reinjects `wireguard.conf` and restarts wg-quick.
@@ -208,22 +283,20 @@ piece by piece, or need to add a single peer to an existing deployment.
 ### 1. Create the nas + wireguard container
 
 ```bash
-just create mynas nas,wireguard,wireguard-hub
+just create mynas nas,wireguard
 ```
 
-Profile split (set once at create time; not changed by `just upgrade`):
-
-- **`wireguard`** — client / spoke role. Every peer that runs a tunnel
-  gets this. A roaming laptop or phone-adjacent VM uses **only** this.
-- **`wireguard-hub`** — server / hub role. Adds IPv4 forwarding so
-  spoke-to-spoke traffic transits this peer. Add **in addition to**
-  `wireguard`, and **only** on the peer(s) acting as hub. Do not add to
-  roaming clients: forwarding on a multi-homed spoke turns it into an
-  unintended router.
+There is a single `wireguard` profile for every peer (client or hub
+alike); role differentiation happens in `wireguard.nft`. On a hub, add
+allow rules to `wg-forward`; on a spoke, leave that chain default-drop.
+On a multi-NIC VM (multiple bridges, wlan0+eth0), be aware that IP
+forwarding is enabled globally by the profile — non-wg forwarding
+paths aren't filtered by this ACL.
 
 Seeds `machines/mynas/wireguard.conf` (fresh keypair, `Address = 10.0.0.2/24`,
 `ListenPort = 51820`, commented `[Peer]` template) plus `udp_ports` (`51820`
-already listed) and the nas identity files.
+already listed), an all-commented `wireguard.nft` (peer ACL — see
+[Peer ACL](#peer-acl-wireguardnft)), and the nas identity files.
 
 Note the public key for later:
 
