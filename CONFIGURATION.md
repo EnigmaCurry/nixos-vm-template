@@ -22,7 +22,7 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `pci_devices` - Proxmox PCI passthrough (proxmox backend only); one `--hostpciN` spec per line. See [PROXMOX.md](PROXMOX.md#gpu-passthrough).
 
 These files are generated during `just create` and preserved across
-`just upgrade` and `just recreate`.
+`just upgrade`, `just sync-identity`, and `just recreate`.
 
 ## Custom Firewall Ports
 
@@ -48,7 +48,8 @@ Lines starting with `#` are treated as comments.
 | VM Type | Rule Location | Applied By | Update Method |
 |---------|---------------|------------|---------------|
 | Immutable / Semi-mutable | `/var/identity/tcp_ports`, `/var/identity/udp_ports` | `firewall-identity.service` at boot | `just upgrade` syncs from machine config |
-| Mutable | `/etc/firewall-ports/tcp_ports`, `/etc/firewall-ports/udp_ports` | `firewall-ports.service` at boot | `just recreate` (or edit files in VM) |
+| Mutable KVM | `/etc/firewall-ports/tcp_ports`, `/etc/firewall-ports/udp_ports` | `firewall-ports.service` at boot | `just recreate` (or edit files in VM) |
+| LXC | `/etc/firewall-ports/tcp_ports`, `/etc/firewall-ports/udp_ports` | `firewall-ports.service` at boot | `just sync-identity` (or edit files in VM) |
 
 Both services use iptables to insert rules into the `nixos-fw` chain at boot.
 For mutable VMs, you can also edit the files directly inside the VM and reboot,

@@ -39,7 +39,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "semi-mutable" "mutable" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "traefik" "semi-mutable" "mutable" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
@@ -149,6 +149,12 @@
               };
               systemd.network.wait-online.enable = false;
               services.resolved.enable = true;
+              # LXC (especially unprivileged) doesn't expose the user/mount
+              # namespaces nix's build sandbox needs. Bake this into the image
+              # so the very first in-container `nixos-rebuild switch` works —
+              # setting it only in the injected /etc/nixos flake would be
+              # chicken-and-egg (the running daemon still has sandbox on).
+              nix.settings.sandbox = false;
             }
           ];
         }).config.system.build.tarball;

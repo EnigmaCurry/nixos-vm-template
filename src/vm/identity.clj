@@ -31,6 +31,8 @@
    {:file "samba_client_shares"  :mode "0644"}
    {:file "wireguard.conf"       :mode "0600"}
    {:file "wireguard.nft"        :mode "0644"}
+   {:file "acme-dns.env"  :mode "0600"}
+   {:file "acme-dns.json" :mode "0600"}
    {:file "ssh_host_ed25519_key"     :mode "0600" :filter :strip-comments}
    {:file "ssh_host_ed25519_key.pub" :mode "0644" :filter :strip-comments}])
 
@@ -73,6 +75,29 @@
   "A single guestfish sub-command, prefixed by the ':' separator token."
   [& toks]
   (cons ":" (map str toks)))
+
+(defn traefik-guestfish-cmds
+  "Guestfish tokens to stage machines/<name>/traefik/ (if present) as a
+  subdirectory of `dest-parent` on the guest. Used both for immutable
+  (dest-parent=/identity) and mutable (dest-parent=/etc) paths. Idempotent:
+  removes any prior tree at dest-parent/traefik first, then re-copies. Files
+  get 0644, dirs 0755, all root:root."
+  [machine-dir dest-parent]
+  (let [src (str machine-dir "/traefik")]
+    (when (fs/directory? src)
+      (let [dst (str dest-parent "/traefik")
+            entries (->> (fs/glob src "**") sort)]
+        (concat (cmd "rm-rf" dst)
+                (cmd "copy-in" src dest-parent)
+                (cmd "chmod" "0755" dst)
+                (cmd "chown" "0" "0" dst)
+                (mapcat (fn [p]
+                          (let [rel (str (fs/relativize src p))
+                                d (str dst "/" rel)
+                                mode (if (fs/directory? p) "0755" "0644")]
+                            (concat (cmd "chmod" mode d)
+                                    (cmd "chown" "0" "0" d))))
+                        entries))))))
 
 (defn- identity-file-cmds
   "Guestfish tokens for one identity-table entry (copy/touch + chmod + chown).
@@ -127,7 +152,8 @@
                             (concat (cmd "copy-in" (str k) "/identity/deploy_keys/")
                                     (cmd "chmod" "0600" dst)
                                     (cmd "chown" "0" "0" dst))))
-                        keys)))))))
+                        keys)))
+      (traefik-guestfish-cmds machine-dir "/identity")))))
 
 (defn guestfish-sync-cmds
   "Build the guestfish token vector (beginning at `run`) that mounts an existing
@@ -173,6 +199,8 @@
       (present "samba_client_shares" "0644")
       (present "wireguard.conf" "0600")
       (present "wireguard.nft" "0644")
+      (present "acme-dns.env" "0600")
+      (present "acme-dns.json" "0600")
       (when-let [keys (deploy-keys machine-dir)]
         (concat (cmd "mkdir-p" "/identity/deploy_keys")
                 (mapcat (fn [k]
@@ -181,7 +209,8 @@
                             (concat (cmd "copy-in" (str k) "/identity/deploy_keys/")
                                     (cmd "chmod" "0600" dst)
                                     (cmd "chown" "0" "0" dst))))
-                        keys)))))))
+                        keys)))
+      (traefik-guestfish-cmds machine-dir "/identity")))))
 
 ;; ─── proxmox: rsync staging + remote chmod plan ──────────────────────────────
 
@@ -193,7 +222,7 @@
   ["admin_authorized_keys" "user_authorized_keys" "tcp_ports" "udp_ports"
    "resolv.conf" "hosts" "root_password_hash" "static_ip" "allowed_cidrs"
    "ca-cert.pem" "woodpecker.env" "samba_credentials" "samba_client_shares"
-   "wireguard.conf" "wireguard.nft"])
+   "wireguard.conf" "wireguard.nft" "acme-dns.env" "acme-dns.json"])
 
 (defn stage-identity!
   "Populate a fresh temp dir with hostname/machine-id (no trailing newline) plus
@@ -211,6 +240,9 @@
       (fs/create-dirs (str tmp "/deploy_keys"))
       (doseq [k keys]
         (fs/copy k (str tmp "/deploy_keys/" (fs/file-name k)) {:replace-existing true})))
+    (let [tsrc (str machine-dir "/traefik")]
+      (when (fs/directory? tsrc)
+        (fs/copy-tree tsrc (str tmp "/traefik") {:replace-existing true})))
     tmp))
 
 (defn proxmox-perm-cmds
@@ -235,6 +267,9 @@
      (chmod "0644" "samba_client_shares")
      (chmod "0600" "wireguard.conf")
      (chmod "0644" "wireguard.nft")
+     (chmod "0600" "acme-dns.env")
+     (chmod "0600" "acme-dns.json")
      (format "chmod 0700 %s/deploy_keys 2>/dev/null || true" id)
      (format "find %s/deploy_keys -type f -exec chmod 0600 {} + 2>/dev/null || true" id)
+     (format "if [ -d %s/traefik ]; then find %s/traefik -type d -exec chmod 0755 {} + && find %s/traefik -type f -exec chmod 0644 {} +; fi" id id id)
      (format "chown -R 0:0 %s/" id)]))

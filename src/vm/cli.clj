@@ -9,6 +9,7 @@
             [vm.net :as net]
             [vm.wizard :as wizard]
             [vm.wireguard :as wg]
+            [vm.acme :as acme]
             [vm.proc :as proc]
             [vm.backend :as b]
             [vm.backend.libvirt :as lv]
@@ -172,6 +173,8 @@
                                           :network (arg a 5 "nat") :static-ip (arg a 6 "")})
       "network-config" (net/network-config-interactive cfg (arg a 0 nil) (arg a 1 ""))
       "wireguard"      (wg/command cfg (arg a 0 nil))
+      "acme-register"  (acme/cmd-register cfg (arg a 0 nil) (arg a 1 nil))
+      "acme-verify"    (acme/cmd-verify cfg (arg a 0 nil) (arg a 1 nil))
       "passwd"        (machine/set-password cfg (arg a 0 nil))
       "set-profile"   (machine/set-profile cfg (arg a 0 nil) (str/join "," (rest a)))
       "seed-config"   (machine/seed-config cfg (arg a 0 nil))
@@ -184,6 +187,7 @@
       "clone"         ((cf cfg :clone-vm) @B cfg (arg a 0 nil) (arg a 1 nil)
                        (arg a 2 "") (arg a 3 "") (arg a 4 ""))
       "upgrade"       ((cf cfg :upgrade-vm) @B cfg (arg a 0 nil))
+      "sync-identity" (b/sync-identity @B cfg (arg a 0 nil))
       "resize"        ((cf cfg :resize-vm) @B cfg (arg a 0 nil))
       "resize-var"    ((cf cfg :resize-var) @B cfg (arg a 0 nil) (arg a 1 nil))
       "backup"        ((cf cfg :backup-vm) @B cfg (arg a 0 nil))

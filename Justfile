@@ -87,6 +87,16 @@ network-config name network="":
 wireguard hub:
     @{{VM_CLI}} wireguard "{{hub}}"
 
+# Appends credentials to machines/<vm>/acme-dns.json and prints the CNAME to publish.
+# Register a domain with the VM's acme-dns server (for Traefik ACME dnsChallenge).
+acme-register vm domain:
+    @{{VM_CLI}} acme-register "{{vm}}" "{{domain}}"
+
+# Compares the resolved CNAME target to the fulldomain in machines/<vm>/acme-dns.json.
+# Verify the _acme-challenge CNAME for a registered domain is published correctly.
+acme-verify vm domain:
+    @{{VM_CLI}} acme-verify "{{vm}}" "{{domain}}"
+
 # Start a VM
 start name:
     @{{VM_CLI}} start "{{name}}"
@@ -147,6 +157,10 @@ push-sway-home sway_home="../sway-home":
 # Upgrade a VM to a new image (preserves /var data)
 upgrade name:
     @{{VM_CLI}} upgrade "{{name}}"
+
+# Sync machine-dir identity + config files onto an existing VM (stops it, injects, restarts)
+sync-identity name:
+    @{{VM_CLI}} sync-identity "{{name}}"
 
 # Resize VM resources interactively (memory, vcpus, /var disk)
 resize name:

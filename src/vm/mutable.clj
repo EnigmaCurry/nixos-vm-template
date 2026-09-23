@@ -241,6 +241,22 @@
                          (c "chmod" "0600" "/etc/wireguard/wg0.conf")
                          (c "chown" "0" "0" "/etc/wireguard")
                          (c "chown" "0" "0" "/etc/wireguard/wg0.conf")))))
+        ;; chain 2c: machines/<name>/traefik/ -> /etc/traefik/ (recursive).
+        (when (fs/directory? (str md "/traefik"))
+          (gf! cfg disk-path
+               (concat ["run"] (c "mount" nixos-dev "/")
+                       (identity/traefik-guestfish-cmds md "/etc"))))
+        ;; chain 2d: acme-dns provider config -> /etc/acme-dns.{env,json}.
+        ;; Loaded by traefik.service via EnvironmentFile=-/etc/acme-dns.env;
+        ;; both absent = feature off.
+        (doseq [leaf ["acme-dns.env" "acme-dns.json"]]
+          (let [src (str md "/" leaf)]
+            (when (non-empty? src)
+              (gf! cfg disk-path
+                   (concat ["run"] (c "mount" nixos-dev "/")
+                           (c "copy-in" src "/etc/")
+                           (c "chmod" "0600" (str "/etc/" leaf))
+                           (c "chown" "0" "0" (str "/etc/" leaf)))))))
         ;; chain 3: /etc/nixos flake + modules + profiles
         (spit (str tmp "/flake.nix") (generate-mutable-flake hostname (detect-system) prof))
         (proc/run! ["cp" (str repo "/flake.lock") (str tmp "/flake.lock")])

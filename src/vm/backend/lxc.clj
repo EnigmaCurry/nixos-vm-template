@@ -46,6 +46,10 @@
          "        specialArgs = {\n"
          "          inherit sway-home nix-flatpak;\n"
          "          swayHomeInputs = sway-home.inputs;\n"
+         "          # modules/image-version.nix requires this. The main flake\n"
+         "          # computes it from git/self at image build time; inside the\n"
+         "          # container `self` has no git metadata, so we pass a stub.\n"
+         "          imageVersion = \"in-container-rebuild\\n\";\n"
          "        };\n"
          "        modules = [\n"
          "          ./modules\n"
@@ -64,6 +68,10 @@
          "            systemd.network.networks.\"10-eth0\" = { matchConfig.Name = \"eth0\"; networkConfig.DHCP = \"yes\"; };\n"
          "            systemd.network.wait-online.enable = false;\n"
          "            services.resolved.enable = true;\n"
+         "            # LXC (especially unprivileged) doesn't expose the kernel\n"
+         "            # user/mount namespaces nix's build sandbox needs. Disable\n"
+         "            # so `nixos-rebuild switch` inside the container works.\n"
+         "            nix.settings.sandbox = false;\n"
          "          }\n"
          "        ];\n"
          "      };\n"
@@ -175,6 +183,16 @@
     (when (non-empty? (str md "/wireguard.nft"))
       (fs/create-dirs (str etc "/wireguard"))
       (proc/run! ["cp" (str md "/wireguard.nft") (str etc "/wireguard/wireguard.nft")]))
+    ;; traefik/ -> /etc/traefik/ (recursive; the traefik profile reads
+    ;; /etc/traefik/traefik.yml + dynamic/*.yml in mutable/LXC mode).
+    (when (fs/directory? (str md "/traefik"))
+      (fs/copy-tree (str md "/traefik") (str etc "/traefik") {:replace-existing true}))
+    ;; acme-dns provider config for traefik's built-in ACME client. Loaded by
+    ;; traefik.service via EnvironmentFile=-/etc/acme-dns.env; storage JSON is
+    ;; referenced by ACME_DNS_STORAGE_PATH inside that env file. Both absent =
+    ;; feature disabled.
+    (cp (str md "/acme-dns.env")  (str etc "/acme-dns.env"))
+    (cp (str md "/acme-dns.json") (str etc "/acme-dns.json"))
     ;; /etc/nixos flake for in-guest nixos-rebuild
     (spit (str etc "/nixos/flake.nix")
           (generate-lxc-flake hostname (detect-system) prof (privileged? cfg name)))
@@ -200,6 +218,10 @@
    (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/nixos/flake.nix %s/etc/nixos/flake.lock 2>/dev/null || true" root root)
+   (format "if [ -d %s/etc/traefik ]; then find %s/etc/traefik -type d -exec chmod 0755 {} + && find %s/etc/traefik -type f -exec chmod 0644 {} + && chown -R 0:0 %s/etc/traefik; fi"
+           root root root root)
+   (format "chmod 0600 %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" root root)
+   (format "chown 0:0 %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" root root)
    ;; chown the whole /etc/ssh dir (not just authorized_keys.d): sshd StrictModes
    ;; checks every parent directory of the authorized_keys file.
    (format "chown -R 0:0 %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/wireguard %s/etc/nixos 2>/dev/null || true"
@@ -553,25 +575,30 @@
         (println (format "Start with: BACKEND=proxmox-lxc just start %s" dest))))))
 
 (defn upgrade-vm [_this cfg name]
-  ;; LXC is mutable-only. There's no host-side image swap like the KVM backends;
-  ;; instead recreate (rootfs is disposable, bind-mounted data is preserved) or
-  ;; nixos-rebuild from inside.
+  ;; LXC is mutable-only. There's no host-side image swap like the KVM backends.
+  ;; Prefer sync-identity + nixos-rebuild (preserves rootfs); recreate is the
+  ;; escape hatch when you actually want a fresh rootfs.
   (b/validate-machine! cfg name)
   (println (format "'%s' is an LXC container — there is no host-side upgrade." name))
   (println)
   (println "Pick one of these instead:")
   (println)
-  (println "1. Roll out repo changes (updated profiles/modules) — recreate.")
-  (println "   Rebuilds the rootfs from the current image (recreate does the build")
-  (println "   for you); your host ZFS bind mounts (the data) are NOT touched:")
-  (println (format "     BACKEND=proxmox-lxc just recreate %s" name))
+  (println "1. Roll out repo changes (updated profiles/modules) — preserve rootfs.")
+  (println "   Refreshes /etc/nixos + identity in-place, then rebuild inside.")
+  (println "   Keeps everything on the rootfs (installed packages, ACME state, etc.):")
+  (println (format "     BACKEND=proxmox-lxc just sync-identity %s" name))
+  (println (format "     just ssh admin@%s sudo nixos-rebuild switch" name))
   (println)
   (println "2. Ad-hoc changes from inside the container:")
   (println (format "     just ssh admin@%s" name))
   (println "     sudo nixos-rebuild switch")
-  (println "   NOTE: /etc/nixos inside the container is a snapshot from create time.")
-  (println "   To refresh it with the latest repo profiles/modules first:")
-  (println (format "     BACKEND=proxmox-lxc just sync-identity %s" name)))
+  (println "   NOTE: without a prior sync-identity, /etc/nixos is the snapshot from")
+  (println "   create time — repo-side profile/module changes won't be visible.")
+  (println)
+  (println "3. Wipe and rebuild the rootfs from the current image.")
+  (println "   Host ZFS bind mounts (the data) are NOT touched, but anything on")
+  (println "   the rootfs itself (installed packages, ACME state, etc.) is lost:")
+  (println (format "     BACKEND=proxmox-lxc just recreate %s" name)))
 
 (defn resize-var [this cfg name size]
   (pc/validate! cfg)

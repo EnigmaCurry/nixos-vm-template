@@ -420,7 +420,15 @@
       : > "$smbinc"
 
       # Start the copyparty config: globals + accounts (filled from nas_passwd).
-      { echo "[global]"; echo "  usernames"; echo; echo "[accounts]"; } > "$cpconf"
+      # Trust X-Forwarded-For from loopback so copyparty logs the real client
+      # IP when it's fronted by a reverse proxy in the same container (e.g.
+      # the traefik profile). Harmless when no proxy is in front.
+      { echo "[global]";
+        echo "  usernames";
+        echo "  xff-hdr: x-forwarded-for";
+        echo "  xff-src: 127.0.0.1";
+        echo;
+        echo "[accounts]"; } > "$cpconf"
 
       # Create a system user + Samba passdb entry for each user in nas_passwd, and
       # add it to the copyparty [accounts] section.

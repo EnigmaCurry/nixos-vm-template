@@ -398,6 +398,162 @@
              "# PersistentKeepalive = 25           # send a keepalive every N sec when this peer is behind NAT"
              ""]))
 
+(defn- traefik-yml-template
+  "Static Traefik config seeded on first create when the traefik profile is
+  selected. `mutable?` decides which on-VM path the file-provider references."
+  [name mutable?]
+  (let [cfg-dir (if mutable? "/etc/traefik" "/var/identity/traefik")
+        dyn-dir (str cfg-dir "/dynamic")]
+    (str/join "\n"
+              [(format "# Traefik static config for VM '%s'." name)
+               (format "# Read at boot by services.traefik from %s/traefik.yml" cfg-dir)
+               "#"
+               (format "# Apply changes with:  just sync-identity %s" name)
+               "# then (inside the VM):    sudo systemctl restart traefik"
+               "#"
+               "# Files in dynamic/*.yml are hot-reloaded by Traefik itself."
+               "#"
+               "# Docs: https://doc.traefik.io/traefik/reference/install-configuration/introduction/"
+               ""
+               "global:"
+               "  checkNewVersion: false"
+               "  sendAnonymousUsage: false"
+               ""
+               "log:"
+               "  level: INFO"
+               ""
+               "# ── Entry points ────────────────────────────────────────────────────────────"
+               "# Bind on all interfaces:   address: \":80\""
+               "# Bind on a wireguard IP:   address: \"10.0.0.1:80\""
+               "# (net.ipv4.ip_nonlocal_bind=1 is set by the profile so binding an address"
+               "# that isn't up yet at boot still succeeds.)"
+               "# `http.aliasHeadersStrategy: delete` strips headers whose names alias a"
+               "# canonical header (e.g. X_Auth_User → X-Auth-User) before routing, so a"
+               "# client cannot spoof headers Traefik manages. Valid: keep|delete|reject."
+               "entryPoints:"
+               "  web:"
+               "    address: \":80\""
+               "    http:"
+               "      aliasHeadersStrategy: delete"
+               "  websecure:"
+               "    address: \":443\""
+               "    http:"
+               "      aliasHeadersStrategy: delete"
+               "    # Disable the 60s default readTimeout so long-running uploads"
+               "    # (e.g. large files via copyparty/WebDAV) aren't cut off."
+               "    transport:"
+               "      respondingTimeouts:"
+               "        readTimeout: \"0s\""
+               ""
+               "# ── Providers ───────────────────────────────────────────────────────────────"
+               "providers:"
+               "  file:"
+               (format "    directory: %s" dyn-dir)
+               "    watch: true"
+               ""
+               "# ── Dashboard (uncomment to enable) ─────────────────────────────────────────"
+               "# api:"
+               "#   dashboard: true"
+               "#   insecure: false"
+               "#"
+               "# Then expose it via a router in dynamic/, e.g.:"
+               "#   http:"
+               "#     routers:"
+               "#       dashboard:"
+               "#         rule: \"Host(`traefik.example.local`)\""
+               "#         service: api@internal"
+               "#         entryPoints: [web]"
+               ""
+               "# ── ACME / Let's Encrypt via acme-dns (uncomment + edit) ────────────────────"
+               "# Uses Traefik's built-in ACME client with the acme-dns DNS-01 provider."
+               "# Preconditions:"
+               "#   1. Populate acme-dns.env with ACME_DNS_API_BASE + register each domain:"
+               (format "#        just acme-register %s <domain>" name)
+               "#   2. Publish the CNAME record the helper prints (per domain)."
+               "#   3. Uncomment this block and set `email:`."
+               "# Certs are renewed automatically; no VM restart needed."
+               "# certificatesResolvers:"
+               "#   letsencrypt:"
+               "#     acme:"
+               "#       email: you@example.com"
+               "#       storage: /var/lib/traefik/acme.json"
+               "#       dnsChallenge:"
+               "#         provider: acmedns"
+               ""])))
+
+(defn- acme-dns-env-template
+  "Seed for machines/<name>/acme-dns.env: a systemd EnvironmentFile that
+  Traefik's built-in ACME client reads for the acme-dns DNS-01 provider.
+  The storage path is constant across modes because a boot-time helper
+  copies acme-dns.json into traefik's writable state dir; sync-identity
+  drops the workstation copy at /etc or /var/identity."
+  [_mutable?]
+  (str/join "\n"
+            ["# acme-dns provider config for Traefik's built-in ACME client (dnsChallenge)."
+             "#"
+             "# ACME_DNS_API_BASE is written on the first run of:"
+             "#   just acme-register <vm> <domain>"
+             "# which also POSTs to the acme-dns server, appends per-domain credentials to"
+             "# acme-dns.json, and prints the CNAME record to publish."
+             "#"
+             "# systemd loads this via EnvironmentFile=- on traefik.service, so an absent"
+             "# ACME_DNS_API_BASE just leaves the ACME resolver disabled at boot; lego is"
+             "# only initialized once a router in dynamic/*.yml references a certResolver."
+             "#"
+             "# ACME_DNS_STORAGE_PATH points at traefik's state dir (not the on-disk"
+             "# workstation copy): lego needs write access to save challenge state, and"
+             "# services.traefik runs with ProtectSystem=strict so /etc is read-only."
+             "# A oneshot in the traefik profile copies /etc/acme-dns.json (or"
+             "# /var/identity/acme-dns.json) into /var/lib/traefik/acme-dns.json with"
+             "# traefik ownership before the service starts."
+             ""
+             "# ACME_DNS_API_BASE=https://acme-dns.example.com:2890"
+             "ACME_DNS_STORAGE_PATH=/var/lib/traefik/acme-dns.json"
+             ""]))
+
+(def ^:private traefik-dynamic-example
+  "Placeholder dynamic-config example seeded alongside traefik.yml. Named with a
+  .disabled suffix so Traefik's file provider ignores it until the user renames."
+  (str/join "\n"
+            ["# Example dynamic Traefik config. Rename this file (drop the .disabled"
+             "# suffix) or add other *.yml files in this directory to define routers,"
+             "# services, and middlewares. Traefik hot-reloads changes."
+             "#"
+             "# The example below fronts copyparty (from the `nas` profile) on port"
+             "# 3923. copyparty terminates TLS with a self-signed cert, so the"
+             "# loadBalancer talks HTTPS to 127.0.0.1:3923 via a serversTransport"
+             "# with insecureSkipVerify (upstream is loopback; client-to-traefik TLS"
+             "# is the trust boundary that matters). The router publishes on the"
+             "# `websecure` entry point with the `letsencrypt` certresolver and"
+             "# pins the cert to the wildcard `*.nas.example.com` via `tls.domains`"
+             "# — precondition: `just acme-register <vm> '*.nas.example.com'`,"
+             "# publish the CNAME the helper prints, and uncomment the ACME block"
+             "# in ../traefik.yml. Adjust the Host rule + wildcard to match a name"
+             "# that resolves to this VM."
+             "#"
+             "# Docs: https://doc.traefik.io/traefik/reference/dynamic-configuration/file/"
+             ""
+             "# http:"
+             "#   routers:"
+             "#     copyparty:"
+             "#       rule: \"Host(`copyparty.nas.example.com`)\""
+             "#       entryPoints: [websecure]"
+             "#       service: copyparty"
+             "#       tls:"
+             "#         certResolver: letsencrypt"
+             "#         domains:"
+             "#           - main: \"*.nas.example.com\""
+             "#   services:"
+             "#     copyparty:"
+             "#       loadBalancer:"
+             "#         serversTransport: copyparty-selfsigned"
+             "#         servers:"
+             "#           - url: \"https://127.0.0.1:3923\""
+             "#   serversTransports:"
+             "#     copyparty-selfsigned:"
+             "#       insecureSkipVerify: true"
+             ""]))
+
 (defn- write-authorized-keys!
   "Port of init_machine's per-account authorized_keys handling. `account` is
   \"admin\" or \"user\"; `header-lines` are the comment header; `preset` are
@@ -538,6 +694,12 @@
           nas? (contains? profs "nas")
           samba-mount? (contains? profs "samba-mount")
           wireguard? (contains? profs "wireguard")
+          traefik? (contains? profs "traefik")
+          ;; True when the target's rootfs is writable (either the `mutable`
+          ;; profile is enabled on KVM, or the backend is proxmox-lxc which is
+          ;; mutable-only). Drives per-mode paths in seeded templates.
+          mutable? (or (contains? profs "mutable")
+                       (= (:backend cfg) "proxmox-lxc"))
           moonshine? (contains? profs "moonshine-nvidia")
           sunshine? (contains? profs "sunshine-plasma-nvidia")
           ;; Both Moonlight-protocol servers use the same well-known ports and
@@ -639,7 +801,28 @@
       ;; later by hand.
       (when (and wireguard? (not (fs/exists? (str md "/wireguard.nft"))))
         (spit (str md "/wireguard.nft") wireguard-nft-template)
-        (println (format "Created: %s/wireguard.nft (all-commented — edit to allow wg traffic)" md))))
+        (println (format "Created: %s/wireguard.nft (all-commented — edit to allow wg traffic)" md)))
+      ;; traefik — seed static config + empty dynamic dir with a disabled example.
+      ;; Static file path in the seed depends on mutable mode (immutable ->
+      ;; /var/identity/traefik/dynamic; mutable -> /etc/traefik/dynamic). Switching
+      ;; modes later means editing the providers.file.directory line.
+      (when traefik?
+        (let [tdir (str md "/traefik")
+              ydir (str tdir "/dynamic")]
+          (fs/create-dirs ydir)
+          (when-not (fs/exists? (str tdir "/traefik.yml"))
+            (spit (str tdir "/traefik.yml") (traefik-yml-template name mutable?))
+            (println (format "Created: %s/traefik.yml (edit to configure Traefik)" tdir)))
+          (when-not (fs/exists? (str ydir "/example.yml.disabled"))
+            (spit (str ydir "/example.yml.disabled") traefik-dynamic-example)
+            (println (format "Created: %s/example.yml.disabled (rename to *.yml to activate)" ydir))))
+        ;; acme-dns.env — seeded alongside traefik so `just acme-register` has a
+        ;; file to append ACME_DNS_API_BASE to. acme-dns.json is created lazily
+        ;; by the helper on first successful /register response.
+        (when-not (fs/exists? (str md "/acme-dns.env"))
+          (spit (str md "/acme-dns.env") (acme-dns-env-template mutable?))
+          (fs/set-posix-file-permissions (str md "/acme-dns.env") "rw-------")
+          (println (format "Created: %s/acme-dns.env (populate via `just acme-register`)" md)))))
     ;; resolv.conf
     (when-not (fs/exists? (str md "/resolv.conf"))
       (spit (str md "/resolv.conf")
