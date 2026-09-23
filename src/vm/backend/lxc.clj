@@ -183,6 +183,8 @@
     (when (non-empty? (str md "/wireguard.nft"))
       (fs/create-dirs (str etc "/wireguard"))
       (proc/run! ["cp" (str md "/wireguard.nft") (str etc "/wireguard/wireguard.nft")]))
+    ;; wg_users -> /etc/wg_users (traefik-wg-users generator reads this)
+    (cp (str md "/wg_users") (str etc "/wg_users"))
     ;; traefik/ -> /etc/traefik/ (recursive; the traefik profile reads
     ;; /etc/traefik/traefik.yml + dynamic/*.yml in mutable/LXC mode).
     (when (fs/directory? (str md "/traefik"))
@@ -199,6 +201,10 @@
     (proc/run! ["cp" (str repo "/flake.lock") (str etc "/nixos/flake.lock")])
     (proc/run! ["cp" "-r" "--no-preserve=mode" (str repo "/modules") (str etc "/nixos/modules")])
     (proc/run! ["cp" "-r" "--no-preserve=mode" (str repo "/profiles") (str etc "/nixos/profiles")])
+    ;; Source trees referenced by profile callPackage calls (relative paths
+    ;; from /etc/nixos/profiles/foo.nix resolve into /etc/nixos/src/...).
+    (fs/create-dirs (str etc "/nixos/src"))
+    (proc/run! ["cp" "-r" "--no-preserve=mode" (str repo "/src/wg-auth") (str etc "/nixos/src/wg-auth")])
     tmp))
 
 (defn- rootfs-perm-cmds [root]
@@ -217,6 +223,8 @@
    (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
    (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)
+   (format "chmod 0644 %s/etc/wg_users 2>/dev/null || true" root)
+   (format "chown 0:0 %s/etc/wg_users 2>/dev/null || true" root)
    (format "chmod 0644 %s/etc/nixos/flake.nix %s/etc/nixos/flake.lock 2>/dev/null || true" root root)
    (format "if [ -d %s/etc/traefik ]; then find %s/etc/traefik -type d -exec chmod 0755 {} + && find %s/etc/traefik -type f -exec chmod 0644 {} + && chown -R 0:0 %s/etc/traefik; fi"
            root root root root)
