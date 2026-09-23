@@ -248,6 +248,41 @@
                            {:in priv})]
     {:private priv :public pub}))
 
+(def ^:private wg-users-template
+  "Commented wg_users seeded when both wireguard and traefik profiles are
+  selected. Consumed by the wg-auth service (wired in by the traefik profile)
+  to inject an X-Remote-User header based on the wg-peer source IP."
+  (str/join "\n"
+            ["# wg_users — wireguard peer -> user identity mapping."
+             "#"
+             "# The wg-auth service (shipped by the traefik profile when wg is"
+             "# enabled) reads this file and, for each incoming request whose"
+             "# source IP matches a listed peer's AllowedIPs (looked up in"
+             "# wireguard.conf), returns an X-Remote-User header for Traefik"
+             "# to attach to the proxied request. Attach the wg-user or"
+             "# wg-required middleware to a router in traefik/dynamic/*.yml"
+             "# to opt that route into the injection."
+             "#"
+             "# Format: <wg-peer>  <user>"
+             "#   wg-peer  a peer name (the `# hostname:` comment above a"
+             "#            [Peer] block in wireguard.conf)."
+             "#   user     a string echoed back as X-Remote-User. Downstream"
+             "#            services decide what it means (e.g. copyparty's"
+             "#            idp-h-usr matches it against its own accounts)."
+             "#"
+             "# Multiple wg peers (i.e. multiple devices) may map to the same"
+             "# user — list one line per peer. Unlisted peers pass through"
+             "# with no identity asserted (wg-user) or get 403 (wg-required)."
+             "#"
+             "# Apply changes with:  just sync-identity <name>"
+             "#"
+             "# Examples:"
+             "#   laptop     alice"
+             "#   phone      alice"
+             "#   admin      alice"
+             "#   guest-pc   bob"
+             ""]))
+
 (def ^:private wireguard-nft-template
   "Commented wireguard.nft seeded whenever the wireguard profile is selected.
   Two chains (wg-input, wg-forward) both default-drop until users add rules."
@@ -464,6 +499,26 @@
                "#         service: api@internal"
                "#         entryPoints: [web]"
                ""
+               "# ── Wireguard peer → user injection (wg-auth) ───────────────────────────────"
+               "# When the wireguard profile is also enabled, the traefik profile ships"
+               "# two forward-auth middlewares (defined in the generated"
+               "# dynamic/wg-users.yml — do not hand-edit that file):"
+               "#"
+               "#   wg-user      Attach X-Remote-User to the proxied request when the"
+               "#                source IP matches a wg peer listed in machines/<name>/wg_users."
+               "#                Unmapped peers pass through with no identity asserted."
+               "#   wg-required  Same, but return 403 for unmapped peers (peers-only site)."
+               "#"
+               "# Both fail closed if the map is unavailable or the auth service is down."
+               "# Attach either to a router in dynamic/*.yml, e.g.:"
+               "#   http:"
+               "#     routers:"
+               "#       copyparty:"
+               "#         rule: \"Host(`copyparty.nas.example.com`)\""
+               "#         entryPoints: [websecure]"
+               "#         middlewares: [wg-user]"
+               "#         service: copyparty"
+               "#"
                "# ── ACME / Let's Encrypt via acme-dns (uncomment + edit) ────────────────────"
                "# Uses Traefik's built-in ACME client with the acme-dns DNS-01 provider."
                "# Preconditions:"
@@ -538,6 +593,10 @@
              "#     copyparty:"
              "#       rule: \"Host(`copyparty.nas.example.com`)\""
              "#       entryPoints: [websecure]"
+             "#       # Optional: with the wireguard profile also enabled, attach"
+             "#       # wg-user to auto-authenticate mapped wg peers as their user"
+             "#       # (or wg-required for a peers-only site). See wg_users."
+             "#       # middlewares: [wg-user]"
              "#       service: copyparty"
              "#       tls:"
              "#         certResolver: letsencrypt"
@@ -802,6 +861,11 @@
       (when (and wireguard? (not (fs/exists? (str md "/wireguard.nft"))))
         (spit (str md "/wireguard.nft") wireguard-nft-template)
         (println (format "Created: %s/wireguard.nft (all-commented — edit to allow wg traffic)" md)))
+      ;; wg_users — traefik + wireguard together: seed the peer→user map
+      ;; consumed by the wg-auth service. All-commented = no auto-login.
+      (when (and traefik? wireguard? (not (fs/exists? (str md "/wg_users"))))
+        (spit (str md "/wg_users") wg-users-template)
+        (println (format "Created: %s/wg_users (all-commented — edit to auto-authenticate wg peers)" md)))
       ;; traefik — seed static config + empty dynamic dir with a disabled example.
       ;; Static file path in the seed depends on mutable mode (immutable ->
       ;; /var/identity/traefik/dynamic; mutable -> /etc/traefik/dynamic). Switching

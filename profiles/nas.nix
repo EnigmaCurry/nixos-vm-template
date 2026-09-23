@@ -423,10 +423,24 @@
       # Trust X-Forwarded-For from loopback so copyparty logs the real client
       # IP when it's fronted by a reverse proxy in the same container (e.g.
       # the traefik profile). Harmless when no proxy is in front.
+      #
+      # rproxy: -1 picks the LAST X-Forwarded-For entry (what traefik itself
+      # appended = the real TCP source), not the first. A client sending its
+      # own X-Forwarded-For prefix cannot displace traefik's entry, so the
+      # ipu/ipar auto-login rules see only traefik-verified IPs.
+      #
+      # idp-h-usr: x-remote-user makes copyparty trust the pre-authenticated
+      # username the wg-auth service injects via the traefik wg-user /
+      # wg-required middlewares (see profiles/wg-auth.nix). auth-ord runs
+      # idp first, then ipu (unused here), then pw so users on unmapped
+      # wg peers or off-wg still get the normal password prompt.
       { echo "[global]";
         echo "  usernames";
         echo "  xff-hdr: x-forwarded-for";
         echo "  xff-src: 127.0.0.1";
+        echo "  rproxy: -1";
+        echo "  idp-h-usr: x-remote-user";
+        echo "  auth-ord: idp,ipu,pw";
         echo;
         echo "[accounts]"; } > "$cpconf"
 

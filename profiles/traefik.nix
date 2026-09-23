@@ -65,6 +65,11 @@ let
   acmeDnsJsonDst = "/var/lib/traefik/acme-dns.json";
 in
 {
+  # Ship wg-auth alongside traefik — provides the wg-user / wg-required
+  # middlewares that map wg-peer source IPs to X-Remote-User for downstream
+  # services. See profiles/wg-auth.nix.
+  imports = [ ./wg-auth.nix ];
+
   services.traefik = {
     enable = true;
     staticConfigFile = staticFile;

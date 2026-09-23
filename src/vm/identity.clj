@@ -31,6 +31,7 @@
    {:file "samba_client_shares"  :mode "0644"}
    {:file "wireguard.conf"       :mode "0600"}
    {:file "wireguard.nft"        :mode "0644"}
+   {:file "wg_users"             :mode "0644"}
    {:file "acme-dns.env"  :mode "0600"}
    {:file "acme-dns.json" :mode "0600"}
    {:file "ssh_host_ed25519_key"     :mode "0600" :filter :strip-comments}
@@ -199,6 +200,7 @@
       (present "samba_client_shares" "0644")
       (present "wireguard.conf" "0600")
       (present "wireguard.nft" "0644")
+      (present "wg_users" "0644")
       (present "acme-dns.env" "0600")
       (present "acme-dns.json" "0600")
       (when-let [keys (deploy-keys machine-dir)]
@@ -222,7 +224,7 @@
   ["admin_authorized_keys" "user_authorized_keys" "tcp_ports" "udp_ports"
    "resolv.conf" "hosts" "root_password_hash" "static_ip" "allowed_cidrs"
    "ca-cert.pem" "woodpecker.env" "samba_credentials" "samba_client_shares"
-   "wireguard.conf" "wireguard.nft" "acme-dns.env" "acme-dns.json"])
+   "wireguard.conf" "wireguard.nft" "wg_users" "acme-dns.env" "acme-dns.json"])
 
 (defn stage-identity!
   "Populate a fresh temp dir with hostname/machine-id (no trailing newline) plus
@@ -267,6 +269,7 @@
      (chmod "0644" "samba_client_shares")
      (chmod "0600" "wireguard.conf")
      (chmod "0644" "wireguard.nft")
+     (chmod "0644" "wg_users")
      (chmod "0600" "acme-dns.env")
      (chmod "0600" "acme-dns.json")
      (format "chmod 0700 %s/deploy_keys 2>/dev/null || true" id)

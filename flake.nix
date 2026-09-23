@@ -195,6 +195,7 @@
         )
         // {
           default = mkProfileImage system "core";
+          wg-auth = nixpkgs.legacyPackages.${system}.callPackage ./src/wg-auth/package.nix { };
         }
       );
 
