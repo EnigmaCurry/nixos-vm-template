@@ -789,9 +789,10 @@
                             ssh-key-mode user-keys)
     ;; SSH host key templates (populate BEFORE create/recreate to pin the key)
     (seed-ssh-host-key-templates! md name)
-    ;; tcp_ports — seeded once at creation; the nas / moonshine-nvidia /
-    ;; sunshine-plasma-nvidia profiles add their service ports here (not in the
-    ;; image) so they stay visible/editable. Remove any you don't want exposed.
+    ;; tcp_ports — seeded once at creation. Only port 22 (ssh) is uncommented
+    ;; by default; all other examples (including nas / moonshine-nvidia /
+    ;; sunshine-plasma-nvidia service ports) are seeded commented-out so
+    ;; operators explicitly opt into each exposure.
     (let [profs (set (map str/trim (str/split (or profile "") #",")))
           nas? (contains? profs "nas")
           samba-mount? (contains? profs "samba-mount")
@@ -813,15 +814,17 @@
         (spit (str md "/tcp_ports")
               (str/join "\n" (concat ["# TCP ports to open in firewall (one per line)"
                                       (format "# Run 'just upgrade %s' to apply changes." name)
-                                      "22" "80" "443"]
+                                      "22"
+                                      "# 80"
+                                      "# 443"]
                                      (when nas?
                                        ["# nas profile — SMB (445), NFSv4 (2049), WSD (5357):"
                                         "# copyparty listens on loopback only; HTTP/WebDAV goes via traefik."
-                                        "445" "2049" "5357"])
+                                        "# 445" "# 2049" "# 5357"])
                                      (when streaming?
                                        [(format "# %s — Moonlight HTTPS (47984), HTTP (47989), RTSP (48010):"
                                                 streaming-label)
-                                        "47984" "47989" "48010"])
+                                        "# 47984" "# 47989" "# 48010"])
                                      [""])))
         (println (format "Created: %s/tcp_ports%s" md
                          (str/join "" [(when nas? " + nas")
