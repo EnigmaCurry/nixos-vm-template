@@ -388,7 +388,9 @@ done 2>/dev/null"]
       :else
       (loop [acc []]
         (let [dataset (choose-dataset cfg pools)
-              ctpath (str "/srv/" (subvol-leaf dataset))
+              default-ctpath (str "/srv/" (subvol-leaf dataset))
+              ctpath (let [v (str/trim (prompt/ask "Container mount path:" default-ctpath))]
+                       (if (str/blank? v) default-ctpath v))
               acc' (conj acc (str dataset ":" ctpath))]
           (println (format "  Share: host %s  ->  container %s" dataset ctpath))
           (if (prompt/confirm "Bind-mount another host dataset?" :no)
