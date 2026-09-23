@@ -284,6 +284,8 @@
              "#   rpool/data/nas:/srv/nas                       dataset on stock PVE"
              "#   local-zfs/nas:/srv/nas                        via PVE storage entry"
              "#   /rust/backup/archive:/srv/archive             subdir of a dataset"
+             "#   rust/traefik-nas:/var/lib/traefik             persist state through recreate"
+             "#                                                 (traefik ACME certs, etc.)"
              ""]))
 
 (def ^:private wg-users-template
