@@ -603,31 +603,34 @@
         (println (format "Container '%s' cloned from '%s' (VMID: %s)." dest source dest-vmid))
         (println (format "Start with: BACKEND=proxmox-lxc just start %s" dest))))))
 
-(defn upgrade-vm [_this cfg name]
-  ;; LXC is mutable-only. There's no host-side image swap like the KVM backends.
-  ;; Prefer sync-identity + nixos-rebuild (preserves rootfs); recreate is the
+(defn upgrade-vm [this cfg name]
+  ;; LXC is mutable-only, so there's no host-side image swap like the KVM
+  ;; backends. Instead, "upgrade" means "roll out repo changes": sync-identity
+  ;; refreshes /etc/nixos + identity in-place (preserves rootfs), then
+  ;; nixos-rebuild switch runs inside the container. `just recreate` is the
   ;; escape hatch when you actually want a fresh rootfs.
   (b/validate-machine! cfg name)
-  (println (format "'%s' is an LXC container — there is no host-side upgrade." name))
+  (when-not (b/running? this cfg name)
+    (println (format "Error: Container '%s' is not running." name))
+    (println (format "Start it first: BACKEND=proxmox-lxc just start %s" name))
+    (System/exit 1))
+  (println (format "'%s' is an LXC container — rolling out repo changes in place." name))
+  (println "(No host-side image swap; use `just recreate` for a fresh rootfs.)")
   (println)
-  (println "Pick one of these instead:")
-  (println)
-  (println "1. Roll out repo changes (updated profiles/modules) — preserve rootfs.")
-  (println "   Refreshes /etc/nixos + identity in-place, then rebuild inside.")
-  (println "   Keeps everything on the rootfs (installed packages, ACME state, etc.):")
-  (println (format "     BACKEND=proxmox-lxc just sync-identity %s" name))
-  (println (format "     just ssh admin@%s sudo nixos-rebuild switch" name))
-  (println)
-  (println "2. Ad-hoc changes from inside the container:")
-  (println (format "     just ssh admin@%s" name))
-  (println "     sudo nixos-rebuild switch")
-  (println "   NOTE: without a prior sync-identity, /etc/nixos is the snapshot from")
-  (println "   create time — repo-side profile/module changes won't be visible.")
-  (println)
-  (println "3. Wipe and rebuild the rootfs from the current image.")
-  (println "   Host ZFS bind mounts (the data) are NOT touched, but anything on")
-  (println "   the rootfs itself (installed packages, ACME state, etc.) is lost:")
-  (println (format "     BACKEND=proxmox-lxc just recreate %s" name)))
+  (b/sync-identity this cfg name)
+  (let [ip (b/wait-for-vm-ip this cfg name)
+        ssh-user (or (System/getenv "LXC_UPGRADE_SSH_USER") "admin")]
+    (when (str/blank? ip)
+      (println (format "Error: Could not determine IP for container '%s' after sync-identity." name))
+      (System/exit 1))
+    (println)
+    (println (format "Running `sudo nixos-rebuild switch` on %s@%s..." ssh-user ip))
+    (proc/run! (concat (:ssh cfg)
+                       ["-o" "StrictHostKeyChecking=accept-new"
+                        (str ssh-user "@" ip)
+                        "sudo" "nixos-rebuild" "switch"]))
+    (println)
+    (println (format "'%s' upgraded." name))))
 
 (defn resize-var [this cfg name size]
   (pc/validate! cfg)
