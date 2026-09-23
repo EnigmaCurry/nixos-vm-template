@@ -457,7 +457,9 @@ done 2>/dev/null"]
                        ;; cloud-init is only for template builds (just cloud-template);
                        ;; hide it from the regular VM picker so users don't get a
                        ;; runtime cloud-init failure with no seed drive attached.
-                       (remove #{"cloud-init"})))
+                       ;; wg-auth is auto-imported by the traefik profile; picking
+                       ;; it standalone does nothing useful.
+                       (remove #{"cloud-init" "wg-auth"})))
           ;; ── profile(s) ──
           env-profile (some-> (System/getenv "NIXOS_VM_PROFILE") str/trim not-empty)
           profile
