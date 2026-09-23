@@ -207,33 +207,52 @@
     (proc/run! ["cp" "-r" "--no-preserve=mode" (str repo "/src/wg-auth") (str etc "/nixos/src/wg-auth")])
     tmp))
 
-(defn- rootfs-perm-cmds [root]
-  [(format "chmod 0644 %s/etc/hostname 2>/dev/null || true" root)
-   (format "chmod 0444 %s/etc/machine-id 2>/dev/null || true" root)
-   (format "chmod 0755 %s/etc/ssh/authorized_keys.d 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/ssh/authorized_keys.d/* 2>/dev/null || true" root)
-   (format "chmod 0600 %s/etc/ssh/ssh_host_ed25519_key 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null || true" root)
-   (format "chmod 0755 %s/etc/firewall-ports %s/etc/network-config 2>/dev/null || true" root root)
-   (format "chmod 0644 %s/etc/firewall-ports/* %s/etc/network-config/* 2>/dev/null || true" root root)
-   (format "chmod 0600 %s/etc/root_password_hash 2>/dev/null || true" root)
-   (format "chmod 0700 %s/etc/nas 2>/dev/null || true" root)
-   (format "chmod 0600 %s/etc/nas/nas_passwd 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nas_hosts 2>/dev/null || true" root root)
-   (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
-   (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/wg_users 2>/dev/null || true" root)
-   (format "chown 0:0 %s/etc/wg_users 2>/dev/null || true" root)
-   (format "chmod 0644 %s/etc/nixos/flake.nix %s/etc/nixos/flake.lock 2>/dev/null || true" root root)
-   (format "if [ -d %s/etc/traefik ]; then find %s/etc/traefik -type d -exec chmod 0755 {} + && find %s/etc/traefik -type f -exec chmod 0644 {} + && chown -R 0:0 %s/etc/traefik; fi"
-           root root root root)
-   (format "chmod 0600 %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" root root)
-   (format "chown 0:0 %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" root root)
-   ;; chown the whole /etc/ssh dir (not just authorized_keys.d): sshd StrictModes
-   ;; checks every parent directory of the authorized_keys file.
-   (format "chown -R 0:0 %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/wireguard %s/etc/nixos 2>/dev/null || true"
-           root root root root root root root root)])
+(defn- container-root-uid
+  "On-disk uid that maps to root inside container `vmid`. Unprivileged
+  containers return the base of `lxc.idmap: u 0 <base> <count>` from the CT
+  config (defaults to 100000, the Proxmox subuid default); privileged
+  containers return 0. Read at inject time so a customized idmap is honored.
+  Any chown against the pct-mounted rootfs from the host must use this uid —
+  chown to 0 on an unprivileged CT surfaces as `nobody:nogroup` inside the
+  container and sshd (among other things) breaks."
+  [cfg vmid]
+  (let [conf (try (pc/pve-ssh cfg (format "cat /etc/pve/lxc/%s.conf" vmid))
+                  (catch Exception _ ""))
+        unpriv? (re-find #"(?m)^unprivileged:\s*1\s*$" conf)]
+    (if-not unpriv?
+      0
+      (or (some-> (re-find #"(?m)^lxc\.idmap:\s*u\s+0\s+(\d+)\s+\d+" conf)
+                  second Long/parseLong)
+          100000))))
+
+(defn- rootfs-perm-cmds [root uid]
+  (let [own (str uid ":" uid)]
+    [(format "chmod 0644 %s/etc/hostname 2>/dev/null || true" root)
+     (format "chmod 0444 %s/etc/machine-id 2>/dev/null || true" root)
+     (format "chmod 0755 %s/etc/ssh/authorized_keys.d 2>/dev/null || true" root)
+     (format "chmod 0644 %s/etc/ssh/authorized_keys.d/* 2>/dev/null || true" root)
+     (format "chmod 0600 %s/etc/ssh/ssh_host_ed25519_key 2>/dev/null || true" root)
+     (format "chmod 0644 %s/etc/ssh/ssh_host_ed25519_key.pub 2>/dev/null || true" root)
+     (format "chmod 0755 %s/etc/firewall-ports %s/etc/network-config 2>/dev/null || true" root root)
+     (format "chmod 0644 %s/etc/firewall-ports/* %s/etc/network-config/* 2>/dev/null || true" root root)
+     (format "chmod 0600 %s/etc/root_password_hash 2>/dev/null || true" root)
+     (format "chmod 0700 %s/etc/nas 2>/dev/null || true" root)
+     (format "chmod 0600 %s/etc/nas/nas_passwd 2>/dev/null || true" root)
+     (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nas_hosts 2>/dev/null || true" root root)
+     (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
+     (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
+     (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)
+     (format "chmod 0644 %s/etc/wg_users 2>/dev/null || true" root)
+     (format "chown %s %s/etc/wg_users 2>/dev/null || true" own root)
+     (format "chmod 0644 %s/etc/nixos/flake.nix %s/etc/nixos/flake.lock 2>/dev/null || true" root root)
+     (format "if [ -d %s/etc/traefik ]; then find %s/etc/traefik -type d -exec chmod 0755 {} + && find %s/etc/traefik -type f -exec chmod 0644 {} + && chown -R %s %s/etc/traefik; fi"
+             root root root own root)
+     (format "chmod 0600 %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" root root)
+     (format "chown %s %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" own root root)
+     ;; chown the whole /etc/ssh dir (not just authorized_keys.d): sshd StrictModes
+     ;; checks every parent directory of the authorized_keys file.
+     (format "chown -R %s %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/wireguard %s/etc/nixos 2>/dev/null || true"
+             own root root root root root root root root)]))
 
 (defn- inject-rootfs!
   "Inject identity + /etc/nixos flake into a STOPPED container's rootfs.
@@ -242,18 +261,20 @@
   container's host key is not silently rotated)."
   [cfg name vmid install-host-key?]
   (let [staged (stage-rootfs-etc! cfg name install-host-key?)
-        root (format "/var/lib/lxc/%s/rootfs" vmid)]
+        root (format "/var/lib/lxc/%s/rootfs" vmid)
+        uid (container-root-uid cfg vmid)]
     (try
-      (println "Injecting identity into container rootfs...")
+      (println (format "Injecting identity into container rootfs (host uid=%d for container root)..." uid))
       (pc/pve-ssh-soft cfg (format "pct unmount %s 2>/dev/null || true" vmid))
       (pc/pve-ssh cfg (format "pct mount %s" vmid))
       (pc/pve-ssh cfg (format "mkdir -p %s/etc/ssh/authorized_keys.d %s/etc/firewall-ports %s/etc/network-config %s/etc/nixos"
                               root root root root))
       ;; --no-owner/--no-group: the staging dir is built locally as the calling
       ;; (non-root) user; preserving that uid would leave /etc/ssh owned non-root
-      ;; and sshd StrictModes would reject every key. Let remote root own it.
+      ;; and sshd StrictModes would reject every key. Let remote root own it,
+      ;; then rootfs-perm-cmds chowns to the container-root uid.
       (pc/pve-rsync-noown! cfg (str staged "/etc/") (format "%s:%s/etc/" (:pve-host cfg) root))
-      (doseq [c (rootfs-perm-cmds root)] (pc/pve-ssh-soft cfg c))
+      (doseq [c (rootfs-perm-cmds root uid)] (pc/pve-ssh-soft cfg c))
       (finally
         (pc/pve-ssh-soft cfg (format "pct unmount %s" vmid))
         (fs/delete-tree staged)))))
