@@ -118,7 +118,7 @@ func clientIP(r *http.Request) string {
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:9099", "listen address")
-	mapPath := flag.String("map", "/run/traefik/wg-users.map", "peer→user map file")
+	mapPath := flag.String("map", "/run/wg-auth/users.map", "peer→user map file")
 	flag.Parse()
 
 	m := &mapState{path: *mapPath}

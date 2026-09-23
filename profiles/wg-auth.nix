@@ -9,7 +9,7 @@
 # ── Pieces ──────────────────────────────────────────────────────────────────
 #   traefik-wg-users.service   oneshot generator. Reads wireguard.conf +
 #                              wg_users → writes:
-#                              /run/traefik/wg-users.map        (auth service input)
+#                              /run/wg-auth/users.map        (auth service input)
 #                              <dynDir>/wg-users.yml             (traefik middleware defs)
 #                              Fail-closed: parse/validation errors leave both
 #                              files removed, so routers referencing the
@@ -17,7 +17,7 @@
 #                              silently falling through.
 #
 #   wg-auth.service            Go forward-auth daemon (pkgs.wg-auth). Reads
-#                              /run/traefik/wg-users.map, listens on
+#                              /run/wg-auth/users.map, listens on
 #                              127.0.0.1:9099, serves /lookup and /require.
 #                              Runs as wg-auth:wg-auth (its own user + group).
 #
@@ -40,7 +40,7 @@
 #   - wireguard.conf absent → generator no-op → same 404 result
 #
 # ── Permissions ─────────────────────────────────────────────────────────────
-#   /run/traefik/wg-users.map        root:wg-auth 0640  (auth service reads)
+#   /run/wg-auth/users.map        root:wg-auth 0640  (auth service reads)
 #   <dynDir>/wg-users.yml            root:traefik 0644  (traefik reads)
 #
 # The traefik user has no access to the map, and the wg-auth user has no
@@ -53,7 +53,11 @@ let
   wgConf   = if mutable then "/etc/wireguard/wg0.conf"    else "/var/identity/wireguard.conf";
   wgUsers  = if mutable then "/etc/wg_users"              else "/var/identity/wg_users";
   dynDir   = if mutable then "/etc/traefik/dynamic"       else "/var/identity/traefik/dynamic";
-  mapFile  = "/run/traefik/wg-users.map";
+  # Runtime dir owned by wg-auth. The map lives here (not under /run/traefik)
+  # because traefik.service declares RuntimeDirectory=traefik, which creates
+  # /run/traefik at 0700 root:traefik and blocks traversal for wg-auth even
+  # if we chowned the map itself.
+  mapFile  = "/run/wg-auth/users.map";
   midFile  = "${dynDir}/wg-users.yml";
   authAddr = "127.0.0.1:9099";
 
@@ -111,7 +115,7 @@ in
   # /require return 500 (empty map is not the same as an error — see below —
   # but a missing map file IS an error, which is what tmpfiles prevents).
   systemd.tmpfiles.rules = [
-    "d /run/traefik 0755 root root -"
+    "d /run/wg-auth 0755 root wg-auth -"
   ];
 
   systemd.services.traefik-wg-users = {
