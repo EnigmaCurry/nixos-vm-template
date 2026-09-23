@@ -69,8 +69,22 @@ Traefik's built-in ACME client obtains certs from Let's Encrypt using the
 `machines/<name>/acme-dns.env`. The traefik profile mounts that env file
 as an `EnvironmentFile=-` on the systemd unit (non-fatal if absent).
 
-Persistent state: `/var/lib/traefik/acme.json` on the /var disk survives
-image rebuilds.
+Persistent state is `/var/lib/traefik/acme.json`. Whether it survives
+`just recreate` depends on the VM mode:
+
+- **Immutable / semi-mutable KVM**: /var is a separate disk. Certs survive
+  `just upgrade` and `just recreate`.
+- **Mutable KVM / LXC**: /var lives on the rootfs. Certs are destroyed by
+  `just recreate`. On LXC, add a `mounts` line so `/var/lib/traefik` is
+  bind-mounted from a host ZFS dataset that outlives the container:
+
+  ```
+  # machines/<name>/mounts
+  rust/traefik-<name>:/var/lib/traefik
+  ```
+
+  The dataset is auto-created on first `just create`. See
+  [MODES.md](MODES.md) for the full rebuild-vs-recreate matrix.
 
 ### Preconditions
 
