@@ -122,7 +122,17 @@ sudo wg show                        # every peer should have a recent handshake
 ping <hub-tunnel-address>           # reach the hub over the tunnel
 ```
 
-## 5. Serve Samba over the VPN
+## 5. Serve HTTP over the VPN with peer identity
+
+The `traefik` profile ships a pair of forward-auth middlewares (`wg-user`,
+`wg-required`) that pre-authenticate wg peers by source IP and forward
+their identity to downstream services as an `X-Remote-User` header —
+useful for exposing copyparty / Grafana / Gitea etc. to wg peers without
+per-service password prompts. Peer → user mapping lives in
+`machines/<name>/wg_users`. See
+[TRAEFIK.md § Peer identity injection](TRAEFIK.md#peer-identity-injection-wg-auth).
+
+## 6. Serve Samba over the VPN
 
 Add a user and grant access on the nas hub:
 

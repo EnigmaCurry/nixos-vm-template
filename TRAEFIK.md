@@ -181,6 +181,100 @@ succeeds even before wg0 is up at boot. Traffic still has to pass the
 `wg-input` chain in `wireguard.nft` — add an accept rule for tcp dport 80/443
 for the peers you want to serve.
 
+## Peer identity injection (wg-auth)
+
+When the `traefik` and `wireguard` profiles are both enabled, the traefik
+profile ships two forward-auth middlewares that map a request's source IP
+to a pre-authenticated user identity via an `X-Remote-User` header:
+
+- **`wg-user`** — attach `X-Remote-User: <user>` when the source IP is a
+  wg peer listed in `wg_users`. Unmapped peers pass through with no
+  identity asserted (the backend does its own auth).
+- **`wg-required`** — same, but return 403 for unmapped peers. Use for
+  peers-only routes.
+
+Both fail closed: if the auth service or map is unavailable, requests
+5xx rather than silently forward. If the generator fails validation, the
+middleware definitions aren't emitted and routers referencing them 404.
+
+### 1. Map peers to users
+
+Edit `machines/<name>/wg_users` (seeded as a commented template by
+`just create`):
+
+```
+# <wg-peer>  <user>
+laptop       alice
+phone        alice
+guest-pc     bob
+```
+
+Peer names come from the `# hostname:` comments above each `[Peer]`
+block in `wireguard.conf`. Multiple peers may map to the same user.
+
+### 2. Attach to a router
+
+In your `traefik/dynamic/*.yml`:
+
+```yaml
+http:
+  routers:
+    myapp:
+      rule: "Host(`myapp.example.com`)"
+      entryPoints: [websecure]
+      middlewares: [wg-required]        # or [wg-user]
+      service: myapp
+      tls: {certResolver: letsencrypt}
+```
+
+The copyparty example seeded by the `nas` profile uses `wg-required` (see
+`machines/<name>/traefik/dynamic/example.yml.disabled`).
+
+### 3. Apply
+
+```bash
+just sync-identity <name>
+# then, inside a mutable / LXC VM:
+sudo nixos-rebuild switch --flake /etc/nixos
+# — or for immutable KVM:
+just upgrade <name>
+```
+
+### 4. Verify
+
+Inside the VM:
+
+```bash
+curl -sS http://127.0.0.1:9099/healthz
+# → "ok"
+
+sudo cat /run/wg-auth/users.map
+# ip <TAB> user rows, one per mapped device
+
+curl -sSD - -H 'X-Forwarded-For: 10.0.0.5' http://127.0.0.1:9099/lookup
+# → 200 OK
+# → X-Remote-User: alice   (when 10.0.0.5 is mapped)
+```
+
+End-to-end, from a mapped wg peer:
+
+```bash
+curl https://myapp.example.com/
+```
+
+The backend service must trust the header. Copyparty is auto-configured
+by the `nas` profile (`idp-h-usr: x-remote-user`, `auth-ord: idp`). Other
+common backends support this as "reverse-proxy header auth" — e.g.
+Grafana's `auth.proxy`, Gitea's `REVERSE_PROXY_AUTHENTICATION_HEADER`.
+
+### Files added by this feature
+
+| File | Perm | Purpose |
+|------|------|---------|
+| `machines/<name>/wg_users`            | 0644 | wg peer → user mapping (source of truth) |
+| `/run/wg-auth/users.map`              | 0640 | IP → user map (generated) |
+| `/etc/traefik/dynamic/wg-users.yml`   | 0644 | Middleware definitions (generated). `/var/identity/traefik/dynamic/` on immutable. |
+
 ## Files
 
 | File | Perm | Purpose |
@@ -189,3 +283,4 @@ for the peers you want to serve.
 | `machines/<name>/traefik/dynamic/*.yml`     | 0644 | Dynamic rules (file provider) |
 | `machines/<name>/acme-dns.env`              | 0600 | `ACME_DNS_API_BASE` + `ACME_DNS_STORAGE_PATH` for the lego acmedns provider |
 | `machines/<name>/acme-dns.json`             | 0600 | Per-domain acme-dns credentials (managed by `just acme-register`) |
+| `machines/<name>/wg_users`                  | 0644 | wg peer → user mapping consumed by wg-auth (see [Peer identity injection](#peer-identity-injection-wg-auth)) |
