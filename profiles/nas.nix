@@ -436,9 +436,11 @@
       #
       # idp-h-usr: x-remote-user makes copyparty trust the pre-authenticated
       # username the wg-auth service injects via the traefik wg-user /
-      # wg-required middlewares (see profiles/wg-auth.nix). auth-ord runs
-      # idp first, then ipu (unused here), then pw so users on unmapped
-      # wg peers or off-wg still get the normal password prompt.
+      # wg-required middlewares (see profiles/wg-auth.nix). auth-ord: idp
+      # makes IdP the ONLY accepted auth method — no password fallback,
+      # no ipu path. Users without a wg_users mapping get 401 (login is
+      # not offered). Password logins for shared users still work over
+      # Samba (which has its own auth stack, unaffected by this file).
       { echo "[global]";
         echo "  usernames";
         echo "  i: 127.0.0.1";
@@ -446,7 +448,7 @@
         echo "  xff-src: 127.0.0.1";
         echo "  rproxy: -1";
         echo "  idp-h-usr: x-remote-user";
-        echo "  auth-ord: idp,ipu,pw";
+        echo "  auth-ord: idp";
         echo;
         echo "[accounts]"; } > "$cpconf"
 
