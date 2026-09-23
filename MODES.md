@@ -61,18 +61,56 @@ BACKEND=proxmox just create myvm docker,dev
 
 ### Upgrading Mutable VMs
 
-Mutable VMs cannot be upgraded from the host with `just upgrade`. Instead,
-upgrade from inside the VM:
+Mutable VMs cannot be upgraded from the host with `just upgrade`. Ship the
+latest workstation checkout with `sync-identity`, then rebuild inside the
+VM:
 
 ```bash
-# SSH into the VM
+just sync-identity myvm
 just ssh admin@myvm
+sudo nixos-rebuild switch --flake /etc/nixos
+```
 
-# Standard NixOS upgrade
-sudo nixos-rebuild switch --upgrade
+`sync-identity` stages `/etc/nixos/{flake.nix,flake.lock,modules,profiles,src}`
+on the VM as a *snapshot* of the workstation's working tree — whatever branch
+is checked out and any uncommitted edits are included, and `flake.lock` is
+copied verbatim so both sides pin the same nixpkgs. There is no git remote
+pull; to promote new code to the VM, run `sync-identity` again.
 
-# Or with a flake
-sudo nixos-rebuild switch --flake github:owner/repo#config
+### When `nixos-rebuild` is enough vs. when to recreate
+
+For feature development, most workstation changes land on the VM with
+`sync-identity` + `nixos-rebuild switch`. A few knobs live outside the
+NixOS system and require `just recreate`, which **destroys the rootfs**
+— including `/var/lib/traefik/acme.json`, container-local caches, and
+anything else not on a separate disk. (Immutable / semi-mutable VMs have
+a separate /var disk that survives recreate; mutable VMs and LXC
+containers put /var on the rootfs.)
+
+| Change type | Applies with | Preserves rootfs |
+|---|---|---|
+| Any `.nix` file (`profiles/`, `modules/`) | `sync-identity` + `nixos-rebuild switch` | ✓ |
+| Any `src/` referenced by a profile via `callPackage` | `sync-identity` + `nixos-rebuild switch` | ✓ |
+| `flake.lock` bump (nixpkgs version) | `sync-identity` + `nixos-rebuild switch` | ✓ |
+| Any identity file (SSH keys, `hosts`, `resolv.conf`, `wg_users`, `nas_acl`, …) | `sync-identity` (unit-restart handles reload) | ✓ |
+| `tcp_ports` / `udp_ports` | `sync-identity` (firewall re-applied) | ✓ |
+| `memory` / `vcpus` | `just generate-config` (host-side `qm set` / `pct set`) | ✓ |
+| LXC bind mounts (`mounts`) | `just recreate` — sync-identity does not re-apply | ✗ |
+| LXC features (`privileged`, apparmor, nesting) | `just recreate` | ✗ |
+| LXC rootfs storage backend | `just recreate` | ✗ |
+| Disk size (mutable KVM single disk) | `just recreate` | ✗ |
+
+If you need to recreate a mutable VM or LXC container without losing
+Traefik certs, back them up first:
+
+```bash
+# LXC:
+ssh <pve-host> "pct exec <vmid> -- cat /var/lib/traefik/acme.json" > acme.json.bak
+BACKEND=proxmox-lxc just recreate myvm
+ssh <pve-host> "pct exec <vmid> -- tee /var/lib/traefik/acme.json" < acme.json.bak
+ssh <pve-host> "pct exec <vmid> -- chown traefik:traefik /var/lib/traefik/acme.json && \
+                pct exec <vmid> -- chmod 600 /var/lib/traefik/acme.json && \
+                pct exec <vmid> -- systemctl restart traefik"
 ```
 
 ### Mutable VM Internals
