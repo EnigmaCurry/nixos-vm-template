@@ -836,14 +836,14 @@
                                       (format "# Run 'just upgrade %s' to apply changes." name)]
                                      (when nas?
                                        ["# nas profile — mDNS (5353), WS-Discovery (3702):"
-                                        "5353" "3702"])
+                                        "# 5353" "# 3702"])
                                      (when streaming?
                                        [(format "# %s — Moonlight video (47998), control (47999), audio (48000):"
                                                 streaming-label)
-                                        "47998" "47999" "48000"])
+                                        "# 47998" "# 47999" "# 48000"])
                                      (when wireguard?
                                        ["# wireguard profile — default ListenPort:"
-                                        "51820"])
+                                        "# 51820"])
                                      [""])))
         (println (format "Created: %s/udp_ports%s" md
                          (str/join "" [(when nas? " (nas)")
