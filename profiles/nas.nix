@@ -420,9 +420,14 @@
       : > "$smbinc"
 
       # Start the copyparty config: globals + accounts (filled from nas_passwd).
-      # Trust X-Forwarded-For from loopback so copyparty logs the real client
-      # IP when it's fronted by a reverse proxy in the same container (e.g.
-      # the traefik profile). Harmless when no proxy is in front.
+      #
+      # i: 127.0.0.1 binds copyparty to loopback only — direct network access
+      # is denied. All HTTP/WebDAV traffic must go through the traefik profile,
+      # which proxies from 127.0.0.1:3923. Prevents bypassing the wg-user /
+      # wg-required middleware chain (and TLS termination).
+      #
+      # xff-hdr / xff-src: trust X-Forwarded-For from loopback so copyparty
+      # logs the real client IP when fronted by traefik in the same container.
       #
       # rproxy: -1 picks the LAST X-Forwarded-For entry (what traefik itself
       # appended = the real TCP source), not the first. A client sending its
@@ -436,6 +441,7 @@
       # wg peers or off-wg still get the normal password prompt.
       { echo "[global]";
         echo "  usernames";
+        echo "  i: 127.0.0.1";
         echo "  xff-hdr: x-forwarded-for";
         echo "  xff-src: 127.0.0.1";
         echo "  rproxy: -1";

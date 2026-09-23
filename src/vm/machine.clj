@@ -812,8 +812,9 @@
                                       (format "# Run 'just upgrade %s' to apply changes." name)
                                       "22" "80" "443"]
                                      (when nas?
-                                       ["# nas profile — SMB (445), NFSv4 (2049), copyparty web+WebDAV (3923), WSD (5357):"
-                                        "445" "2049" "3923" "5357"])
+                                       ["# nas profile — SMB (445), NFSv4 (2049), WSD (5357):"
+                                        "# copyparty listens on loopback only; HTTP/WebDAV goes via traefik."
+                                        "445" "2049" "5357"])
                                      (when streaming?
                                        [(format "# %s — Moonlight HTTPS (47984), HTTP (47989), RTSP (48010):"
                                                 streaming-label)
