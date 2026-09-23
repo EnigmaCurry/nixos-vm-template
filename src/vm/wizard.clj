@@ -691,10 +691,12 @@ done 2>/dev/null"]
       (println (format "Created: %s/vcpus (%s)" md vcpus))
       (when lxc?
         (spit (str md "/privileged") (str (or privileged "0") "\n"))
-        (if (str/blank? mounts)
-          (fs/delete-if-exists (str md "/mounts"))
-          (do (spit (str md "/mounts") (str mounts "\n"))
-              (println (format "Created: %s/mounts" md)))))
+        ;; Blank picked-mounts: preserve whatever's on disk (typically the
+        ;; commented template seeded by init-machine). Users can add mounts
+        ;; later by hand-editing this file, then `just recreate`.
+        (when-not (str/blank? mounts)
+          (spit (str md "/mounts") (str mounts "\n"))
+          (println (format "Created: %s/mounts" md))))
       ;; nas_passwd / nas_acl / nas_hosts are seeded by machine/init-machine
       ;; whenever the nas profile is present — the interactive wizard just
       ;; forwards to init-machine, so those files land regardless of code path.

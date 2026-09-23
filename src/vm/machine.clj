@@ -248,6 +248,27 @@
                            {:in priv})]
     {:private priv :public pub}))
 
+(def ^:private mounts-template
+  "Commented mounts seeded on LXC backends. All-commented = no bind mounts
+  applied — apply-mounts iterates comment-stripped lines via port-lines."
+  (str/join "\n"
+            ["# LXC host bind mounts — one per line:  <host-spec>:<container-path>"
+             "#"
+             "# host-spec forms:"
+             "#   /abs/host/path       literal PVE host directory (must exist)."
+             "#   rpool/data/nas       real ZFS dataset (auto-`zfs create`d if missing)."
+             "#   local-zfs/nas        PVE zfspool storage entry (resolved to its dataset)."
+             "#"
+             "# Applied by `pct set -mpN` at container-create time. `sync-identity`"
+             "# does NOT re-apply changes — edits require `just recreate`, which"
+             "# destroys the container rootfs. Back up /var/lib/traefik/acme.json"
+             "# first if traefik is in use."
+             "#"
+             "# Examples:"
+             "#   /tank/media:/srv/media"
+             "#   rpool/data/nas:/srv/nas"
+             ""]))
+
 (def ^:private wg-users-template
   "Commented wg_users seeded when both wireguard and traefik profiles are
   selected. Consumed by the wg-auth service (wired in by the traefik profile)
@@ -754,11 +775,11 @@
           samba-mount? (contains? profs "samba-mount")
           wireguard? (contains? profs "wireguard")
           traefik? (contains? profs "traefik")
+          lxc? (= (:backend cfg) "proxmox-lxc")
           ;; True when the target's rootfs is writable (either the `mutable`
           ;; profile is enabled on KVM, or the backend is proxmox-lxc which is
           ;; mutable-only). Drives per-mode paths in seeded templates.
-          mutable? (or (contains? profs "mutable")
-                       (= (:backend cfg) "proxmox-lxc"))
+          mutable? (or (contains? profs "mutable") lxc?)
           moonshine? (contains? profs "moonshine-nvidia")
           sunshine? (contains? profs "sunshine-plasma-nvidia")
           ;; Both Moonlight-protocol servers use the same well-known ports and
@@ -861,6 +882,12 @@
       (when (and wireguard? (not (fs/exists? (str md "/wireguard.nft"))))
         (spit (str md "/wireguard.nft") wireguard-nft-template)
         (println (format "Created: %s/wireguard.nft (all-commented — edit to allow wg traffic)" md)))
+      ;; mounts — LXC host bind mounts. All-commented on first create;
+      ;; the wizard overwrites this file when the user picks datasets, and
+      ;; preserves it when they don't (see wizard-lxc-mounts's blank branch).
+      (when (and lxc? (not (fs/exists? (str md "/mounts"))))
+        (spit (str md "/mounts") mounts-template)
+        (println (format "Created: %s/mounts (all-commented — edit to add host bind mounts)" md)))
       ;; wg_users — traefik + wireguard together: seed the peer→user map
       ;; consumed by the wg-auth service. All-commented = no auto-login.
       (when (and traefik? wireguard? (not (fs/exists? (str md "/wg_users"))))
