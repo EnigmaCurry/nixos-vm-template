@@ -22,6 +22,11 @@ the same way on any libvirt or Proxmox KVM VM. On KVM, skip the nas/Samba
 sections below and use a plain `wireguard` VM as the hub (or any other
 profile that suits the services you want to expose over the tunnel).
 
+The [`syncthing`](PROFILES.md#available-profiles) profile composes with
+`wireguard`: when both are enabled, `syncthing-config` at boot binds the
+sync port to the wg IP and disables global announce, local announce,
+relays, and NAT-PMP — the tunnel becomes the only path in or out.
+
 ## Preconditions
 
 - Proxmox LXC backend configured — see [PROXMOX_LXC.md](PROXMOX_LXC.md).

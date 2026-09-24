@@ -52,7 +52,7 @@ predictably, and can be recreated identically at any time.
 - Bind mounted `/home` to `/var/home` and `/root` to `/var/root` (persistent)
 - **Optional mutable mode**: standard read-write NixOS for full flexibility
 - Snapshots and backups
-- Composable VM profiles to customize the VM role (docker, podman, dev, claude, etc.)
+- Composable VM profiles to customize the VM role (docker, podman, dev, claude, syncthing, etc.)
 - UEFI boot with systemd-boot
 - SSH key-only authentication
 - QEMU guest agent for IP detection and guest commands
