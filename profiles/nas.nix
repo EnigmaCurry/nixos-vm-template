@@ -441,6 +441,12 @@
       # no ipu path. Users without a wg_users mapping get 401 (login is
       # not offered). Password logins for shared users still work over
       # Samba (which has its own auth stack, unaffected by this file).
+      #
+      # ban-{403,404,url,422}: no — disable per-request bans. The wg-auth
+      # layer already gates access; the default thresholds (9 hits / 2 min
+      # → 24 h ban) trip on normal browser asset bursts (SPA loads, 404s on
+      # apple-touch-icon, favicon probes) and lock out real users. Password
+      # bans (--ban-pw) don't apply since auth-ord=idp disables password auth.
       { echo "[global]";
         echo "  usernames";
         echo "  i: 127.0.0.1";
@@ -449,6 +455,10 @@
         echo "  rproxy: -1";
         echo "  idp-h-usr: x-remote-user";
         echo "  auth-ord: idp";
+        echo "  ban-403: no";
+        echo "  ban-404: no";
+        echo "  ban-url: no";
+        echo "  ban-422: no";
         echo;
         echo "[accounts]"; } > "$cpconf"
 
