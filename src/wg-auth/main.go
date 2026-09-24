@@ -9,6 +9,12 @@
 //	/healthz  200                            when the map file is loadable
 //	          500                            otherwise
 //
+// Both /lookup and /require accept an optional `?users=a,b,c` query
+// parameter — a per-request allowlist of user names. When set, only the
+// listed users are accepted; a mapped IP whose user is not in the list is
+// treated as unmapped (/lookup: 200 no header; /require: 403). Empty or
+// absent = any mapped user is accepted (current behaviour).
+//
 // Any I/O or parse error on the map file → 500 on both /lookup and /require.
 // Traefik surfaces that as a 502 to the client, which is the fail-closed
 // posture we want.
@@ -134,15 +140,35 @@ func main() {
 				http.Error(w, "wg-auth map unavailable", http.StatusInternalServerError)
 				return
 			}
-			if user == "" {
+			// Optional per-request user allowlist. Empty = accept any mapped user.
+			var allowed map[string]struct{}
+			if q := strings.TrimSpace(r.URL.Query().Get("users")); q != "" {
+				allowed = map[string]struct{}{}
+				for _, u := range strings.Split(q, ",") {
+					u = strings.TrimSpace(u)
+					if u != "" {
+						allowed[u] = struct{}{}
+					}
+				}
+			}
+			// Compute "effective" user identity: the mapped user, or empty if the
+			// allowlist excludes them. Downstream logic then treats "excluded"
+			// the same as "unmapped" (403 on /require, pass-through on /lookup).
+			effective := user
+			if user != "" && allowed != nil {
+				if _, ok := allowed[user]; !ok {
+					effective = ""
+				}
+			}
+			if effective == "" {
 				if require {
-					http.Error(w, "wg peer not mapped", http.StatusForbidden)
+					http.Error(w, "wg peer not mapped or not in allowlist", http.StatusForbidden)
 					return
 				}
 				w.WriteHeader(http.StatusOK)
 				return
 			}
-			w.Header().Set("X-Remote-User", user)
+			w.Header().Set("X-Remote-User", effective)
 			w.WriteHeader(http.StatusOK)
 		}
 	}

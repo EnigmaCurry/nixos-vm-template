@@ -167,20 +167,28 @@ No extra configuration required beyond adding both profiles at create time.
 
 ## Exposing the GUI via traefik
 
-The GUI listens on `127.0.0.1:8384` only. To expose it, add a router to
-`machines/<name>/traefik/dynamic/*.yml`:
+The GUI listens on `127.0.0.1:8384` only. Syncthing can't consume an
+injected `X-Remote-User`, so **`wg-required` alone would open the admin GUI
+to every wg peer with a `wg_users` mapping** — too broad. Use a
+user-filtered middleware instead (see
+[TRAEFIK.md § Restricting to specific users](TRAEFIK.md#restricting-to-specific-users)):
 
 ```yaml
 http:
+  middlewares:
+    # Peer must be mapped AND its user must be admin.
+    wg-required-syncthing:
+      chain:
+        middlewares: [wg-strip-user, wg-auth-require-syncthing]
+    wg-auth-require-syncthing:
+      forwardAuth:
+        address: "http://127.0.0.1:9099/require?users=admin"
+        authResponseHeaders: [X-Remote-User]
   routers:
     syncthing:
       rule: "Host(`syncthing.example.com`)"
       entryPoints: [websecure]
-      # wg-required is the sole auth layer — syncthing can't consume an
-      # injected X-Remote-User. Layer a GUI password on top via
-      # services.syncthing.settings.gui.{user,password} if you want
-      # defense-in-depth.
-      middlewares: [wg-required]
+      middlewares: [wg-required-syncthing]
       service: syncthing
       tls:
         certResolver: letsencrypt
@@ -193,9 +201,13 @@ http:
           - url: "http://127.0.0.1:8384"
 ```
 
+Replace `admin` with the comma-separated list of `wg_users` users allowed
+to reach the GUI. Non-admin wg peers get 403 at the traefik layer, before
+syncthing sees the request. Layer a GUI password on top via
+`services.syncthing.settings.gui.{user,password}` for defense-in-depth.
+
 Then `just sync-identity <name>`; traefik hot-reloads the file provider.
-Requires the `traefik` + `wireguard` profiles (for `wg-required`); see
-[TRAEFIK.md](TRAEFIK.md).
+Requires the `traefik` + `wireguard` profiles.
 
 ## Troubleshooting
 
