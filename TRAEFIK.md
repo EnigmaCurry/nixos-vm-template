@@ -233,25 +233,25 @@ The copyparty example seeded by the `nas` profile uses `wg-required` (see
 ### Restricting to specific users
 
 `wg-required` accepts any mapped peer — network-level allowlist. To also
-filter on the identified user (e.g. only `admin` can reach the syncthing
+filter on the identified user (e.g. only `ryan` can reach the syncthing
 GUI, even though other peers are mapped), pass `?users=<comma-list>` to
 `/require` via a custom middleware. Define one alongside your router:
 
 ```yaml
 http:
   middlewares:
-    # Peer must be mapped AND its user must be admin.
-    wg-required-admin:
+    # Peer must be mapped AND its user must be ryan.
+    wg-required-ryan:
       chain:
-        middlewares: [wg-strip-user, wg-auth-require-admin]
-    wg-auth-require-admin:
+        middlewares: [wg-strip-user, wg-auth-require-ryan]
+    wg-auth-require-ryan:
       forwardAuth:
-        address: "http://127.0.0.1:9099/require?users=admin"
+        address: "http://127.0.0.1:9099/require?users=ryan"
         authResponseHeaders: [X-Remote-User]
   routers:
     myapp:
       # …
-      middlewares: [wg-required-admin]
+      middlewares: [wg-required-ryan]
 ```
 
 The `?users=` list is an allowlist — a mapped peer whose user isn't listed
@@ -262,7 +262,7 @@ user just passes through with no `X-Remote-User` header.
 
 Reuse `wg-strip-user` from the shipped set to clear any client-supplied
 `X-Remote-User` before the auth step. Define one such middleware per
-user-scope you need (e.g. `wg-required-admin`, `wg-required-family`); the
+user-scope you need (e.g. `wg-required-ryan`, `wg-required-family`); the
 router picks whichever fits.
 
 ### 3. Apply

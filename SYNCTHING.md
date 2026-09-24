@@ -176,13 +176,13 @@ user-filtered middleware instead (see
 ```yaml
 http:
   middlewares:
-    # Peer must be mapped AND its user must be admin.
+    # Peer must be mapped AND its user must be ryan.
     wg-required-syncthing:
       chain:
         middlewares: [wg-strip-user, wg-auth-require-syncthing]
     wg-auth-require-syncthing:
       forwardAuth:
-        address: "http://127.0.0.1:9099/require?users=admin"
+        address: "http://127.0.0.1:9099/require?users=ryan"
         authResponseHeaders: [X-Remote-User]
   routers:
     syncthing:
@@ -201,9 +201,9 @@ http:
           - url: "http://127.0.0.1:8384"
 ```
 
-Replace `admin` with the comma-separated list of `wg_users` users allowed
-to reach the GUI. Non-admin wg peers get 403 at the traefik layer, before
-syncthing sees the request. Layer a GUI password on top via
+Replace `ryan` with the comma-separated list of `wg_users` users allowed
+to reach the GUI. Peers mapped to other users get 403 at the traefik
+layer, before syncthing sees the request. Layer a GUI password on top via
 `services.syncthing.settings.gui.{user,password}` for defense-in-depth.
 
 Then `just sync-identity <name>`; traefik hot-reloads the file provider.
