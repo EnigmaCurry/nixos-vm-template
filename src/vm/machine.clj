@@ -239,6 +239,71 @@
              "#   0.0.0.0/0         guest pubdocs           # world-readable shares"
              ""]))
 
+(def ^:private syncthing-devices-template
+  "Commented syncthing_devices seeded when the syncthing profile is selected.
+  Authoritative: entries not listed here are deleted from syncthing on boot."
+  (str/join "\n"
+            ["# Syncthing peer devices — one per line:"
+             "#   <peer-name> <device-id> [address]..."
+             "#"
+             "# peer-name  local alias for the peer (used in syncthing_folders"
+             "#            to reference which peers a folder shares to)."
+             "# device-id  the peer's 63-character device ID (with dashes) — get"
+             "#            it from that peer's syncthing GUI (Actions → Show ID),"
+             "#            or `syncthing device-id` on the peer."
+             "# address    zero or more URLs telling THIS device where to reach"
+             "#            the peer. Formats: tcp://host:port, quic://host:port,"
+             "#            or the literal `dynamic` (use discovery). Omit the"
+             "#            column entirely for automatic discovery."
+             "#"
+             "# AUTHORITATIVE: this file is the source of truth. Devices added"
+             "# via the GUI are deleted on the next boot / sync-identity, and"
+             "# a peer's address list is reset to match this file."
+             "#"
+             "# Composition with wireguard: when the wireguard profile is also"
+             "# enabled, syncthing on THIS device only listens on the wg tunnel"
+             "# (its LAN interface is closed for the sync port) AND global"
+             "# announce / local announce / relays / NAT-PMP are all turned"
+             "# off — the tunnel is the only way in or out. Pin peer addresses"
+             "# to their wg IPs below to keep outbound over wg too."
+             "#"
+             "# Apply changes with:"
+             "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
+             "#"
+             "# Examples:"
+             "#   laptop     3TYBOKV-RPKZLFT-GFQDTZW-S7XYPHO-2Q3LVFT-WUCQ5BR-LBFVJHX-NRZ3QQL"
+             "#   phone      7CFNTQM-IMTJBHJ-3UWRDIU-ZGQJFR6-VCXZ3NB-XUH3KZO-N52ITXR-LAIYUAU tcp://10.13.17.3:22000"
+             ""]))
+
+(def ^:private syncthing-folders-template
+  "Commented syncthing_folders seeded when the syncthing profile is selected.
+  Authoritative: unlisted folders and unlisted peers are pruned on boot."
+  (str/join "\n"
+            ["# Syncthing folders — one per line:"
+             "#   <folder-id> <path> [peer-name]..."
+             "#"
+             "# folder-id  short unique id shared across peers (must match the"
+             "#            id used on other syncthing devices for this folder)."
+             "# path       absolute path on THIS device. When bundled with the"
+             "#            nas profile, /srv/<share> reuses a bind-mounted"
+             "#            dataset; otherwise anywhere under /var writable by"
+             "#            the syncthing user is fine."
+             "# peer-name  zero or more peers to share with — must match names"
+             "#            defined in syncthing_devices."
+             "#"
+             "# AUTHORITATIVE: folders and their peer lists are both reconciled"
+             "# to match this file — unlisted folders are deleted, and peers"
+             "# removed from a folder's line are unshared on the next boot /"
+             "# sync-identity."
+             "#"
+             "# Apply changes with:"
+             "#   just upgrade <name>   (or  just sync-identity <name> on proxmox-lxc)"
+             "#"
+             "# Examples:"
+             "#   docs     /srv/docs   laptop phone"
+             "#   backup   /var/lib/syncthing/backup   laptop"
+             ""]))
+
 (defn- generate-wg-keypair!
   "Generate a fresh WireGuard keypair via `nix run nixpkgs#wireguard-tools`.
   Returns {:private <base64> :public <base64>}."
@@ -247,6 +312,21 @@
         pub  (proc/capture (concat (:nix cfg) ["run" "nixpkgs#wireguard-tools" "--" "pubkey"])
                            {:in priv})]
     {:private priv :public pub}))
+
+(defn- generate-syncthing-identity!
+  "Generate a fresh syncthing cert/key pair via `nix run nixpkgs#syncthing --
+  generate`. Returns {:cert <pem> :key <pem> :device-id <str>}. The device ID
+  is a hash of cert.pem, so pinning the cert pins the identity across recreate."
+  [cfg]
+  (let [tmp (str (fs/create-temp-dir))]
+    (try
+      (proc/run! (concat (:nix cfg) ["run" "nixpkgs#syncthing" "--" "generate" "--home" tmp]))
+      (let [cert (slurp (str tmp "/cert.pem"))
+            key (slurp (str tmp "/key.pem"))
+            id (proc/capture (concat (:nix cfg) ["run" "nixpkgs#syncthing" "--" "device-id" "--home" tmp]))]
+        {:cert cert :key key :device-id id})
+      (finally
+        (fs/delete-tree tmp)))))
 
 (def ^:private mounts-template
   "Commented mounts seeded on LXC backends. All-commented = no bind mounts
@@ -796,6 +876,7 @@
     (let [profs (set (map str/trim (str/split (or profile "") #",")))
           nas? (contains? profs "nas")
           samba-mount? (contains? profs "samba-mount")
+          syncthing? (contains? profs "syncthing")
           wireguard? (contains? profs "wireguard")
           traefik? (contains? profs "traefik")
           lxc? (= (:backend cfg) "proxmox-lxc")
@@ -821,6 +902,10 @@
                                        ["# nas profile — SMB (445), NFSv4 (2049), WSD (5357):"
                                         "# copyparty listens on loopback only; HTTP/WebDAV goes via traefik."
                                         "# 445" "# 2049" "# 5357"])
+                                     (when syncthing?
+                                       ["# syncthing profile — sync protocol (22000):"
+                                        "# GUI (8384) listens on loopback only; expose via traefik."
+                                        "# 22000"])
                                      (when streaming?
                                        [(format "# %s — Moonlight HTTPS (47984), HTTP (47989), RTSP (48010):"
                                                 streaming-label)
@@ -828,6 +913,7 @@
                                      [""])))
         (println (format "Created: %s/tcp_ports%s" md
                          (str/join "" [(when nas? " + nas")
+                                       (when syncthing? " + syncthing")
                                        (when streaming? (str " + " streaming-label))]))))
       ;; udp_ports
       (when-not (fs/exists? (str md "/udp_ports"))
@@ -837,6 +923,9 @@
                                      (when nas?
                                        ["# nas profile — mDNS (5353), WS-Discovery (3702):"
                                         "# 5353" "# 3702"])
+                                     (when syncthing?
+                                       ["# syncthing profile — sync (22000), LAN discovery (21027):"
+                                        "# 22000" "# 21027"])
                                      (when streaming?
                                        [(format "# %s — Moonlight video (47998), control (47999), audio (48000):"
                                                 streaming-label)
@@ -847,6 +936,7 @@
                                      [""])))
         (println (format "Created: %s/udp_ports%s" md
                          (str/join "" [(when nas? " (nas)")
+                                       (when syncthing? " (syncthing)")
                                        (when streaming? (str " (" streaming-label ")"))
                                        (when wireguard? " (wireguard)")]))))
       ;; pci_devices — seeded for the streaming profiles (Proxmox GPU passthrough).
@@ -891,6 +981,25 @@
         (when-not (fs/exists? (str md "/nas_hosts"))
           (spit (str md "/nas_hosts") nas-hosts-template)
           (println (format "Created: %s/nas_hosts (REQUIRED — blank file denies every share; uncomment examples to open access)" md))))
+      ;; syncthing — pin the device identity by generating cert.pem/key.pem
+      ;; once; preserved across recreate because the files live in machine-dir
+      ;; and are copied into the guest at every create/upgrade.
+      (when syncthing?
+        (when-not (fs/exists? (str md "/syncthing_cert.pem"))
+          (println (format "Generating Syncthing identity for %s..." name))
+          (let [{:keys [cert key device-id]} (generate-syncthing-identity! cfg)]
+            (spit (str md "/syncthing_cert.pem") cert)
+            (fs/set-posix-file-permissions (str md "/syncthing_cert.pem") "rw-------")
+            (spit (str md "/syncthing_key.pem") key)
+            (fs/set-posix-file-permissions (str md "/syncthing_key.pem") "rw-------")
+            (println (format "Created: %s/syncthing_cert.pem (device ID: %s)" md device-id))
+            (println (format "Created: %s/syncthing_key.pem" md))))
+        (when-not (fs/exists? (str md "/syncthing_devices"))
+          (spit (str md "/syncthing_devices") syncthing-devices-template)
+          (println (format "Created: %s/syncthing_devices (edit to add peer devices)" md)))
+        (when-not (fs/exists? (str md "/syncthing_folders"))
+          (spit (str md "/syncthing_folders") syncthing-folders-template)
+          (println (format "Created: %s/syncthing_folders (edit to add shared folders)" md))))
       ;; wireguard — generate a keypair once and pin it in wireguard.conf.
       ;; Preserved across recreate/upgrade because the file lives here and is
       ;; copied verbatim to /var/identity by identity sync.

@@ -175,6 +175,16 @@
       (cp (str md "/nas_passwd") (str etc "/nas/nas_passwd"))
       (cp (str md "/nas_acl") (str etc "/nas/nas_acl"))
       (cp (str md "/nas_hosts") (str etc "/nas/nas_hosts")))
+    ;; syncthing profile config: cert/key (device identity, 0600) + devices/
+    ;; folders manifests (0644). Renamed on the way in so the guest sees the
+    ;; standard cert.pem/key.pem names services.syncthing expects.
+    (when (some non-empty? [(str md "/syncthing_cert.pem") (str md "/syncthing_key.pem")
+                            (str md "/syncthing_devices") (str md "/syncthing_folders")])
+      (fs/create-dirs (str etc "/syncthing"))
+      (cp (str md "/syncthing_cert.pem") (str etc "/syncthing/cert.pem"))
+      (cp (str md "/syncthing_key.pem") (str etc "/syncthing/key.pem"))
+      (cp (str md "/syncthing_devices") (str etc "/syncthing/syncthing_devices"))
+      (cp (str md "/syncthing_folders") (str etc "/syncthing/syncthing_folders")))
     ;; wireguard.conf -> /etc/wireguard/wg0.conf (wg-quick default path)
     (when (non-empty? (str md "/wireguard.conf"))
       (fs/create-dirs (str etc "/wireguard"))
@@ -239,6 +249,14 @@
      (format "chmod 0700 %s/etc/nas 2>/dev/null || true" root)
      (format "chmod 0600 %s/etc/nas/nas_passwd 2>/dev/null || true" root)
      (format "chmod 0644 %s/etc/nas/nas_acl %s/etc/nas/nas_hosts 2>/dev/null || true" root root)
+     ;; /etc/syncthing must be world-searchable so the syncthing user (the
+     ;; nas profile makes it uid 1500 'nas'; standalone uses 'syncthing')
+     ;; can read syncthing_devices / syncthing_folders. Sensitive files
+     ;; (cert/key) stay 0600 root:root — the daemon's ExecStartPre runs as
+     ;; root and copies them into the private configDir.
+     (format "chmod 0755 %s/etc/syncthing 2>/dev/null || true" root)
+     (format "chmod 0600 %s/etc/syncthing/cert.pem %s/etc/syncthing/key.pem 2>/dev/null || true" root root)
+     (format "chmod 0644 %s/etc/syncthing/syncthing_devices %s/etc/syncthing/syncthing_folders 2>/dev/null || true" root root)
      (format "chmod 0700 %s/etc/wireguard 2>/dev/null || true" root)
      (format "chmod 0600 %s/etc/wireguard/wg0.conf 2>/dev/null || true" root)
      (format "chmod 0644 %s/etc/wireguard/wireguard.nft 2>/dev/null || true" root)
@@ -251,8 +269,8 @@
      (format "chown %s %s/etc/acme-dns.env %s/etc/acme-dns.json 2>/dev/null || true" own root root)
      ;; chown the whole /etc/ssh dir (not just authorized_keys.d): sshd StrictModes
      ;; checks every parent directory of the authorized_keys file.
-     (format "chown -R %s %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/wireguard %s/etc/nixos 2>/dev/null || true"
-             own root root root root root root root root)]))
+     (format "chown -R %s %s/etc/hostname %s/etc/machine-id %s/etc/ssh %s/etc/firewall-ports %s/etc/network-config %s/etc/nas %s/etc/syncthing %s/etc/wireguard %s/etc/nixos 2>/dev/null || true"
+             own root root root root root root root root root)]))
 
 (defn- inject-rootfs!
   "Inject identity + /etc/nixos flake into a STOPPED container's rootfs.

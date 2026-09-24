@@ -100,6 +100,37 @@
                                     (cmd "chown" "0" "0" d))))
                         entries))))))
 
+(def ^:private syncthing-files
+  "Per-machine file -> {dst-name, mode} for the syncthing profile. Staged as a
+  syncthing/ subdirectory of the identity dir; the profile expects them there."
+  [{:src "syncthing_cert.pem" :dst "cert.pem" :mode "0600"}
+   {:src "syncthing_key.pem" :dst "key.pem" :mode "0600"}
+   {:src "syncthing_devices" :dst "syncthing_devices" :mode "0644"}
+   {:src "syncthing_folders" :dst "syncthing_folders" :mode "0644"}])
+
+(defn syncthing-guestfish-cmds
+  "Guestfish tokens to stage the syncthing_* files (if any are present) into
+  `dest-parent`/syncthing/ on the guest. Skipped entirely when no source file
+  exists. Directory made 0700 (contains the private key)."
+  [machine-dir dest-parent]
+  (let [present (filter (fn [{:keys [src]}] (non-empty-file? (str machine-dir "/" src)))
+                        syncthing-files)]
+    (when (seq present)
+      (let [dst-dir (str dest-parent "/syncthing")]
+        (concat (cmd "mkdir-p" dst-dir)
+                ;; 0755 so the (non-root) syncthing user can traverse in and
+                ;; read the manifests. cert.pem / key.pem inside remain 0600.
+                (cmd "chmod" "0755" dst-dir)
+                (cmd "chown" "0" "0" dst-dir)
+                (mapcat (fn [{:keys [src dst mode]}]
+                          (let [s (str machine-dir "/" src)
+                                d (str dst-dir "/" dst)]
+                            (when (non-empty-file? s)
+                              (concat (cmd "upload" s d)
+                                      (cmd "chmod" mode d)
+                                      (cmd "chown" "0" "0" d)))))
+                        present))))))
+
 (defn- identity-file-cmds
   "Guestfish tokens for one identity-table entry (copy/touch + chmod + chown).
   With `:filter :strip-comments`, the source is read on the workstation, `#`
@@ -154,7 +185,8 @@
                                     (cmd "chmod" "0600" dst)
                                     (cmd "chown" "0" "0" dst))))
                         keys)))
-      (traefik-guestfish-cmds machine-dir "/identity")))))
+      (traefik-guestfish-cmds machine-dir "/identity")
+      (syncthing-guestfish-cmds machine-dir "/identity")))))
 
 (defn guestfish-sync-cmds
   "Build the guestfish token vector (beginning at `run`) that mounts an existing
@@ -212,7 +244,8 @@
                                     (cmd "chmod" "0600" dst)
                                     (cmd "chown" "0" "0" dst))))
                         keys)))
-      (traefik-guestfish-cmds machine-dir "/identity")))))
+      (traefik-guestfish-cmds machine-dir "/identity")
+      (syncthing-guestfish-cmds machine-dir "/identity")))))
 
 ;; ─── proxmox: rsync staging + remote chmod plan ──────────────────────────────
 
@@ -245,6 +278,15 @@
     (let [tsrc (str machine-dir "/traefik")]
       (when (fs/directory? tsrc)
         (fs/copy-tree tsrc (str tmp "/traefik") {:replace-existing true})))
+    ;; syncthing: rename cert/key + keep devices/folders under syncthing/
+    (let [present (filter (fn [{:keys [src]}] (non-empty-file? (str machine-dir "/" src)))
+                          syncthing-files)]
+      (when (seq present)
+        (fs/create-dirs (str tmp "/syncthing"))
+        (doseq [{:keys [src dst]} present]
+          (fs/copy (str machine-dir "/" src)
+                   (str tmp "/syncthing/" dst)
+                   {:replace-existing true}))))
     tmp))
 
 (defn proxmox-perm-cmds
@@ -275,4 +317,5 @@
      (format "chmod 0700 %s/deploy_keys 2>/dev/null || true" id)
      (format "find %s/deploy_keys -type f -exec chmod 0600 {} + 2>/dev/null || true" id)
      (format "if [ -d %s/traefik ]; then find %s/traefik -type d -exec chmod 0755 {} + && find %s/traefik -type f -exec chmod 0644 {} +; fi" id id id)
+     (format "if [ -d %s/syncthing ]; then chmod 0755 %s/syncthing && chmod 0600 %s/syncthing/cert.pem %s/syncthing/key.pem 2>/dev/null && chmod 0644 %s/syncthing/syncthing_devices %s/syncthing/syncthing_folders 2>/dev/null; fi || true" id id id id id id)
      (format "chown -R 0:0 %s/" id)]))

@@ -39,7 +39,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "traefik" "semi-mutable" "mutable" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "syncthing" "traefik" "semi-mutable" "mutable" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
@@ -114,7 +114,7 @@
       # vm.mutable (an LXC rootfs is read-write; nixos-rebuild runs inside), and
       # outputs config.system.build.tarball (a tar.xz for `pct create`). Container
       # networking: systemd-networkd DHCP on eth0.
-      lxcProfiles = [ "core" "docker" "nas" ];
+      lxcProfiles = [ "core" "docker" "nas" "syncthing" ];
       mkLxcImage = system: profileList:
         let
           allProfiles = lib.unique (lib.sort lib.lessThan ([ "core" ] ++ profileList));
