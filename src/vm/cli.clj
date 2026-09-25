@@ -8,6 +8,7 @@
             [vm.profile :as profile]
             [vm.net :as net]
             [vm.wizard :as wizard]
+            [vm.admin :as admin]
             [vm.wireguard :as wg]
             [vm.acme :as acme]
             [vm.proc :as proc]
@@ -217,6 +218,7 @@
                                               (keep #(second (re-find #"^commit=(.*)" %))) first)]
                           (println (format "%s:%s" n (if (str/blank? commit) "unknown" commit)))))
       "test-connection" (cmd-test-connection cfg)
+      "admin"          (admin/main-menu cfg)
       (do (println (format "Error: unknown command '%s'" command))
           (System/exit 1)))))
 
