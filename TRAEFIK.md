@@ -228,7 +228,17 @@ http:
 ```
 
 The copyparty example seeded by the `nas` profile uses `wg-required` (see
-`machines/<name>/traefik/dynamic/example.yml.disabled`).
+`machines/<name>/traefik/dynamic/example.yml.disabled`). It also includes a
+higher-priority `copyparty-block-zfs` router that matches any URL containing
+`/.zfs/` and applies the `block-all` middleware — a reusable "reject with
+403" primitive provisioned in `middleware-block-all.yml` (always active,
+seeded alongside the example). Attach `middlewares: [block-all]` to a
+higher-priority `PathRegexp` router to hard-block any URL pattern.
+
+The `copyparty-block-zfs` router is defense-in-depth on top of the
+container-side `.zfs` mask (see [Automatic `.zfs` masking](PROXMOX_LXC.md#automatic-zfs-masking)
+in the LXC docs); direct-URL lookups are already blocked at the filesystem
+layer, and the traefik router closes the same gap at the edge.
 
 ### Restricting to specific users
 
@@ -316,6 +326,8 @@ Grafana's `auth.proxy`, Gitea's `REVERSE_PROXY_AUTHENTICATION_HEADER`.
 |------|------|---------|
 | `machines/<name>/traefik/traefik.yml`       | 0644 | Static config |
 | `machines/<name>/traefik/dynamic/*.yml`     | 0644 | Dynamic rules (file provider) |
+| `machines/<name>/traefik/dynamic/middleware-block-all.yml` | 0644 | Reusable "reject with 403" middleware (`block-all`). Seeded once; edit or delete to change the primitive. |
+| `machines/<name>/traefik/dynamic/example.yml.disabled`     | 0644 | Reference example (copyparty router + `copyparty-block-zfs`). **Overwritten on every `seed-config`.** Rename to `example.yml` to activate — your renamed copy is untouched. |
 | `machines/<name>/acme-dns.env`              | 0600 | `ACME_DNS_API_BASE` + `ACME_DNS_STORAGE_PATH` for the lego acmedns provider |
 | `machines/<name>/acme-dns.json`             | 0600 | Per-domain acme-dns credentials (managed by `just acme-register`) |
 | `machines/<name>/wg_users`                  | 0644 | wg peer → user mapping consumed by wg-auth (see [Peer identity injection](#peer-identity-injection-wg-auth)) |

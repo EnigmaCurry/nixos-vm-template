@@ -165,6 +165,20 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 | `just clean`          | Remove built images and VM disks |
 | `just shell`          | Enter Nix development shell      |
 
+## Host admin (PVE only)
+
+| Command | Description |
+|---------|-------------|
+| `just admin` | Interactive menu for host-side tasks that don't belong to any single VM |
+
+Currently offers a ZFS submenu: browse pools, datasets (with sanoid policy
+and LXC bind-mount consumers), and per-dataset snapshots. Snapshot lifecycle
+(create / destroy / show restore paths) is supported; dataset and sanoid
+policy management are read-only.
+
+Available only when `BACKEND=proxmox` or `BACKEND=proxmox-lxc`; on the
+libvirt backend the menu shows an explanatory note and no ZFS entry.
+
 ## See also
 
 - [MODES.md](MODES.md) — `just mutable` and immutable / mutable / semi-mutable VMs
