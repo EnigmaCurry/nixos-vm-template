@@ -167,6 +167,16 @@
              (remove #(str/starts-with? (:name %) "template_"))
              vec)))))
 
+(defn- sanoid-templates
+  "Parse a sanoid config, return sorted names of `template_*` sections. These
+  are what the `use_template = X` directive references from dataset sections."
+  [raw]
+  (->> (str/split-lines (or raw ""))
+       (map #(str/replace % #"[#;].*$" ""))
+       (map str/trim)
+       (keep #(second (re-matches #"^\[(template_.+)\]$" %)))
+       sort vec))
+
 (defn- policy-for
   "Section covering `dataset` — exact match wins over recursive ancestor."
   [sections dataset]
@@ -372,6 +382,172 @@
               (view-snapshots cfg chosen consumers)
               (recur))))))))
 
+;; ─── dataset creation + snapshot-policy attach ──────────────────────────────
+
+(defn- valid-dataset-name?
+  "ZFS accepts [A-Za-z0-9_.-:] and / for nesting. Each segment must start with
+  an alphanumeric or _, and must not start with a dot."
+  [s]
+  (boolean
+   (and (not (str/blank? s))
+        (re-matches #"[A-Za-z0-9_][A-Za-z0-9_.:\-]*(/[A-Za-z0-9_][A-Za-z0-9_.:\-]*)*" s))))
+
+(defn- dataset-exists? [cfg full]
+  (pve/pve-ssh-ok? cfg (format "zfs list -H -o name %s 2>/dev/null" full)))
+
+(defn- b64 ^String [^String s]
+  (.encodeToString (java.util.Base64/getEncoder) (.getBytes s "UTF-8")))
+
+(defn- write-sanoid-section!
+  "Append a `[dataset]` section (with body-lines, one per line, auto-indented)
+  to /etc/sanoid/sanoid.d/nixos-vm-template.conf on the PVE host. Ensures
+  sanoid.conf carries an `!include /etc/sanoid/sanoid.d/*.conf` line so the
+  section is actually loaded. Returns true on success, false on failure. Uses
+  base64 so shell quoting never touches user-supplied content."
+  [cfg dataset body-lines]
+  (let [section (str "\n[" dataset "]\n"
+                     (str/join "\n" (map #(str "    " %) body-lines))
+                     "\n")
+        include-line "!include /etc/sanoid/sanoid.d/*.conf"
+        cmd (str
+             "mkdir -p /etc/sanoid/sanoid.d && "
+             "touch /etc/sanoid/sanoid.conf && "
+             "grep -qxF '" include-line "' /etc/sanoid/sanoid.conf || "
+             "{ echo " (b64 (str include-line "\n")) " | base64 -d "
+             ">> /etc/sanoid/sanoid.conf; } && "
+             "echo " (b64 section) " | base64 -d "
+             ">> /etc/sanoid/sanoid.d/nixos-vm-template.conf")]
+    (try (pve/pve-ssh! cfg cmd) true
+         (catch Throwable t
+           (println (format "  ✗ failed to write sanoid config: %s" (.getMessage t)))
+           false))))
+
+(defn- prompt-custom-retention
+  "Ask for hourly/daily/weekly/monthly counts. Returns body-lines vector, or
+  nil if the user cancelled at any step."
+  []
+  (let [ask-int (fn [msg default]
+                  (loop []
+                    (when-let [raw (ask-or-nil msg default)]
+                      (let [t (str/trim raw)]
+                        (if (re-matches #"\d+" t)
+                          t
+                          (do (println "  must be a non-negative integer")
+                              (recur)))))))
+        h (ask-int "Hourly snapshots to keep (0 = none):" "24")
+        d (when h (ask-int "Daily snapshots to keep:" "7"))
+        w (when d (ask-int "Weekly snapshots to keep:" "4"))
+        m (when w (ask-int "Monthly snapshots to keep:" "12"))]
+    (when (and h d w m)
+      [(str "hourly = " h)
+       (str "daily = " d)
+       (str "weekly = " w)
+       (str "monthly = " m)
+       "autosnap = yes"
+       "autoprune = yes"])))
+
+(def ^:private hardcoded-policies
+  "Canned policy presets shown when the host's sanoid config has no templates
+  defined. Written inline (not `use_template`) so no template dependency."
+  {"frequent (hourly=48, daily=7)"
+   ["hourly = 48" "daily = 7" "autosnap = yes" "autoprune = yes"]
+   "production (hourly=36, daily=30, monthly=3)"
+   ["hourly = 36" "daily = 30" "monthly = 3" "autosnap = yes" "autoprune = yes"]})
+
+(defn- attach-snapshot-policy!
+  "After a dataset is created, offer to attach a sanoid snapshot policy.
+  raw = concatenated sanoid config (for template detection); nil when sanoid
+  isn't installed on the host."
+  [cfg dataset sanoid? raw]
+  (cond
+    (not sanoid?)
+    (println (str "  sanoid is not installed on the host — install with "
+                  "`apt install sanoid` on PVE to enable snapshot policies"))
+
+    (not (confirm-or-no (format "Apply a snapshot policy to %s?" dataset) :no))
+    nil
+
+    :else
+    (let [templates (sanoid-templates raw)
+          template-labels (mapv #(str % " (use_template)") templates)
+          hardcoded-labels (vec (sort (keys hardcoded-policies)))
+          options (cond-> []
+                    (seq template-labels) (into template-labels)
+                    (empty? template-labels) (into hardcoded-labels)
+                    :always (into ["custom (enter retention inline)" "none"]))
+          pick (choose-or-back "Choose a snapshot policy:" (conj options BACK))]
+      (cond
+        (contains? #{BACK "none"} pick)
+        (println "  (no policy attached)")
+
+        (str/ends-with? pick " (use_template)")
+        (let [tpl (str/replace pick #" \(use_template\)$" "")]
+          (when (write-sanoid-section! cfg dataset [(str "use_template = " tpl)])
+            (println (format "  ✓ attached policy: use_template = %s" tpl))))
+
+        (contains? hardcoded-policies pick)
+        (when (write-sanoid-section! cfg dataset (get hardcoded-policies pick))
+          (println (format "  ✓ attached policy: %s" pick)))
+
+        (= pick "custom (enter retention inline)")
+        (if-let [body (prompt-custom-retention)]
+          (when (write-sanoid-section! cfg dataset body)
+            (println "  ✓ attached custom policy"))
+          (println "  (cancelled — no policy attached)"))))))
+
+(defn- create-dataset!
+  "Interactive: pick a pool, prompt for a dataset name, validate, `zfs create -p`,
+  then offer to attach a snapshot policy. Reads pools once (already fetched by
+  zfs-admin); raw is the current sanoid config (nil if sanoid absent)."
+  [cfg pools sanoid? raw]
+  (let [pool-labels (mapv :name pools)
+        pool (choose-or-back "Select a pool for the new dataset:"
+                             (conj pool-labels BACK))]
+    (when (not= pool BACK)
+      (let [pool-name (first-token pool)]
+        (when-let [name (loop []
+                          (when-let [raw-name (ask-or-nil
+                                               "Dataset name (e.g. `movies` or `backups/nightly`):")]
+                            (let [v (str/trim raw-name)
+                                  full (str pool-name "/" v)]
+                              (cond
+                                (str/blank? v)
+                                (do (println "  name cannot be empty") (recur))
+                                (not (valid-dataset-name? v))
+                                (do (println (str "  invalid — use A-Za-z0-9_-.: and / for nesting;"
+                                                  " each segment must start with an alphanumeric or _"))
+                                    (recur))
+                                (dataset-exists? cfg full)
+                                (do (println (format "  '%s' already exists" full)) (recur))
+                                :else v))))]
+          (let [full (str pool-name "/" name)]
+            (println (format "Creating %s..." full))
+            (if (pve/pve-ssh-soft cfg (format "zfs create -p %s" full))
+              (do (println (format "  ✓ created %s" full))
+                  (attach-snapshot-policy! cfg full sanoid? raw))
+              (println "  ✗ zfs create failed — see error above"))))))))
+
+;; ─── zfs admin submenu ───────────────────────────────────────────────────────
+
+(defn- manage-existing-datasets
+  "Original pool-selection loop, now a leaf of the zfs-admin submenu."
+  [cfg pools consumers sections sanoid?]
+  (loop []
+    (let [rows (mapv (fn [p]
+                       {:pool p
+                        :label (format "%-16s  size=%-8s  free=%-8s  %s"
+                                       (:name p)
+                                       (fmt-bytes (:size p))
+                                       (fmt-bytes (:free p))
+                                       (or (:health p) "?"))})
+                     pools)
+          labels (conj (mapv :label rows) BACK)
+          pick (choose-or-back "Select a ZFS pool:" labels)]
+      (when (not= pick BACK)
+        (let [pool-name (first-token pick)]
+          (view-pool cfg pool-name consumers sections sanoid?)
+          (recur))))))
+
 (defn- zfs-admin [cfg]
   (println)
   (println "── ZFS Admin ──")
@@ -381,25 +557,27 @@
                            (or (:pve-node cfg) "the PVE node")))
           (choose-or-back "" [BACK]))
       (let [sanoid? (sanoid-installed? cfg)
-            sections (if sanoid? (sanoid-sections (sanoid-config-raw cfg)) [])
             consumers (lxc-consumers cfg)]
         (when-not sanoid?
           (println "(sanoid not installed on host — policy column hidden)"))
         (loop []
-          (let [rows (mapv (fn [p]
-                             {:pool p
-                              :label (format "%-16s  size=%-8s  free=%-8s  %s"
-                                             (:name p)
-                                             (fmt-bytes (:size p))
-                                             (fmt-bytes (:free p))
-                                             (or (:health p) "?"))})
-                           pools)
-                labels (conj (mapv :label rows) BACK)
-                pick (choose-or-back "Select a ZFS pool:" labels)]
-            (when (not= pick BACK)
-              (let [pool-name (first-token pick)]
-                (view-pool cfg pool-name consumers sections sanoid?)
-                (recur)))))))))
+          ;; Re-fetch sanoid config each iteration so newly-attached policies
+          ;; show up in Manage without leaving the ZFS admin menu.
+          (let [raw (when sanoid? (sanoid-config-raw cfg))
+                sections (if sanoid? (sanoid-sections raw) [])
+                pick (choose-or-back ""
+                                     ["Create new ZFS dataset"
+                                      "Manage existing ZFS datasets"
+                                      BACK])]
+            (case pick
+              "Create new ZFS dataset"
+              (do (create-dataset! cfg pools sanoid? raw) (recur))
+
+              "Manage existing ZFS datasets"
+              (do (manage-existing-datasets cfg pools consumers sections sanoid?)
+                  (recur))
+
+              nil)))))))
 
 ;; ─── main menu ───────────────────────────────────────────────────────────────
 
