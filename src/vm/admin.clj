@@ -13,6 +13,14 @@
 (defn- pve-backend? [cfg]
   (contains? #{"proxmox" "proxmox-lxc"} (:backend cfg)))
 
+(defn- first-token
+  "First whitespace-separated token of a string. script-wizard trims and can
+  reflow the labels it echoes back to us, so we key selections off the leading
+  identifier (pool/dataset/snapshot name) rather than exact label equality —
+  same pattern as vm.wizard uses for bridge picks."
+  [s]
+  (first (str/split (str s) #"\s+")))
+
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
   `command -v sanoid` where a non-zero exit is a legitimate answer."
@@ -217,7 +225,8 @@
   (let [labels (mapv snapshot-label snaps)
         pick (prompt/choose "Destroy which snapshot?" (conj labels BACK))]
     (when (not= pick BACK)
-      (let [chosen (nth snaps (.indexOf ^java.util.List labels pick))
+      (let [key (first-token pick)
+            chosen (some #(when (= (:name %) key) %) snaps)
             full (:name chosen)]
         (when (prompt/confirm (format "Destroy %s? This CANNOT be undone." full) :no)
           (if (pve/pve-ssh-soft cfg (format "zfs destroy %s" full))
@@ -229,7 +238,8 @@
         pick (prompt/choose "Show restore paths for which snapshot?"
                             (conj labels BACK))]
     (when (not= pick BACK)
-      (let [chosen (nth snaps (.indexOf ^java.util.List labels pick))
+      (let [key (first-token pick)
+            chosen (some #(when (= (:name %) key) %) snaps)
             snap-name (second (str/split (:name chosen) #"@"))
             mount (or (:mountpoint dataset-map) (str "/" (:name dataset-map)))
             host-path (str mount "/.zfs/snapshot/" snap-name)
@@ -307,7 +317,8 @@
               labels (conj (mapv :label rows) BACK)
               pick (prompt/choose "Select a dataset for details:" labels)]
           (when (not= pick BACK)
-            (let [chosen (some #(when (= (:label %) pick) (:dataset %)) rows)]
+            (let [key (first-token pick)
+                  chosen (some #(when (= (:name (:dataset %)) key) (:dataset %)) rows)]
               (view-snapshots cfg chosen consumers)
               (recur))))))))
 
@@ -336,7 +347,7 @@
                 labels (conj (mapv :label rows) BACK)
                 pick (prompt/choose "Select a ZFS pool:" labels)]
             (when (not= pick BACK)
-              (let [pool-name (:name (:pool (some #(when (= (:label %) pick) %) rows)))]
+              (let [pool-name (first-token pick)]
                 (view-pool cfg pool-name consumers sections sanoid?)
                 (recur)))))))))
 
