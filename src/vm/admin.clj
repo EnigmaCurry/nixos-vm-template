@@ -180,21 +180,97 @@
           (.atZone (java.time.ZoneId/systemDefault))
           (.format (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm")))))
 
+;; ─── snapshot lifecycle ──────────────────────────────────────────────────────
+
+(defn- default-snapshot-name []
+  (str "manual-"
+       (-> (java.time.LocalDateTime/now)
+           (.format (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmm")))))
+
+(defn- valid-snapshot-name?
+  "Restrict snapshot names to characters ZFS accepts *and* that survive
+  substitution into a remote ssh command without quoting. Reject @ and /."
+  [s]
+  (boolean (and (not (str/blank? s))
+                (re-matches #"[A-Za-z0-9_\-.:]+" s))))
+
+(defn- snapshot-label [s]
+  (format "%-60s  used=%-8s  %s"
+          (:name s) (fmt-bytes (:used s)) (fmt-epoch (:creation s))))
+
+(defn- create-snapshot! [cfg dataset]
+  (let [snap-name (loop []
+                    (let [v (str/trim (prompt/ask "Snapshot name:" (default-snapshot-name)))]
+                      (cond
+                        (str/blank? v) (recur)
+                        (not (valid-snapshot-name? v))
+                        (do (println "  invalid — use letters, digits, and _-.: only")
+                            (recur))
+                        :else v)))
+        full (str dataset "@" snap-name)]
+    (when (prompt/confirm (format "Create snapshot %s?" full) :yes)
+      (if (pve/pve-ssh-soft cfg (format "zfs snapshot %s" full))
+        (println (format "  ✓ created %s" full))
+        (println "  ✗ zfs snapshot failed — see error above")))))
+
+(defn- destroy-snapshot! [cfg snaps]
+  (let [labels (mapv snapshot-label snaps)
+        pick (prompt/choose "Destroy which snapshot?" (conj labels BACK))]
+    (when (not= pick BACK)
+      (let [chosen (nth snaps (.indexOf ^java.util.List labels pick))
+            full (:name chosen)]
+        (when (prompt/confirm (format "Destroy %s? This CANNOT be undone." full) :no)
+          (if (pve/pve-ssh-soft cfg (format "zfs destroy %s" full))
+            (println (format "  ✓ destroyed %s" full))
+            (println "  ✗ zfs destroy failed — see error above")))))))
+
+(defn- show-restore-paths [dataset-map consumers snaps]
+  (let [labels (mapv snapshot-label snaps)
+        pick (prompt/choose "Show restore paths for which snapshot?"
+                            (conj labels BACK))]
+    (when (not= pick BACK)
+      (let [chosen (nth snaps (.indexOf ^java.util.List labels pick))
+            snap-name (second (str/split (:name chosen) #"@"))
+            mount (or (:mountpoint dataset-map) (str "/" (:name dataset-map)))
+            host-path (str mount "/.zfs/snapshot/" snap-name)
+            cons (get consumers (:name dataset-map))]
+        (println)
+        (println (format "Snapshot: %s" (:name chosen)))
+        (println "Read-only view of the dataset at that instant:")
+        (println (format "  Host:                %s/" host-path))
+        (doseq [c cons]
+          (println (format "  CT %s (%s):%s%s/.zfs/snapshot/%s/"
+                           (:vmid c) (:name c)
+                           (apply str (repeat (max 1 (- 8 (count (:vmid c)) (count (or (:name c) "")))) " "))
+                           (:path c) snap-name)))
+        (println)
+        (println "Copy files back with e.g.:")
+        (println (format "  cp -a %s/some/file /target/" host-path))
+        (println)
+        (prompt/choose "" [BACK])))))
+
 ;; ─── views ───────────────────────────────────────────────────────────────────
 
-(defn- view-snapshots [cfg dataset]
-  (println)
-  (println (format "── Snapshots: %s ──" dataset))
-  (let [snaps (zfs-snapshots cfg dataset)]
-    (if (empty? snaps)
-      (println "  (no snapshots)")
-      (doseq [s snaps]
-        (println (format "  %-60s  used=%-8s  %s"
-                         (:name s)
-                         (fmt-bytes (:used s))
-                         (fmt-epoch (:creation s))))))
-    (println)
-    (prompt/choose "" [BACK])))
+(defn- view-snapshots [cfg dataset-map consumers]
+  (loop []
+    (let [dataset (:name dataset-map)
+          snaps (zfs-snapshots cfg dataset)]
+      (println)
+      (println (format "── Snapshots: %s ──" dataset))
+      (if (empty? snaps)
+        (println "  (no snapshots)")
+        (doseq [s snaps] (println (str "  " (snapshot-label s)))))
+      (println)
+      (let [items (cond-> ["Create snapshot"]
+                    (seq snaps) (into ["Destroy snapshot"
+                                       "Show restore paths for a snapshot"])
+                    :always (conj BACK))
+            pick (prompt/choose "" items)]
+        (case pick
+          "Create snapshot"                     (do (create-snapshot! cfg dataset) (recur))
+          "Destroy snapshot"                    (do (destroy-snapshot! cfg snaps) (recur))
+          "Show restore paths for a snapshot"   (do (show-restore-paths dataset-map consumers snaps) (recur))
+          nil)))))
 
 (defn- view-pool [cfg pool consumers sections sanoid?]
   (loop []
@@ -232,7 +308,7 @@
               pick (prompt/choose "Select a dataset for details:" labels)]
           (when (not= pick BACK)
             (let [chosen (some #(when (= (:label %) pick) (:dataset %)) rows)]
-              (view-snapshots cfg (:name chosen))
+              (view-snapshots cfg chosen consumers)
               (recur))))))))
 
 (defn- zfs-admin [cfg]
