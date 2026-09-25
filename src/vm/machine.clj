@@ -768,7 +768,7 @@
              "#     # belt-and-suspenders — it catches direct-URL attempts before they"
              "#     # even reach copyparty. Higher priority than the main copyparty"
              "#     # router so it wins the match for .zfs paths. `block-all` is"
-             "#     # provisioned in block-all.yml (seeded automatically alongside"
+             "#     # provisioned in middleware-block-all.yml (seeded automatically alongside"
              "#     # this file) — no local declaration needed."
              "#     copyparty-block-zfs:"
              "#       rule: \"Host(`copyparty.nas.example.com`) && PathRegexp(`.*/\\\\.zfs(/|$)`)\""
@@ -1102,9 +1102,9 @@
           ;; the seeded example.yml.disabled references `middlewares: [block-all]`
           ;; without needing to declare it inline. Only seeded if missing so
           ;; user edits survive `just seed-config`.
-          (when-not (fs/exists? (str ydir "/block-all.yml"))
-            (spit (str ydir "/block-all.yml") traefik-dynamic-block-all)
-            (println (format "Created: %s/block-all.yml (reusable 'reject with 403' middleware)" ydir))))
+          (when-not (fs/exists? (str ydir "/middleware-block-all.yml"))
+            (spit (str ydir "/middleware-block-all.yml") traefik-dynamic-block-all)
+            (println (format "Created: %s/middleware-block-all.yml (reusable 'reject with 403' middleware)" ydir))))
         ;; acme-dns.env — seeded alongside traefik so `just acme-register` has a
         ;; file to append ACME_DNS_API_BASE to. acme-dns.json is created lazily
         ;; by the helper on first successful /register response.
