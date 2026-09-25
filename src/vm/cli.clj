@@ -201,9 +201,13 @@
       "recreate"      (b/recreate-vm @B cfg (arg a 0 nil) (arg a 1 "30G") (arg a 2 ""))
       ;; primitives
       "start"         (b/start @B cfg (arg a 0 nil))
-      "stop"          (b/stop @B cfg (arg a 0 nil))
+      "stop"          (let [n (arg a 0 nil)]
+                        (b/set-autostart @B cfg n false)
+                        (b/stop @B cfg n))
       "reboot"        (b/reboot @B cfg (arg a 0 nil))
-      "force-stop"    (b/force-stop @B cfg (arg a 0 nil))
+      "force-stop"    (let [n (arg a 0 nil)]
+                        (b/set-autostart @B cfg n false)
+                        (b/force-stop @B cfg n))
       "status"        (b/status @B cfg (arg a 0 nil))
       "list"          (b/list-vms @B cfg)
       "console"       (b/console @B cfg (arg a 0 nil))

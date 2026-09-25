@@ -23,6 +23,11 @@
   (stop [this cfg name])
   (reboot [this cfg name])
   (force-stop [this cfg name])
+  (set-autostart [this cfg name enabled?]
+    "Toggle host-boot autostart for this VM/CT. Called by start (on) and by
+    the cli-level stop/force-stop paths (off) so intent set by explicit user
+    commands survives host reboots; internal composites (stop-graceful used by
+    upgrade/recreate) do not touch it.")
   (status [this cfg name])
   (list-vms [this cfg])
   (console [this cfg name])

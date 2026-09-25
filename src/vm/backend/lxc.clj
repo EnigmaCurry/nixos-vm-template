@@ -437,13 +437,19 @@
     (pc/validate! cfg)
     (let [vmid (pc/get-vmid cfg name)]
       (println (format "Starting container: %s (VMID: %s)" name vmid))
-      (pc/pve-ssh! cfg (format "pct start %s" vmid))))
+      (pc/pve-ssh! cfg (format "pct start %s" vmid))
+      (pc/pve-ssh-soft cfg (format "pct set %s --onboot 1" vmid))))
 
   (stop [_ cfg name]
     (pc/validate! cfg)
     (let [vmid (pc/get-vmid cfg name)]
       (println (format "Stopping container: %s (VMID: %s)" name vmid))
       (pc/pve-ssh! cfg (format "pct shutdown %s" vmid))))
+
+  (set-autostart [_ cfg name enabled?]
+    (pc/validate! cfg)
+    (let [vmid (pc/get-vmid cfg name)]
+      (pc/pve-ssh-soft cfg (format "pct set %s --onboot %s" vmid (if enabled? "1" "0")))))
 
   (reboot [_ cfg name]
     (pc/validate! cfg)
