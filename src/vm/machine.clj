@@ -1094,9 +1094,12 @@
           (when-not (fs/exists? (str tdir "/traefik.yml"))
             (spit (str tdir "/traefik.yml") (traefik-yml-template name mutable?))
             (println (format "Created: %s/traefik.yml (edit to configure Traefik)" tdir)))
-          (when-not (fs/exists? (str ydir "/example.yml.disabled"))
-            (spit (str ydir "/example.yml.disabled") traefik-dynamic-example)
-            (println (format "Created: %s/example.yml.disabled (rename to *.yml to activate)" ydir)))
+          ;; Always refresh the reference example — it's a doc/template, not
+          ;; user config, so overwriting on every seed-config keeps the
+          ;; comments and patterns current. Any file the user activated by
+          ;; renaming to *.yml is out of this filename's scope and untouched.
+          (spit (str ydir "/example.yml.disabled") traefik-dynamic-example)
+          (println (format "Wrote:   %s/example.yml.disabled (reference template — always refreshed; rename to *.yml to activate)" ydir))
           ;; Reusable "reject with 403" middleware primitive (block-all).
           ;; Provisioned as an active *.yml so Traefik loads it at all times;
           ;; the seeded example.yml.disabled references `middlewares: [block-all]`
