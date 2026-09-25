@@ -5,7 +5,7 @@
   LXC consumers) -> snapshots. Mutation (create/destroy dataset, attach/edit
   sanoid policy, snapshot lifecycle) lives in follow-ups."
   (:require [clojure.string :as str]
-            [vm.prompt :as prompt]
+            [babashka.process :as p]
             [vm.backend.pve-common :as pve]))
 
 (def ^:private BACK "← Back")
@@ -21,48 +21,52 @@
   [s]
   (first (str/split (str s) #"\s+")))
 
-;; script-wizard signals cancel (ESC / Ctrl-C) by raising through the pod. In
-;; a nested menu we want that to unwind one level, not blow the whole CLI out
-;; with a non-zero exit — so these wrappers translate cancel into the same
-;; value the caller would produce by explicitly picking BACK / leaving the
-;; field blank / answering \"no\". Existing menu loops already handle those
-;; cases, so no call-site logic changes.
+;; script-wizard's babashka pod (which vm.prompt uses everywhere else) signals
+;; cancel (ESC / Ctrl-C) by sending a shutdown message to bb — which calls
+;; System/exit directly, bypassing every try/catch. Not usable for menu-style
+;; UIs where cancel should unwind one level.
 ;;
-;; We catch Throwable (not just Exception) because the pod's cancel path may
-;; surface as things outside the Exception hierarchy — broken-pipe errors if
-;; the pod subprocess exits, sci-level throwables, etc. NIXOS_VM_DEBUG=1
-;; logs the caught throwable to *err* so we can diagnose future surprises
-;; without having to widen the catch again.
+;; Workaround: for admin.clj only, shell out to script-wizard's CLI mode via
+;; babashka.process. Cancel becomes a non-zero exit code that :continue true
+;; returns as data — no way for the subprocess to blow up bb. Uses :in :inherit
+;; + :err :inherit so script-wizard has TTY access; captures stdout for the
+;; picked value.
 
-(defn- debug? [] (contains? #{"1" "true" "yes"} (System/getenv "NIXOS_VM_DEBUG")))
-
-(defn- log-cancel! [tag t-or-v]
-  (when (debug?)
-    (binding [*out* *err*]
-      (if (instance? Throwable t-or-v)
-        (println (format "admin: %s caught: %s: %s"
-                         tag (.getSimpleName (class t-or-v)) (.getMessage t-or-v)))
-        (println (format "admin: %s returned nil (pod signalled cancel via :value nil)" tag))))))
+(defn- sw
+  "Run `script-wizard <argv>` with TTY passthrough for interaction, capturing
+  stdout. Returns {:exit int :out string}. :continue keeps babashka.process
+  from throwing on non-zero exit."
+  [argv]
+  (let [r (p/shell {:out :string :err :inherit :in :inherit :continue true}
+                   (into ["script-wizard"] argv))]
+    {:exit (:exit r) :out (str/trim (str (:out r)))}))
 
 (defn- choose-or-back
-  ([msg items]
-   (let [r (try (prompt/choose msg items) (catch Throwable t (log-cancel! "choose" t) nil))]
-     (if (nil? r) (do (log-cancel! "choose" nil) BACK) r)))
+  ([msg items] (choose-or-back msg items nil))
   ([msg items default]
-   (let [r (try (prompt/choose msg items default) (catch Throwable t (log-cancel! "choose" t) nil))]
-     (if (nil? r) (do (log-cancel! "choose" nil) BACK) r))))
+   (let [argv (cond-> ["choose"]
+                default (into ["-d" (str default)])
+                :always (conj (str msg))
+                :always (into (mapv str items)))
+         {:keys [exit out]} (sw argv)]
+     (if (zero? exit) out BACK))))
 
 (defn- ask-or-nil
-  ([msg] (try (prompt/ask msg) (catch Throwable t (log-cancel! "ask" t) nil)))
-  ([msg default] (try (prompt/ask msg default) (catch Throwable t (log-cancel! "ask" t) nil))))
+  ([msg] (ask-or-nil msg nil))
+  ([msg default]
+   (let [argv (cond-> ["ask" (str msg)]
+                (some? default) (conj (str default)))
+         {:keys [exit out]} (sw argv)]
+     (if (zero? exit) out nil))))
 
 (defn- confirm-or-no
-  ([msg]
-   (let [r (try (prompt/confirm msg) (catch Throwable t (log-cancel! "confirm" t) nil))]
-     (if (nil? r) false r)))
+  ([msg] (confirm-or-no msg nil))
   ([msg default]
-   (let [r (try (prompt/confirm msg default) (catch Throwable t (log-cancel! "confirm" t) nil))]
-     (if (nil? r) false r))))
+   (let [dflt (case default :yes "yes" :no "no" nil)
+         argv (cond-> ["confirm" (str msg)]
+                dflt (conj dflt))
+         {:keys [exit out]} (sw argv)]
+     (if (zero? exit) (= "yes" out) false))))
 
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
@@ -401,9 +405,7 @@
 (defn main-menu
   "Interactive top-level admin menu. The ZFS entry appears only on PVE
   backends (proxmox / proxmox-lxc); other backends see only the Quit option
-  with an explanatory note. Top-level Throwable catch prints the type/message
-  and unwinds cleanly rather than propagating out to cli.clj's -main (which
-  would exit non-zero) — belt-and-suspenders on top of the per-prompt catches."
+  with an explanatory note."
   [cfg]
   (let [pve? (pve-backend? cfg)]
     (loop []
@@ -417,11 +419,5 @@
                     true (conj "Quit"))
             pick (choose-or-back "" items)]
         (cond
-          (= pick "ZFS admin")
-          (do (try (zfs-admin cfg)
-                   (catch Throwable t
-                     (binding [*out* *err*]
-                       (println (format "admin: unwound to main menu (%s: %s)"
-                                        (.getSimpleName (class t)) (.getMessage t))))))
-              (recur))
+          (= pick "ZFS admin") (do (zfs-admin cfg) (recur))
           (= pick "Quit") nil)))))
