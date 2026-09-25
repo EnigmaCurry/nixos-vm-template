@@ -106,6 +106,15 @@ just upgrade <name>           # or: just sync-identity <name>  (LXC only, faster
 devices/folders. If reconciliation fails, `syncthing.service` is stopped via
 `BindsTo` — fix the file and re-run.
 
+**`.stignore` seeding.** On first sight of each folder (i.e. when
+`<path>/.stignore` doesn't exist yet), the reconciler drops a default
+`.stignore` skipping `.hist` (copyparty per-folder state, from the `nas`
+profile) and `.stversions` (syncthing's versioning dir). It's written
+only when missing, so edits you make on the VM survive re-runs. Without
+this you'll hit a stuck-at-N% pull error the first time any peer with
+`.hist` in its ignore list tries to sync a delete: nas has `.hist`
+non-empty (copyparty writes it), so syncthing refuses to remove it.
+
 ## 6. Verify
 
 On the VM:

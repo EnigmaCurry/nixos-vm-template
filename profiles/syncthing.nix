@@ -101,7 +101,7 @@ in
     wants = [ "wg-quick-wg0.service" ];
     requires = [ "syncthing.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.syncthing pkgs.coreutils pkgs.gnused pkgs.gnugrep pkgs.iproute2 ];
+    path = [ pkgs.syncthing pkgs.coreutils pkgs.gnused pkgs.gnugrep pkgs.iproute2 pkgs.curl ];
     # Point `syncthing cli` at the same config + data dirs the daemon is
     # running out of, so it can read cert.pem + config.xml (for the API
     # key) instead of falling back to ~/.local/state/syncthing (which
@@ -141,6 +141,15 @@ in
         echo "$last_err" >&2
         exit 1
       fi
+
+      # API key + GUI URL for the /rest/db/scan trigger below. The address is
+      # loopback-only by profile design, so no TLS. Grep the XML because the
+      # daemon may not always be reachable via `cli show` under load (we're
+      # explicitly avoiding round-tripping through it here).
+      gui_addr=$(sed -nE 's|.*<gui[^>]*enabled=[^>]*>||; s|.*<address>([^<]+)</address>.*|\1|p' \
+                 "$STHOMEDIR/config.xml" 2>/dev/null | head -1)
+      [ -z "$gui_addr" ] && gui_addr=127.0.0.1:8384
+      apikey=$(sed -nE 's|.*<apikey>([^<]+)</apikey>.*|\1|p' "$STHOMEDIR/config.xml" 2>/dev/null | head -1)
 
       # Helper: replace the entire ordered collection at PATH with the given
       # values. `syncthing cli config <path>` treats list-typed properties as
@@ -262,6 +271,30 @@ in
               syncthing cli config folders "$fid" devices "$existing" delete 2>/dev/null || true
             fi
           done
+
+          # Seed a default .stignore covering paths that share the folder tree
+          # but shouldn't sync: copyparty's per-folder state (.hist, from the
+          # nas profile) and syncthing's own versioning dir. Only written when
+          # the file is missing, so user edits are preserved on re-runs. Trigger
+          # a rescan when we just wrote it so a stale pull-error (e.g. a peer
+          # deleting .hist while ours is non-empty) clears immediately.
+          if [ -d "$fpath" ] && [ ! -e "$fpath/.stignore" ]; then
+            cat > "$fpath/.stignore" <<'STIGNORE_EOF'
+# Default ignore patterns installed by syncthing-config.
+# Edit freely — this file is only written when missing; the profile
+# will not overwrite user changes on subsequent runs.
+#
+# Copyparty per-folder state (from the `nas` profile).
+.hist
+# Syncthing's own versioning dir (created when versioning is enabled).
+.stversions
+STIGNORE_EOF
+            echo "syncthing-config: seeded $fpath/.stignore"
+            if [ -n "$apikey" ]; then
+              curl -sS -X POST -H "X-API-Key: $apikey" \
+                "http://$gui_addr/rest/db/scan?folder=$fid" >/dev/null || true
+            fi
+          fi
 
           echo "syncthing-config: folder '$fid' -> $fpath (peers:''${dev_ids:- (none)})"
         done < <(clean "$folders_file")
