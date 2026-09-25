@@ -21,6 +21,25 @@
   [s]
   (first (str/split (str s) #"\s+")))
 
+;; script-wizard raises an exception when the user presses ESC (or Ctrl-C) at
+;; a prompt. In a nested menu we want that to unwind one level, not blow the
+;; whole CLI out with a non-zero exit — so these wrappers translate cancel
+;; into the same value the caller would produce by explicitly picking BACK /
+;; leaving the field blank / answering \"no\". Existing menu loops already
+;; handle those cases, so no call-site logic changes.
+
+(defn- choose-or-back
+  ([msg items] (try (prompt/choose msg items) (catch Exception _ BACK)))
+  ([msg items default] (try (prompt/choose msg items default) (catch Exception _ BACK))))
+
+(defn- ask-or-nil
+  ([msg] (try (prompt/ask msg) (catch Exception _ nil)))
+  ([msg default] (try (prompt/ask msg default) (catch Exception _ nil))))
+
+(defn- confirm-or-no
+  ([msg] (try (prompt/confirm msg) (catch Exception _ false)))
+  ([msg default] (try (prompt/confirm msg default) (catch Exception _ false))))
+
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
   `command -v sanoid` where a non-zero exit is a legitimate answer."
@@ -207,35 +226,37 @@
           (:name s) (fmt-bytes (:used s)) (fmt-epoch (:creation s))))
 
 (defn- create-snapshot! [cfg dataset]
-  (let [snap-name (loop []
-                    (let [v (str/trim (prompt/ask "Snapshot name:" (default-snapshot-name)))]
-                      (cond
-                        (str/blank? v) (recur)
-                        (not (valid-snapshot-name? v))
-                        (do (println "  invalid — use letters, digits, and _-.: only")
-                            (recur))
-                        :else v)))
-        full (str dataset "@" snap-name)]
-    (when (prompt/confirm (format "Create snapshot %s?" full) :yes)
-      (if (pve/pve-ssh-soft cfg (format "zfs snapshot %s" full))
-        (println (format "  ✓ created %s" full))
-        (println "  ✗ zfs snapshot failed — see error above")))))
+  (when-let [snap-name (loop []
+                         (let [raw (ask-or-nil "Snapshot name:" (default-snapshot-name))]
+                           (when raw
+                             (let [v (str/trim raw)]
+                               (cond
+                                 (str/blank? v) (recur)
+                                 (not (valid-snapshot-name? v))
+                                 (do (println "  invalid — use letters, digits, and _-.: only")
+                                     (recur))
+                                 :else v)))))]
+    (let [full (str dataset "@" snap-name)]
+      (when (confirm-or-no (format "Create snapshot %s?" full) :yes)
+        (if (pve/pve-ssh-soft cfg (format "zfs snapshot %s" full))
+          (println (format "  ✓ created %s" full))
+          (println "  ✗ zfs snapshot failed — see error above"))))))
 
 (defn- destroy-snapshot! [cfg snaps]
   (let [labels (mapv snapshot-label snaps)
-        pick (prompt/choose "Destroy which snapshot?" (conj labels BACK))]
+        pick (choose-or-back "Destroy which snapshot?" (conj labels BACK))]
     (when (not= pick BACK)
       (let [key (first-token pick)
             chosen (some #(when (= (:name %) key) %) snaps)
             full (:name chosen)]
-        (when (prompt/confirm (format "Destroy %s? This CANNOT be undone." full) :no)
+        (when (confirm-or-no (format "Destroy %s? This CANNOT be undone." full) :no)
           (if (pve/pve-ssh-soft cfg (format "zfs destroy %s" full))
             (println (format "  ✓ destroyed %s" full))
             (println "  ✗ zfs destroy failed — see error above")))))))
 
 (defn- show-restore-paths [dataset-map consumers snaps]
   (let [labels (mapv snapshot-label snaps)
-        pick (prompt/choose "Show restore paths for which snapshot?"
+        pick (choose-or-back "Show restore paths for which snapshot?"
                             (conj labels BACK))]
     (when (not= pick BACK)
       (let [key (first-token pick)
@@ -257,7 +278,7 @@
         (println "Copy files back with e.g.:")
         (println (format "  cp -a %s/some/file /target/" host-path))
         (println)
-        (prompt/choose "" [BACK])))))
+        (choose-or-back "" [BACK])))))
 
 ;; ─── views ───────────────────────────────────────────────────────────────────
 
@@ -275,7 +296,7 @@
                     (seq snaps) (into ["Destroy snapshot"
                                        "Show restore paths for a snapshot"])
                     :always (conj BACK))
-            pick (prompt/choose "" items)]
+            pick (choose-or-back "" items)]
         (case pick
           "Create snapshot"                     (do (create-snapshot! cfg dataset) (recur))
           "Destroy snapshot"                    (do (destroy-snapshot! cfg snaps) (recur))
@@ -289,7 +310,7 @@
     (let [dss (zfs-datasets cfg pool)]
       (if (empty? dss)
         (do (println "  (no child datasets)")
-            (prompt/choose "" [BACK]))
+            (choose-or-back "" [BACK]))
         (let [rows (mapv (fn [d]
                            (let [pol (when sanoid? (policy-for sections (:name d)))
                                  cons (get consumers (:name d))
@@ -315,7 +336,7 @@
                                              cons-str)}))
                          dss)
               labels (conj (mapv :label rows) BACK)
-              pick (prompt/choose "Select a dataset for details:" labels)]
+              pick (choose-or-back "Select a dataset for details:" labels)]
           (when (not= pick BACK)
             (let [key (first-token pick)
                   chosen (some #(when (= (:name (:dataset %)) key) (:dataset %)) rows)]
@@ -329,7 +350,7 @@
     (if (empty? pools)
       (do (println (format "No ZFS pools found on %s (or the host has no ZFS)."
                            (or (:pve-node cfg) "the PVE node")))
-          (prompt/choose "" [BACK]))
+          (choose-or-back "" [BACK]))
       (let [sanoid? (sanoid-installed? cfg)
             sections (if sanoid? (sanoid-sections (sanoid-config-raw cfg)) [])
             consumers (lxc-consumers cfg)]
@@ -345,7 +366,7 @@
                                              (or (:health p) "?"))})
                            pools)
                 labels (conj (mapv :label rows) BACK)
-                pick (prompt/choose "Select a ZFS pool:" labels)]
+                pick (choose-or-back "Select a ZFS pool:" labels)]
             (when (not= pick BACK)
               (let [pool-name (first-token pick)]
                 (view-pool cfg pool-name consumers sections sanoid?)
@@ -368,7 +389,7 @@
       (let [items (cond-> []
                     pve? (conj "ZFS admin")
                     true (conj "Quit"))
-            pick (prompt/choose "" items)]
+            pick (choose-or-back "" items)]
         (cond
           (= pick "ZFS admin") (do (zfs-admin cfg) (recur))
           (= pick "Quit") nil)))))
