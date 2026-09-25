@@ -37,8 +37,9 @@
   stdout. Returns {:exit int :out string}. :continue keeps babashka.process
   from throwing on non-zero exit."
   [argv]
-  (let [r (p/shell {:out :string :err :inherit :in :inherit :continue true}
-                   (into ["script-wizard"] argv))]
+  (let [r (apply p/shell
+                 {:out :string :err :inherit :in :inherit :continue true}
+                 "script-wizard" argv)]
     {:exit (:exit r) :out (str/trim (str (:out r)))}))
 
 (defn- choose-or-back
