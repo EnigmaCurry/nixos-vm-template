@@ -36,23 +36,33 @@
 
 (defn- debug? [] (contains? #{"1" "true" "yes"} (System/getenv "NIXOS_VM_DEBUG")))
 
-(defn- log-cancel! [t]
+(defn- log-cancel! [tag t-or-v]
   (when (debug?)
     (binding [*out* *err*]
-      (println (format "admin: caught during prompt: %s: %s"
-                       (.getSimpleName (class t)) (.getMessage t))))))
+      (if (instance? Throwable t-or-v)
+        (println (format "admin: %s caught: %s: %s"
+                         tag (.getSimpleName (class t-or-v)) (.getMessage t-or-v)))
+        (println (format "admin: %s returned nil (pod signalled cancel via :value nil)" tag))))))
 
 (defn- choose-or-back
-  ([msg items] (try (prompt/choose msg items) (catch Throwable t (log-cancel! t) BACK)))
-  ([msg items default] (try (prompt/choose msg items default) (catch Throwable t (log-cancel! t) BACK))))
+  ([msg items]
+   (let [r (try (prompt/choose msg items) (catch Throwable t (log-cancel! "choose" t) nil))]
+     (if (nil? r) (do (log-cancel! "choose" nil) BACK) r)))
+  ([msg items default]
+   (let [r (try (prompt/choose msg items default) (catch Throwable t (log-cancel! "choose" t) nil))]
+     (if (nil? r) (do (log-cancel! "choose" nil) BACK) r))))
 
 (defn- ask-or-nil
-  ([msg] (try (prompt/ask msg) (catch Throwable t (log-cancel! t) nil)))
-  ([msg default] (try (prompt/ask msg default) (catch Throwable t (log-cancel! t) nil))))
+  ([msg] (try (prompt/ask msg) (catch Throwable t (log-cancel! "ask" t) nil)))
+  ([msg default] (try (prompt/ask msg default) (catch Throwable t (log-cancel! "ask" t) nil))))
 
 (defn- confirm-or-no
-  ([msg] (try (prompt/confirm msg) (catch Throwable t (log-cancel! t) false)))
-  ([msg default] (try (prompt/confirm msg default) (catch Throwable t (log-cancel! t) false))))
+  ([msg]
+   (let [r (try (prompt/confirm msg) (catch Throwable t (log-cancel! "confirm" t) nil))]
+     (if (nil? r) false r)))
+  ([msg default]
+   (let [r (try (prompt/confirm msg default) (catch Throwable t (log-cancel! "confirm" t) nil))]
+     (if (nil? r) false r))))
 
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
@@ -391,7 +401,9 @@
 (defn main-menu
   "Interactive top-level admin menu. The ZFS entry appears only on PVE
   backends (proxmox / proxmox-lxc); other backends see only the Quit option
-  with an explanatory note."
+  with an explanatory note. Top-level Throwable catch prints the type/message
+  and unwinds cleanly rather than propagating out to cli.clj's -main (which
+  would exit non-zero) — belt-and-suspenders on top of the per-prompt catches."
   [cfg]
   (let [pve? (pve-backend? cfg)]
     (loop []
@@ -405,5 +417,11 @@
                     true (conj "Quit"))
             pick (choose-or-back "" items)]
         (cond
-          (= pick "ZFS admin") (do (zfs-admin cfg) (recur))
+          (= pick "ZFS admin")
+          (do (try (zfs-admin cfg)
+                   (catch Throwable t
+                     (binding [*out* *err*]
+                       (println (format "admin: unwound to main menu (%s: %s)"
+                                        (.getSimpleName (class t)) (.getMessage t))))))
+              (recur))
           (= pick "Quit") nil)))))
