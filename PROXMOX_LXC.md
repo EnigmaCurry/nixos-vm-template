@@ -202,6 +202,20 @@ Because kernel `nfsd` does not work in an unprivileged container, the `nas`
 profile automatically runs the container **privileged** and appends
 `lxc.apparmor.profile: unconfined` to its `pct` config.
 
+### Automatic `.zfs` masking
+
+Each share's ZFS snapshot control directory (`.zfs`) is masked inside the
+container. `nas-shares` bind-mounts an empty read-only directory
+(`/run/nas-shares/empty`) over every `/srv/<share>/.zfs`, so Samba, NFS,
+copyparty, and syncthing all see an empty directory — direct URL / WebDAV /
+`smbclient` lookups of `<share>/.zfs/snapshot/<name>/` resolve to nothing.
+Root on the **PVE host** is unaffected (different mount namespace); browse
+snapshots at `/<dataset>/.zfs/snapshot/` there for maintenance.
+
+Idempotent across `nas-shares` re-runs. Triggered by container restart —
+`just sync-identity <name>` or `just upgrade <name>` picks up any new share
+that needs masking.
+
 ### Required: `nas_hosts` (network-layer scoping)
 
 **Every share is deny-all until you write a rule in `nas_hosts`.** This is

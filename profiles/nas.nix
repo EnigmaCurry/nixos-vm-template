@@ -198,6 +198,18 @@
 
       mkdir -p /etc/exports.d /run/samba /run/copyparty
 
+      # Empty read-only directory used as a bind-mount source to mask each
+      # share's .zfs snapshot control directory (see the mask step in the
+      # main /srv/* loop below). ZFS's snapdir=hidden keeps .zfs out of
+      # readdir() but explicit path lookup — direct URL, WebDAV, smbclient —
+      # still resolves .zfs/snapshot/<name>/, which would expose every
+      # snapshot to any authenticated Samba/copyparty/NFS user. Root:root
+      # 0555 so no service user can write to the source and no non-root user
+      # can accidentally populate it into every share.
+      mkdir -p /run/nas-shares/empty
+      chown root:root /run/nas-shares/empty
+      chmod 0555 /run/nas-shares/empty
+
       # ── helpers ──────────────────────────────────────────────────────
       # Strip comments and blank lines from a file ($1).
       clean() { sed -e 's/#.*//' "$1" 2>/dev/null | grep -vE '^[[:space:]]*$' || true; }
@@ -536,6 +548,22 @@
         # Share root owned by the shared 'nas' identity (setgid so new dirs keep it).
         chown nas:nas "$d" 2>/dev/null || true
         chmod 2775 "$d" 2>/dev/null || true
+
+        # Mask .zfs so container-side services (Samba, NFS, copyparty,
+        # syncthing) cannot resolve /srv/$name/.zfs/snapshot/<name>/ via
+        # direct path lookup. ZFS's snapdir=hidden already keeps .zfs out
+        # of directory listings; this bind-mount closes the explicit-URL
+        # bypass. Only the container's mount namespace is affected — root
+        # on the PVE host still has full access to <dataset>/.zfs for
+        # maintenance. Idempotent: mountpoint check skips re-mounting on
+        # nas-shares re-runs (e.g. after sync-identity).
+        if [ -d "$d/.zfs" ] && ! mountpoint -q "$d/.zfs"; then
+          if mount --bind /run/nas-shares/empty "$d/.zfs" 2>/dev/null; then
+            echo "nas-shares: masked $d/.zfs"
+          else
+            echo "nas-shares: WARNING: failed to mask $d/.zfs — snapshots may be reachable via direct URL" >&2
+          fi
+        fi
 
         # ── Compute per-share host scoping ──
         # Default policy: DENY-ALL for shares not listed in nas_hosts.

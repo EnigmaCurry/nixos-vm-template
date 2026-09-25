@@ -692,6 +692,36 @@
              "ACME_DNS_STORAGE_PATH=/var/lib/traefik/acme-dns.json"
              ""]))
 
+(def ^:private traefik-dynamic-block-all
+  "Reusable \"reject with 403\" middleware primitive, seeded as a live YAML file
+  in the traefik/dynamic dir on first create. Traefik has no native block
+  middleware, so we abuse ipAllowList: the only permitted source range is
+  255.255.255.255/32 (unreachable), which rejects every real request with 403
+  Forbidden before any service is invoked. Referenced by name from routers in
+  user-authored dynamic config (e.g. the copyparty-block-zfs router in the
+  seeded example.yml.disabled)."
+  (str/join "\n"
+            ["# Reusable \"reject with 403\" middleware. Attach `block-all` to any"
+             "# router (typically a higher-priority PathRegexp router) to hard-block"
+             "# a URL pattern at the edge, before any backing service is invoked."
+             "#"
+             "# How it works: Traefik has no native block middleware, so we abuse"
+             "# ipAllowList: the only permitted source range is 255.255.255.255/32"
+             "# (an unreachable IP), so every real request is rejected with 403."
+             "#"
+             "# Provisioned automatically by the traefik profile's seed step; the"
+             "# nas profile's copyparty-block-zfs example router in"
+             "# example.yml.disabled references it. Safe to edit or delete if you"
+             "# want a different rejection primitive."
+             ""
+             "http:"
+             "  middlewares:"
+             "    block-all:"
+             "      ipAllowList:"
+             "        sourceRange:"
+             "          - \"255.255.255.255/32\""
+             ""]))
+
 (def ^:private traefik-dynamic-example
   "Placeholder dynamic-config example seeded alongside traefik.yml. Named with a
   .disabled suffix so Traefik's file provider ignores it until the user renames."
@@ -726,6 +756,25 @@
              "#       # from copyparty anyway. Swap for wg-user if you also want to"
              "#       # serve unauthenticated content from this router (rare)."
              "#       middlewares: [wg-required]"
+             "#       service: copyparty"
+             "#       tls:"
+             "#         certResolver: letsencrypt"
+             "#         domains:"
+             "#           - main: \"*.nas.example.com\""
+             "#     # Defense-in-depth for ZFS snapshot directories: block any request"
+             "#     # whose URL contains /.zfs/ (the ZFS control dir). The nas profile"
+             "#     # already masks .zfs inside the container by bind-mounting an empty"
+             "#     # read-only dir over each /srv/<share>/.zfs, so this router is"
+             "#     # belt-and-suspenders — it catches direct-URL attempts before they"
+             "#     # even reach copyparty. Higher priority than the main copyparty"
+             "#     # router so it wins the match for .zfs paths. `block-all` is"
+             "#     # provisioned in middleware-block-all.yml (seeded automatically alongside"
+             "#     # this file) — no local declaration needed."
+             "#     copyparty-block-zfs:"
+             "#       rule: \"Host(`copyparty.nas.example.com`) && PathRegexp(`.*/\\\\.zfs(/|$)`)\""
+             "#       priority: 100"
+             "#       entryPoints: [websecure]"
+             "#       middlewares: [block-all]"
              "#       service: copyparty"
              "#       tls:"
              "#         certResolver: letsencrypt"
@@ -1045,9 +1094,20 @@
           (when-not (fs/exists? (str tdir "/traefik.yml"))
             (spit (str tdir "/traefik.yml") (traefik-yml-template name mutable?))
             (println (format "Created: %s/traefik.yml (edit to configure Traefik)" tdir)))
-          (when-not (fs/exists? (str ydir "/example.yml.disabled"))
-            (spit (str ydir "/example.yml.disabled") traefik-dynamic-example)
-            (println (format "Created: %s/example.yml.disabled (rename to *.yml to activate)" ydir))))
+          ;; Always refresh the reference example — it's a doc/template, not
+          ;; user config, so overwriting on every seed-config keeps the
+          ;; comments and patterns current. Any file the user activated by
+          ;; renaming to *.yml is out of this filename's scope and untouched.
+          (spit (str ydir "/example.yml.disabled") traefik-dynamic-example)
+          (println (format "Wrote:   %s/example.yml.disabled (reference template — always refreshed; rename to *.yml to activate)" ydir))
+          ;; Reusable "reject with 403" middleware primitive (block-all).
+          ;; Provisioned as an active *.yml so Traefik loads it at all times;
+          ;; the seeded example.yml.disabled references `middlewares: [block-all]`
+          ;; without needing to declare it inline. Only seeded if missing so
+          ;; user edits survive `just seed-config`.
+          (when-not (fs/exists? (str ydir "/middleware-block-all.yml"))
+            (spit (str ydir "/middleware-block-all.yml") traefik-dynamic-block-all)
+            (println (format "Created: %s/middleware-block-all.yml (reusable 'reject with 403' middleware)" ydir))))
         ;; acme-dns.env — seeded alongside traefik so `just acme-register` has a
         ;; file to append ACME_DNS_API_BASE to. acme-dns.json is created lazily
         ;; by the helper on first successful /register response.

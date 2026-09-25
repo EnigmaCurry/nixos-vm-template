@@ -244,6 +244,11 @@ shell:
 test-connection:
     @{{VM_CLI}} test-connection
 
+# Interactive admin menu — host-side tasks that don't belong to any single VM
+# (currently: ZFS pool / dataset / snapshot overview on Proxmox hosts).
+admin:
+    @{{VM_CLI}} admin
+
 # Configure Woodpecker CI secrets for S3 image uploads
 # Required env vars: WOODPECKER_SERVER, WOODPECKER_TOKEN, CI_REPO,
 #   S3_BUCKET, S3_PUBLIC_URL, S3_PROVIDER, S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID
