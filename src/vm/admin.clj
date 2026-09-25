@@ -21,24 +21,38 @@
   [s]
   (first (str/split (str s) #"\s+")))
 
-;; script-wizard raises an exception when the user presses ESC (or Ctrl-C) at
-;; a prompt. In a nested menu we want that to unwind one level, not blow the
-;; whole CLI out with a non-zero exit — so these wrappers translate cancel
-;; into the same value the caller would produce by explicitly picking BACK /
-;; leaving the field blank / answering \"no\". Existing menu loops already
-;; handle those cases, so no call-site logic changes.
+;; script-wizard signals cancel (ESC / Ctrl-C) by raising through the pod. In
+;; a nested menu we want that to unwind one level, not blow the whole CLI out
+;; with a non-zero exit — so these wrappers translate cancel into the same
+;; value the caller would produce by explicitly picking BACK / leaving the
+;; field blank / answering \"no\". Existing menu loops already handle those
+;; cases, so no call-site logic changes.
+;;
+;; We catch Throwable (not just Exception) because the pod's cancel path may
+;; surface as things outside the Exception hierarchy — broken-pipe errors if
+;; the pod subprocess exits, sci-level throwables, etc. NIXOS_VM_DEBUG=1
+;; logs the caught throwable to *err* so we can diagnose future surprises
+;; without having to widen the catch again.
+
+(defn- debug? [] (contains? #{"1" "true" "yes"} (System/getenv "NIXOS_VM_DEBUG")))
+
+(defn- log-cancel! [t]
+  (when (debug?)
+    (binding [*out* *err*]
+      (println (format "admin: caught during prompt: %s: %s"
+                       (.getSimpleName (class t)) (.getMessage t))))))
 
 (defn- choose-or-back
-  ([msg items] (try (prompt/choose msg items) (catch Exception _ BACK)))
-  ([msg items default] (try (prompt/choose msg items default) (catch Exception _ BACK))))
+  ([msg items] (try (prompt/choose msg items) (catch Throwable t (log-cancel! t) BACK)))
+  ([msg items default] (try (prompt/choose msg items default) (catch Throwable t (log-cancel! t) BACK))))
 
 (defn- ask-or-nil
-  ([msg] (try (prompt/ask msg) (catch Exception _ nil)))
-  ([msg default] (try (prompt/ask msg default) (catch Exception _ nil))))
+  ([msg] (try (prompt/ask msg) (catch Throwable t (log-cancel! t) nil)))
+  ([msg default] (try (prompt/ask msg default) (catch Throwable t (log-cancel! t) nil))))
 
 (defn- confirm-or-no
-  ([msg] (try (prompt/confirm msg) (catch Exception _ false)))
-  ([msg default] (try (prompt/confirm msg default) (catch Exception _ false))))
+  ([msg] (try (prompt/confirm msg) (catch Throwable t (log-cancel! t) false)))
+  ([msg default] (try (prompt/confirm msg default) (catch Throwable t (log-cancel! t) false))))
 
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
