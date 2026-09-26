@@ -1,9 +1,11 @@
 (ns vm.admin
   "Top-level `just admin` menu for host-side administrative tasks that don't
   belong to any individual VM. Currently ships a single submenu — ZFS admin —
-  which is read-only in this cut: pools -> datasets (with sanoid policy and
-  LXC consumers) -> snapshots. Mutation (create/destroy dataset, attach/edit
-  sanoid policy, snapshot lifecycle) lives in follow-ups."
+  which drills pools -> datasets (with sanoid policy and LXC consumers) ->
+  snapshots. Supports creating datasets, taking/destroying snapshots, and
+  setting / changing / removing sanoid snapshot policies (policies are only
+  written to /etc/sanoid/sanoid.d/nixos-vm-template.conf; policies defined
+  elsewhere are read-only from the admin menu's perspective)."
   (:require [clojure.string :as str]
             [babashka.process :as p]
             [vm.backend.pve-common :as pve]))
@@ -66,8 +68,11 @@
    (let [dflt (case default :yes "yes" :no "no" nil)
          argv (cond-> ["confirm" (str msg)]
                 dflt (conj dflt))
-         {:keys [exit out]} (sw argv)]
-     (if (zero? exit) (= "yes" out) false))))
+         {:keys [exit]} (sw argv)]
+     ;; script-wizard `confirm` signals the answer via exit code alone
+     ;; (0 = yes, non-zero = no or cancel); it writes nothing to stdout,
+     ;; so a stdout-based check would treat every "yes" as "no".
+     (zero? exit))))
 
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
@@ -321,32 +326,82 @@
 
 ;; ─── views ───────────────────────────────────────────────────────────────────
 
-(defn- view-snapshots [cfg dataset-map consumers]
+;; `view-snapshots` is a leaf of the pool-drill-down; the policy helpers it
+;; calls are grouped with the create-dataset flow below since they were
+;; written for that flow and stayed there when Manage-existing gained edit
+;; capabilities. Forward-declared here rather than reshuffling the sections.
+(declare policy-in-admin-file? remove-sanoid-section! pick-and-write-policy!)
+
+(defn- policy-info-line
+  "Human-readable annotation for the header of `view-snapshots`. Nil if
+  nothing to say (sanoid absent or no effective policy)."
+  [sanoid? effective in-admin-file? dataset]
+  (cond
+    (not sanoid?) nil
+    (nil? effective) "(policy: none)"
+    (= (:name effective) dataset)
+    (if in-admin-file?
+      (format "(policy: %s — managed here)" (:name effective))
+      (format "(policy: %s — defined outside admin-managed config)" (:name effective)))
+    :else
+    (format "(policy: inherited from %s%s)"
+            (:name effective) (if (:recursive? effective) " (recursive)" ""))))
+
+(defn- view-snapshots [cfg dataset-map consumers sanoid?]
   (loop []
     (let [dataset (:name dataset-map)
-          snaps (zfs-snapshots cfg dataset)]
+          snaps (zfs-snapshots cfg dataset)
+          raw (when sanoid? (sanoid-config-raw cfg))
+          sections (if sanoid? (sanoid-sections raw) [])
+          effective (policy-for sections dataset)
+          in-admin? (when sanoid? (policy-in-admin-file? cfg dataset))
+          info (policy-info-line sanoid? effective in-admin? dataset)]
       (println)
       (println (format "── Snapshots: %s ──" dataset))
+      (when info (println (str "  " info)))
       (if (empty? snaps)
         (println "  (no snapshots)")
         (doseq [s snaps] (println (str "  " (snapshot-label s)))))
       (println)
-      (let [items (cond-> ["Create snapshot"]
+      (let [;; Policy items: only offered when sanoid is installed. If a
+            ;; section already lives in the admin-managed file we can edit or
+            ;; remove it; otherwise the only action is Set (which may
+            ;; override an inherited/external policy by writing a more
+            ;; specific section).
+            policy-items (cond
+                           (not sanoid?) []
+                           in-admin? ["Change snapshot policy" "Remove snapshot policy"]
+                           :else ["Set snapshot policy"])
+            items (cond-> ["Create snapshot"]
                     (seq snaps) (into ["Destroy snapshot"
                                        "Show restore paths for a snapshot"])
+                    (seq policy-items) (into policy-items)
                     :always (conj BACK))
             pick (choose-or-back "" items)]
         (case pick
           "Create snapshot"                     (do (create-snapshot! cfg dataset) (recur))
           "Destroy snapshot"                    (do (destroy-snapshot! cfg snaps) (recur))
           "Show restore paths for a snapshot"   (do (show-restore-paths dataset-map consumers snaps) (recur))
+          "Set snapshot policy"                 (do (pick-and-write-policy! cfg dataset raw) (recur))
+          "Change snapshot policy"              (do (when (remove-sanoid-section! cfg dataset)
+                                                      (pick-and-write-policy! cfg dataset raw))
+                                                    (recur))
+          "Remove snapshot policy"              (do (when (confirm-or-no
+                                                           (format "Remove snapshot policy for %s?" dataset)
+                                                           :no)
+                                                      (when (remove-sanoid-section! cfg dataset)
+                                                        (println (format "  ✓ removed policy for %s" dataset))))
+                                                    (recur))
           nil)))))
 
-(defn- view-pool [cfg pool consumers sections sanoid?]
+(defn- view-pool [cfg pool consumers sanoid?]
   (loop []
     (println)
     (println (format "── Pool: %s ──" pool))
-    (let [dss (zfs-datasets cfg pool)]
+    ;; Re-fetch datasets *and* the sanoid config each iteration so policies
+    ;; attached/removed from view-snapshots reflect in the labels.
+    (let [dss (zfs-datasets cfg pool)
+          sections (if sanoid? (sanoid-sections (sanoid-config-raw cfg)) [])]
       (if (empty? dss)
         (do (println "  (no child datasets)")
             (choose-or-back "" [BACK]))
@@ -379,7 +434,7 @@
           (when (not= pick BACK)
             (let [key (first-token pick)
                   chosen (some #(when (= (:name (:dataset %)) key) (:dataset %)) rows)]
-              (view-snapshots cfg chosen consumers)
+              (view-snapshots cfg chosen consumers sanoid?)
               (recur))))))))
 
 ;; ─── dataset creation + snapshot-policy attach ──────────────────────────────
@@ -397,6 +452,9 @@
 
 (defn- b64 ^String [^String s]
   (.encodeToString (java.util.Base64/getEncoder) (.getBytes s "UTF-8")))
+
+(def ^:private admin-sanoid-file
+  "/etc/sanoid/sanoid.d/nixos-vm-template.conf")
 
 (defn- write-sanoid-section!
   "Append a `[dataset]` section (with body-lines, one per line, auto-indented)
@@ -416,10 +474,43 @@
              "{ echo " (b64 (str include-line "\n")) " | base64 -d "
              ">> /etc/sanoid/sanoid.conf; } && "
              "echo " (b64 section) " | base64 -d "
-             ">> /etc/sanoid/sanoid.d/nixos-vm-template.conf")]
+             ">> " admin-sanoid-file)]
     (try (pve/pve-ssh! cfg cmd) true
          (catch Throwable t
            (println (format "  ✗ failed to write sanoid config: %s" (.getMessage t)))
+           false))))
+
+(defn- policy-in-admin-file?
+  "Whether the admin-managed sanoid file has a section header exactly matching
+  [dataset]. Passes the target via base64 to sidestep shell quoting."
+  [cfg dataset]
+  (pve/pve-ssh-ok?
+   cfg
+   (format (str "tgt=$(echo %s | base64 -d) && "
+                "grep -qxF \"$tgt\" %s 2>/dev/null")
+           (b64 (str "[" dataset "]")) admin-sanoid-file)))
+
+(defn- remove-sanoid-section!
+  "Strip any [dataset] section (header line and body lines through the next
+  section header) from the admin-managed sanoid file. No-op if the file or
+  section is absent. Only touches admin-sanoid-file; sections defined
+  elsewhere are left untouched."
+  [cfg dataset]
+  (let [awk-body (str "BEGIN{skip=0} "
+                      "/^[[:space:]]*\\[.+\\][[:space:]]*$/{"
+                      "match($0,/\\[.+\\]/); "
+                      "sec=substr($0,RSTART+1,RLENGTH-2); "
+                      "skip=(sec==tgt)?1:0"
+                      "} "
+                      "!skip{print}")
+        cmd (str "f=" admin-sanoid-file "; "
+                 "[ -f \"$f\" ] || exit 0; "
+                 "tgt=$(echo " (b64 dataset) " | base64 -d); "
+                 "awk -v tgt=\"$tgt\" '" awk-body "' \"$f\" > \"$f.tmp\" && "
+                 "mv \"$f.tmp\" \"$f\"")]
+    (try (pve/pve-ssh! cfg cmd) true
+         (catch Throwable t
+           (println (format "  ✗ failed to update sanoid config: %s" (.getMessage t)))
            false))))
 
 (defn- prompt-custom-retention
@@ -454,6 +545,39 @@
    "production (hourly=36, daily=30, monthly=3)"
    ["hourly = 36" "daily = 30" "monthly = 3" "autosnap = yes" "autoprune = yes"]})
 
+(defn- pick-and-write-policy!
+  "Prompt for a policy choice (template / hardcoded / custom / none / back)
+  and write it to the admin-managed sanoid file. raw is the concatenated
+  sanoid config (for template detection). No outer confirm — call sites are
+  expected to already know the user is committing to attaching a policy."
+  [cfg dataset raw]
+  (let [templates (sanoid-templates raw)
+        template-labels (mapv #(str % " (use_template)") templates)
+        hardcoded-labels (vec (sort (keys hardcoded-policies)))
+        options (cond-> []
+                  (seq template-labels) (into template-labels)
+                  (empty? template-labels) (into hardcoded-labels)
+                  :always (into ["custom (enter retention inline)" "none"]))
+        pick (choose-or-back "Choose a snapshot policy:" (conj options BACK))]
+    (cond
+      (contains? #{BACK "none"} pick)
+      (println "  (no policy attached)")
+
+      (str/ends-with? pick " (use_template)")
+      (let [tpl (str/replace pick #" \(use_template\)$" "")]
+        (when (write-sanoid-section! cfg dataset [(str "use_template = " tpl)])
+          (println (format "  ✓ attached policy: use_template = %s" tpl))))
+
+      (contains? hardcoded-policies pick)
+      (when (write-sanoid-section! cfg dataset (get hardcoded-policies pick))
+        (println (format "  ✓ attached policy: %s" pick)))
+
+      (= pick "custom (enter retention inline)")
+      (if-let [body (prompt-custom-retention)]
+        (when (write-sanoid-section! cfg dataset body)
+          (println "  ✓ attached custom policy"))
+        (println "  (cancelled — no policy attached)")))))
+
 (defn- attach-snapshot-policy!
   "After a dataset is created, offer to attach a sanoid snapshot policy.
   raw = concatenated sanoid config (for template detection); nil when sanoid
@@ -468,32 +592,7 @@
     nil
 
     :else
-    (let [templates (sanoid-templates raw)
-          template-labels (mapv #(str % " (use_template)") templates)
-          hardcoded-labels (vec (sort (keys hardcoded-policies)))
-          options (cond-> []
-                    (seq template-labels) (into template-labels)
-                    (empty? template-labels) (into hardcoded-labels)
-                    :always (into ["custom (enter retention inline)" "none"]))
-          pick (choose-or-back "Choose a snapshot policy:" (conj options BACK))]
-      (cond
-        (contains? #{BACK "none"} pick)
-        (println "  (no policy attached)")
-
-        (str/ends-with? pick " (use_template)")
-        (let [tpl (str/replace pick #" \(use_template\)$" "")]
-          (when (write-sanoid-section! cfg dataset [(str "use_template = " tpl)])
-            (println (format "  ✓ attached policy: use_template = %s" tpl))))
-
-        (contains? hardcoded-policies pick)
-        (when (write-sanoid-section! cfg dataset (get hardcoded-policies pick))
-          (println (format "  ✓ attached policy: %s" pick)))
-
-        (= pick "custom (enter retention inline)")
-        (if-let [body (prompt-custom-retention)]
-          (when (write-sanoid-section! cfg dataset body)
-            (println "  ✓ attached custom policy"))
-          (println "  (cancelled — no policy attached)"))))))
+    (pick-and-write-policy! cfg dataset raw)))
 
 (defn- create-dataset!
   "Interactive: pick a pool, prompt for a dataset name, validate, `zfs create -p`,
@@ -531,7 +630,7 @@
 
 (defn- manage-existing-datasets
   "Original pool-selection loop, now a leaf of the zfs-admin submenu."
-  [cfg pools consumers sections sanoid?]
+  [cfg pools consumers sanoid?]
   (loop []
     (let [rows (mapv (fn [p]
                        {:pool p
@@ -545,7 +644,7 @@
           pick (choose-or-back "Select a ZFS pool:" labels)]
       (when (not= pick BACK)
         (let [pool-name (first-token pick)]
-          (view-pool cfg pool-name consumers sections sanoid?)
+          (view-pool cfg pool-name consumers sanoid?)
           (recur))))))
 
 (defn- zfs-admin [cfg]
@@ -561,10 +660,9 @@
         (when-not sanoid?
           (println "(sanoid not installed on host — policy column hidden)"))
         (loop []
-          ;; Re-fetch sanoid config each iteration so newly-attached policies
-          ;; show up in Manage without leaving the ZFS admin menu.
+          ;; Re-fetch sanoid config each iteration so create-dataset!'s
+          ;; template-detection sees the current state.
           (let [raw (when sanoid? (sanoid-config-raw cfg))
-                sections (if sanoid? (sanoid-sections raw) [])
                 pick (choose-or-back ""
                                      ["Create new ZFS dataset"
                                       "Manage existing ZFS datasets"
@@ -574,7 +672,7 @@
               (do (create-dataset! cfg pools sanoid? raw) (recur))
 
               "Manage existing ZFS datasets"
-              (do (manage-existing-datasets cfg pools consumers sections sanoid?)
+              (do (manage-existing-datasets cfg pools consumers sanoid?)
                   (recur))
 
               nil)))))))
