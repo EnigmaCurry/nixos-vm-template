@@ -475,13 +475,19 @@
     (validate! cfg)
     (let [vmid (get-vmid cfg name)]
       (println (format "Starting VM: %s (VMID: %s)" name vmid))
-      (pve-ssh! cfg (format "qm start %s" vmid))))
+      (pve-ssh! cfg (format "qm start %s" vmid))
+      (pve-ssh-soft cfg (format "qm set %s --onboot 1" vmid))))
 
   (stop [_ cfg name]
     (validate! cfg)
     (let [vmid (get-vmid cfg name)]
       (println (format "Stopping VM: %s (VMID: %s)" name vmid))
       (pve-ssh! cfg (format "qm shutdown %s" vmid))))
+
+  (set-autostart [_ cfg name enabled?]
+    (validate! cfg)
+    (let [vmid (get-vmid cfg name)]
+      (pve-ssh-soft cfg (format "qm set %s --onboot %s" vmid (if enabled? "1" "0")))))
 
   (reboot [_ cfg name]
     (validate! cfg)

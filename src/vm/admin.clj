@@ -1,12 +1,17 @@
 (ns vm.admin
-  "Top-level `just admin` menu for host-side administrative tasks that don't
-  belong to any individual VM. Currently ships a single submenu — ZFS admin —
-  which is read-only in this cut: pools -> datasets (with sanoid policy and
-  LXC consumers) -> snapshots. Mutation (create/destroy dataset, attach/edit
-  sanoid policy, snapshot lifecycle) lives in follow-ups."
+  "Top-level `just admin` menu for host-side administrative tasks. Ships:
+  Manage machines (state-aware Config / Upgrade / Start / Stop / Destroy /
+  Purge per VM or CT — actions shell out to the CLI so a child cancel can't
+  System/exit the menu); Create machine (prompts for a name then hands off to
+  `bb -m vm.cli create`); ZFS admin (PVE-only, drills pools -> datasets ->
+  snapshots, with dataset create + sanoid policy Set/Change/Remove — policies
+  are only written to /etc/sanoid/sanoid.d/nixos-vm-template.conf; policies
+  defined elsewhere are read-only from the admin menu's perspective)."
   (:require [clojure.string :as str]
             [babashka.process :as p]
-            [vm.backend.pve-common :as pve]))
+            [vm.backend :as b]
+            [vm.backend.pve-common :as pve]
+            [vm.machine :as machine]))
 
 (def ^:private BACK "← Back")
 
@@ -66,8 +71,11 @@
    (let [dflt (case default :yes "yes" :no "no" nil)
          argv (cond-> ["confirm" (str msg)]
                 dflt (conj dflt))
-         {:keys [exit out]} (sw argv)]
-     (if (zero? exit) (= "yes" out) false))))
+         {:keys [exit]} (sw argv)]
+     ;; script-wizard `confirm` signals the answer via exit code alone
+     ;; (0 = yes, non-zero = no or cancel); it writes nothing to stdout,
+     ;; so a stdout-based check would treat every "yes" as "no".
+     (zero? exit))))
 
 (defn- ssh-quiet
   "pve-ssh that swallows failure (returns \"\"). For optional probes like
@@ -166,6 +174,16 @@
         (->> (if cur (conj acc cur) acc)
              (remove #(str/starts-with? (:name %) "template_"))
              vec)))))
+
+(defn- sanoid-templates
+  "Parse a sanoid config, return sorted names of `template_*` sections. These
+  are what the `use_template = X` directive references from dataset sections."
+  [raw]
+  (->> (str/split-lines (or raw ""))
+       (map #(str/replace % #"[#;].*$" ""))
+       (map str/trim)
+       (keep #(second (re-matches #"^\[(template_.+)\]$" %)))
+       sort vec))
 
 (defn- policy-for
   "Section covering `dataset` — exact match wins over recursive ancestor."
@@ -311,32 +329,82 @@
 
 ;; ─── views ───────────────────────────────────────────────────────────────────
 
-(defn- view-snapshots [cfg dataset-map consumers]
+;; `view-snapshots` is a leaf of the pool-drill-down; the policy helpers it
+;; calls are grouped with the create-dataset flow below since they were
+;; written for that flow and stayed there when Manage-existing gained edit
+;; capabilities. Forward-declared here rather than reshuffling the sections.
+(declare policy-in-admin-file? remove-sanoid-section! pick-and-write-policy!)
+
+(defn- policy-info-line
+  "Human-readable annotation for the header of `view-snapshots`. Nil if
+  nothing to say (sanoid absent or no effective policy)."
+  [sanoid? effective in-admin-file? dataset]
+  (cond
+    (not sanoid?) nil
+    (nil? effective) "(policy: none)"
+    (= (:name effective) dataset)
+    (if in-admin-file?
+      (format "(policy: %s — managed here)" (:name effective))
+      (format "(policy: %s — defined outside admin-managed config)" (:name effective)))
+    :else
+    (format "(policy: inherited from %s%s)"
+            (:name effective) (if (:recursive? effective) " (recursive)" ""))))
+
+(defn- view-snapshots [cfg dataset-map consumers sanoid?]
   (loop []
     (let [dataset (:name dataset-map)
-          snaps (zfs-snapshots cfg dataset)]
+          snaps (zfs-snapshots cfg dataset)
+          raw (when sanoid? (sanoid-config-raw cfg))
+          sections (if sanoid? (sanoid-sections raw) [])
+          effective (policy-for sections dataset)
+          in-admin? (when sanoid? (policy-in-admin-file? cfg dataset))
+          info (policy-info-line sanoid? effective in-admin? dataset)]
       (println)
       (println (format "── Snapshots: %s ──" dataset))
+      (when info (println (str "  " info)))
       (if (empty? snaps)
         (println "  (no snapshots)")
         (doseq [s snaps] (println (str "  " (snapshot-label s)))))
       (println)
-      (let [items (cond-> ["Create snapshot"]
+      (let [;; Policy items: only offered when sanoid is installed. If a
+            ;; section already lives in the admin-managed file we can edit or
+            ;; remove it; otherwise the only action is Set (which may
+            ;; override an inherited/external policy by writing a more
+            ;; specific section).
+            policy-items (cond
+                           (not sanoid?) []
+                           in-admin? ["Change snapshot policy" "Remove snapshot policy"]
+                           :else ["Set snapshot policy"])
+            items (cond-> ["Create snapshot"]
                     (seq snaps) (into ["Destroy snapshot"
                                        "Show restore paths for a snapshot"])
+                    (seq policy-items) (into policy-items)
                     :always (conj BACK))
             pick (choose-or-back "" items)]
         (case pick
           "Create snapshot"                     (do (create-snapshot! cfg dataset) (recur))
           "Destroy snapshot"                    (do (destroy-snapshot! cfg snaps) (recur))
           "Show restore paths for a snapshot"   (do (show-restore-paths dataset-map consumers snaps) (recur))
+          "Set snapshot policy"                 (do (pick-and-write-policy! cfg dataset raw) (recur))
+          "Change snapshot policy"              (do (when (remove-sanoid-section! cfg dataset)
+                                                      (pick-and-write-policy! cfg dataset raw))
+                                                    (recur))
+          "Remove snapshot policy"              (do (when (confirm-or-no
+                                                           (format "Remove snapshot policy for %s?" dataset)
+                                                           :no)
+                                                      (when (remove-sanoid-section! cfg dataset)
+                                                        (println (format "  ✓ removed policy for %s" dataset))))
+                                                    (recur))
           nil)))))
 
-(defn- view-pool [cfg pool consumers sections sanoid?]
+(defn- view-pool [cfg pool consumers sanoid?]
   (loop []
     (println)
     (println (format "── Pool: %s ──" pool))
-    (let [dss (zfs-datasets cfg pool)]
+    ;; Re-fetch datasets *and* the sanoid config each iteration so policies
+    ;; attached/removed from view-snapshots reflect in the labels.
+    (let [dss (zfs-datasets cfg pool)
+          sections (if sanoid? (sanoid-sections (sanoid-config-raw cfg)) [])]
       (if (empty? dss)
         (do (println "  (no child datasets)")
             (choose-or-back "" [BACK]))
@@ -369,8 +437,218 @@
           (when (not= pick BACK)
             (let [key (first-token pick)
                   chosen (some #(when (= (:name (:dataset %)) key) (:dataset %)) rows)]
-              (view-snapshots cfg chosen consumers)
+              (view-snapshots cfg chosen consumers sanoid?)
               (recur))))))))
+
+;; ─── dataset creation + snapshot-policy attach ──────────────────────────────
+
+(defn- valid-dataset-name?
+  "ZFS accepts [A-Za-z0-9_.-:] and / for nesting. Each segment must start with
+  an alphanumeric or _, and must not start with a dot."
+  [s]
+  (boolean
+   (and (not (str/blank? s))
+        (re-matches #"[A-Za-z0-9_][A-Za-z0-9_.:\-]*(/[A-Za-z0-9_][A-Za-z0-9_.:\-]*)*" s))))
+
+(defn- dataset-exists? [cfg full]
+  (pve/pve-ssh-ok? cfg (format "zfs list -H -o name %s 2>/dev/null" full)))
+
+(defn- b64 ^String [^String s]
+  (.encodeToString (java.util.Base64/getEncoder) (.getBytes s "UTF-8")))
+
+(def ^:private admin-sanoid-file
+  "/etc/sanoid/sanoid.d/nixos-vm-template.conf")
+
+(defn- write-sanoid-section!
+  "Append a `[dataset]` section (with body-lines, one per line, auto-indented)
+  to /etc/sanoid/sanoid.d/nixos-vm-template.conf on the PVE host. Ensures
+  sanoid.conf carries an `!include /etc/sanoid/sanoid.d/*.conf` line so the
+  section is actually loaded. Returns true on success, false on failure. Uses
+  base64 so shell quoting never touches user-supplied content."
+  [cfg dataset body-lines]
+  (let [section (str "\n[" dataset "]\n"
+                     (str/join "\n" (map #(str "    " %) body-lines))
+                     "\n")
+        include-line "!include /etc/sanoid/sanoid.d/*.conf"
+        cmd (str
+             "mkdir -p /etc/sanoid/sanoid.d && "
+             "touch /etc/sanoid/sanoid.conf && "
+             "grep -qxF '" include-line "' /etc/sanoid/sanoid.conf || "
+             "{ echo " (b64 (str include-line "\n")) " | base64 -d "
+             ">> /etc/sanoid/sanoid.conf; } && "
+             "echo " (b64 section) " | base64 -d "
+             ">> " admin-sanoid-file)]
+    (try (pve/pve-ssh! cfg cmd) true
+         (catch Throwable t
+           (println (format "  ✗ failed to write sanoid config: %s" (.getMessage t)))
+           false))))
+
+(defn- policy-in-admin-file?
+  "Whether the admin-managed sanoid file has a section header exactly matching
+  [dataset]. Passes the target via base64 to sidestep shell quoting."
+  [cfg dataset]
+  (pve/pve-ssh-ok?
+   cfg
+   (format (str "tgt=$(echo %s | base64 -d) && "
+                "grep -qxF \"$tgt\" %s 2>/dev/null")
+           (b64 (str "[" dataset "]")) admin-sanoid-file)))
+
+(defn- remove-sanoid-section!
+  "Strip any [dataset] section (header line and body lines through the next
+  section header) from the admin-managed sanoid file. No-op if the file or
+  section is absent. Only touches admin-sanoid-file; sections defined
+  elsewhere are left untouched."
+  [cfg dataset]
+  (let [awk-body (str "BEGIN{skip=0} "
+                      "/^[[:space:]]*\\[.+\\][[:space:]]*$/{"
+                      "match($0,/\\[.+\\]/); "
+                      "sec=substr($0,RSTART+1,RLENGTH-2); "
+                      "skip=(sec==tgt)?1:0"
+                      "} "
+                      "!skip{print}")
+        cmd (str "f=" admin-sanoid-file "; "
+                 "[ -f \"$f\" ] || exit 0; "
+                 "tgt=$(echo " (b64 dataset) " | base64 -d); "
+                 "awk -v tgt=\"$tgt\" '" awk-body "' \"$f\" > \"$f.tmp\" && "
+                 "mv \"$f.tmp\" \"$f\"")]
+    (try (pve/pve-ssh! cfg cmd) true
+         (catch Throwable t
+           (println (format "  ✗ failed to update sanoid config: %s" (.getMessage t)))
+           false))))
+
+(defn- prompt-custom-retention
+  "Ask for hourly/daily/weekly/monthly counts. Returns body-lines vector, or
+  nil if the user cancelled at any step."
+  []
+  (let [ask-int (fn [msg default]
+                  (loop []
+                    (when-let [raw (ask-or-nil msg default)]
+                      (let [t (str/trim raw)]
+                        (if (re-matches #"\d+" t)
+                          t
+                          (do (println "  must be a non-negative integer")
+                              (recur)))))))
+        h (ask-int "Hourly snapshots to keep (0 = none):" "24")
+        d (when h (ask-int "Daily snapshots to keep:" "7"))
+        w (when d (ask-int "Weekly snapshots to keep:" "4"))
+        m (when w (ask-int "Monthly snapshots to keep:" "12"))]
+    (when (and h d w m)
+      [(str "hourly = " h)
+       (str "daily = " d)
+       (str "weekly = " w)
+       (str "monthly = " m)
+       "autosnap = yes"
+       "autoprune = yes"])))
+
+(def ^:private hardcoded-policies
+  "Canned policy presets shown when the host's sanoid config has no templates
+  defined. Written inline (not `use_template`) so no template dependency."
+  {"frequent (hourly=48, daily=7)"
+   ["hourly = 48" "daily = 7" "autosnap = yes" "autoprune = yes"]
+   "production (hourly=36, daily=30, monthly=3)"
+   ["hourly = 36" "daily = 30" "monthly = 3" "autosnap = yes" "autoprune = yes"]})
+
+(defn- pick-and-write-policy!
+  "Prompt for a policy choice (template / hardcoded / custom / none / back)
+  and write it to the admin-managed sanoid file. raw is the concatenated
+  sanoid config (for template detection). No outer confirm — call sites are
+  expected to already know the user is committing to attaching a policy."
+  [cfg dataset raw]
+  (let [templates (sanoid-templates raw)
+        template-labels (mapv #(str % " (use_template)") templates)
+        hardcoded-labels (vec (sort (keys hardcoded-policies)))
+        options (cond-> []
+                  (seq template-labels) (into template-labels)
+                  (empty? template-labels) (into hardcoded-labels)
+                  :always (into ["custom (enter retention inline)" "none"]))
+        pick (choose-or-back "Choose a snapshot policy:" (conj options BACK))]
+    (cond
+      (contains? #{BACK "none"} pick)
+      (println "  (no policy attached)")
+
+      (str/ends-with? pick " (use_template)")
+      (let [tpl (str/replace pick #" \(use_template\)$" "")]
+        (when (write-sanoid-section! cfg dataset [(str "use_template = " tpl)])
+          (println (format "  ✓ attached policy: use_template = %s" tpl))))
+
+      (contains? hardcoded-policies pick)
+      (when (write-sanoid-section! cfg dataset (get hardcoded-policies pick))
+        (println (format "  ✓ attached policy: %s" pick)))
+
+      (= pick "custom (enter retention inline)")
+      (if-let [body (prompt-custom-retention)]
+        (when (write-sanoid-section! cfg dataset body)
+          (println "  ✓ attached custom policy"))
+        (println "  (cancelled — no policy attached)")))))
+
+(defn- attach-snapshot-policy!
+  "After a dataset is created, offer to attach a sanoid snapshot policy.
+  raw = concatenated sanoid config (for template detection); nil when sanoid
+  isn't installed on the host."
+  [cfg dataset sanoid? raw]
+  (cond
+    (not sanoid?)
+    (println (str "  sanoid is not installed on the host — install with "
+                  "`apt install sanoid` on PVE to enable snapshot policies"))
+
+    (not (confirm-or-no (format "Apply a snapshot policy to %s?" dataset) :no))
+    nil
+
+    :else
+    (pick-and-write-policy! cfg dataset raw)))
+
+(defn- create-dataset!
+  "Interactive: pick a pool, prompt for a dataset name, validate, `zfs create -p`,
+  then offer to attach a snapshot policy. Reads pools once (already fetched by
+  zfs-admin); raw is the current sanoid config (nil if sanoid absent)."
+  [cfg pools sanoid? raw]
+  (let [pool-labels (mapv :name pools)
+        pool (choose-or-back "Select a pool for the new dataset:"
+                             (conj pool-labels BACK))]
+    (when (not= pool BACK)
+      (let [pool-name (first-token pool)]
+        (when-let [name (loop []
+                          (when-let [raw-name (ask-or-nil
+                                               "Dataset name (e.g. `movies` or `backups/nightly`):")]
+                            (let [v (str/trim raw-name)
+                                  full (str pool-name "/" v)]
+                              (cond
+                                (str/blank? v)
+                                (do (println "  name cannot be empty") (recur))
+                                (not (valid-dataset-name? v))
+                                (do (println (str "  invalid — use A-Za-z0-9_-.: and / for nesting;"
+                                                  " each segment must start with an alphanumeric or _"))
+                                    (recur))
+                                (dataset-exists? cfg full)
+                                (do (println (format "  '%s' already exists" full)) (recur))
+                                :else v))))]
+          (let [full (str pool-name "/" name)]
+            (println (format "Creating %s..." full))
+            (if (pve/pve-ssh-soft cfg (format "zfs create -p %s" full))
+              (do (println (format "  ✓ created %s" full))
+                  (attach-snapshot-policy! cfg full sanoid? raw))
+              (println "  ✗ zfs create failed — see error above"))))))))
+
+;; ─── zfs admin submenu ───────────────────────────────────────────────────────
+
+(defn- manage-existing-datasets
+  "Original pool-selection loop, now a leaf of the zfs-admin submenu."
+  [cfg pools consumers sanoid?]
+  (loop []
+    (let [rows (mapv (fn [p]
+                       {:pool p
+                        :label (format "%-16s  size=%-8s  free=%-8s  %s"
+                                       (:name p)
+                                       (fmt-bytes (:size p))
+                                       (fmt-bytes (:free p))
+                                       (or (:health p) "?"))})
+                     pools)
+          labels (conj (mapv :label rows) BACK)
+          pick (choose-or-back "Select a ZFS pool:" labels)]
+      (when (not= pick BACK)
+        (let [pool-name (first-token pick)]
+          (view-pool cfg pool-name consumers sanoid?)
+          (recur))))))
 
 (defn- zfs-admin [cfg]
   (println)
@@ -381,44 +659,209 @@
                            (or (:pve-node cfg) "the PVE node")))
           (choose-or-back "" [BACK]))
       (let [sanoid? (sanoid-installed? cfg)
-            sections (if sanoid? (sanoid-sections (sanoid-config-raw cfg)) [])
             consumers (lxc-consumers cfg)]
         (when-not sanoid?
           (println "(sanoid not installed on host — policy column hidden)"))
         (loop []
-          (let [rows (mapv (fn [p]
-                             {:pool p
-                              :label (format "%-16s  size=%-8s  free=%-8s  %s"
-                                             (:name p)
-                                             (fmt-bytes (:size p))
-                                             (fmt-bytes (:free p))
-                                             (or (:health p) "?"))})
-                           pools)
-                labels (conj (mapv :label rows) BACK)
-                pick (choose-or-back "Select a ZFS pool:" labels)]
-            (when (not= pick BACK)
-              (let [pool-name (first-token pick)]
-                (view-pool cfg pool-name consumers sections sanoid?)
-                (recur)))))))))
+          ;; Re-fetch sanoid config each iteration so create-dataset!'s
+          ;; template-detection sees the current state.
+          (let [raw (when sanoid? (sanoid-config-raw cfg))
+                pick (choose-or-back ""
+                                     ["Create new ZFS dataset"
+                                      "Manage existing ZFS datasets"
+                                      BACK])]
+            (case pick
+              "Create new ZFS dataset"
+              (do (create-dataset! cfg pools sanoid? raw) (recur))
+
+              "Manage existing ZFS datasets"
+              (do (manage-existing-datasets cfg pools consumers sanoid?)
+                  (recur))
+
+              nil)))))))
+
+;; ─── create machine ──────────────────────────────────────────────────────────
+
+(defn- valid-machine-name?
+  "Hostname-ish: starts with alphanumeric, then alphanumeric/dash/underscore.
+  Restricted enough to double as a Proxmox hostname and a filesystem-safe
+  machine-dir name."
+  [s]
+  (boolean (and (not (str/blank? s))
+                (re-matches #"[A-Za-z0-9][A-Za-z0-9_-]*" s))))
+
+(defn- create-machine!
+  "Shell out to `bb -m vm.cli create <name>`. Running the wizard in a child
+  process means a user cancel (which calls System/exit inside prompt.clj) can
+  only terminate the child, not the admin menu."
+  [name]
+  (p/shell {:continue true :in :inherit :out :inherit :err :inherit}
+           "bb" "-m" "vm.cli" "create" name))
+
+(defn- prompt-and-create-machine!
+  "Ask for a machine name, validate, then hand off to the CLI create flow."
+  [cfg]
+  (let [lxc? (= (:backend cfg) "proxmox-lxc")
+        kind (if lxc? "container" "VM")]
+    (when-let [name (loop []
+                      (when-let [raw (ask-or-nil
+                                      (format "%s name (letters, digits, _ and -):"
+                                              (str/capitalize kind)))]
+                        (let [v (str/trim raw)]
+                          (cond
+                            (str/blank? v)
+                            (do (println "  name cannot be empty") (recur))
+                            (not (valid-machine-name? v))
+                            (do (println (str "  invalid — start with a letter or digit,"
+                                              " then letters/digits/underscore/dash"))
+                                (recur))
+                            :else v))))]
+      (let [{:keys [exit]} (create-machine! name)]
+        (when-not (zero? exit)
+          (println (format "  (create %s exited with code %d)" kind exit)))))))
+
+;; ─── manage existing machines ────────────────────────────────────────────────
+
+(defn- machine-state
+  "vm-state normalized to the three menu-visible buckets:
+    :running   — VM/CT is up (or paused, treated as up for Stop-purposes)
+    :stopped   — VM/CT object exists on the hypervisor, not running
+    :destroyed — machine config dir exists, but no VM/CT object
+                 (`vm-state` reports \"undefined\")"
+  [b cfg name]
+  (case (b/vm-state b cfg name)
+    ("running" "paused") :running
+    "stopped"            :stopped
+    :destroyed))
+
+(defn- run-cli!
+  "Shell out to `bb -m vm.cli <cmd> <name>` so the child's own wizard cancels
+  and confirm-or-abort exits can't System/exit the admin menu."
+  [cmd name]
+  (p/shell {:continue true :in :inherit :out :inherit :err :inherit}
+           "bb" "-m" "vm.cli" cmd name))
+
+(defn- machine-ip
+  "IP for display. Prefers the configured static address; falls back to
+  `b/get-ip` only when the VM is up (that call hits the hypervisor / guest
+  agent so it's not worth doing when nothing can answer)."
+  [b cfg name state]
+  (let [raw (machine/read-raw cfg name "static_ip")
+        static (when raw
+                 (some-> (->> (str/split-lines raw)
+                              (keep #(second (re-matches #"address=(.*)" %)))
+                              first)
+                         (str/split #"/") first))]
+    (cond
+      (and static (not (str/blank? static))) static
+      (= state :running)
+      (or (try (let [ip (b/get-ip b cfg name)]
+                 (when-not (str/blank? ip) ip))
+               (catch Exception _ nil))
+          "(unknown)")
+      :else "-")))
+
+(defn- print-machine-summary
+  "Basic per-VM config lines above the action menu."
+  [b cfg name state]
+  (let [rd (fn [f] (machine/read-field cfg name f))
+        hostname (or (rd "hostname") name)
+        profile (or (rd "profile") "?")
+        memory (or (rd "memory") "?")
+        vcpus (or (rd "vcpus") "?")
+        disk (or (rd "disk_size") (rd "var_size") "?")
+        network (or (rd "network") "?")]
+    (println (format "  hostname: %s" hostname))
+    (println (format "  profile:  %s" profile))
+    (println (format "  memory:   %s MB" memory))
+    (println (format "  vcpus:    %s" vcpus))
+    (println (format "  disk:     %s" disk))
+    (println (format "  network:  %s" network))
+    (println (format "  ip:       %s" (machine-ip b cfg name state)))))
+
+(defn- manage-machine
+  "Per-machine submenu. Actions are shelled out to the CLI so the child
+  process owns its own confirm/wizard exits."
+  [b cfg name]
+  (loop []
+    (let [state (machine-state b cfg name)
+          state-label (case state
+                        :running "running"
+                        :stopped "stopped"
+                        :destroyed "destroyed (no VM/CT — machine config remains)")]
+      (println)
+      (println (format "── Machine: %s (%s) ──" name state-label))
+      (print-machine-summary b cfg name state)
+      (println)
+      (let [items (case state
+                    :running   ["Config" "Upgrade" "Stop" "Recreate"]
+                    :stopped   ["Config" "Upgrade" "Start" "Recreate" "Destroy"]
+                    :destroyed ["Config" "Recreate" "Purge"])
+            pick (choose-or-back "" (conj items BACK))]
+        (case pick
+          "Config"   (do (run-cli! "config"   name) (recur))
+          "Upgrade"  (do (run-cli! "upgrade"  name) (recur))
+          "Start"    (do (run-cli! "start"    name) (recur))
+          "Stop"     (do (run-cli! "stop"     name) (recur))
+          "Recreate" (do (run-cli! "recreate" name) (recur))
+          "Destroy"  (do (run-cli! "destroy"  name) (recur))
+          ;; After a successful purge the machine dir is gone; return to the
+          ;; machine list rather than re-drawing this menu for a phantom.
+          "Purge"    (do (run-cli! "purge" name)
+                         (when (machine/exists? cfg name) (recur)))
+          nil)))))
+
+(defn- manage-machines
+  "List all machines with their state, let user drill into one."
+  [b cfg]
+  (loop []
+    (let [entries (machine/list-machines cfg)]
+      (println)
+      (println "── Machines ──")
+      (if (empty? entries)
+        (do (println "  (no machines configured yet)")
+            (choose-or-back "" [BACK]))
+        (let [rows (mapv (fn [{:keys [name profile]}]
+                           (let [s (machine-state b cfg name)]
+                             {:name name
+                              :label (format "%-24s  %-10s  %s"
+                                             name
+                                             (case s
+                                               :running "running"
+                                               :stopped "stopped"
+                                               :destroyed "destroyed")
+                                             profile)}))
+                         entries)
+              labels (conj (mapv :label rows) BACK)
+              pick (choose-or-back "Select a machine:" labels)]
+          (when (not= pick BACK)
+            (let [key (first-token pick)]
+              (manage-machine b cfg key)
+              (recur))))))))
 
 ;; ─── main menu ───────────────────────────────────────────────────────────────
 
 (defn main-menu
-  "Interactive top-level admin menu. The ZFS entry appears only on PVE
-  backends (proxmox / proxmox-lxc); other backends see only the Quit option
-  with an explanatory note."
-  [cfg]
-  (let [pve? (pve-backend? cfg)]
+  "Interactive top-level admin menu. Manage/Create machine entries are
+  backend-agnostic; ZFS admin only appears on PVE backends
+  (proxmox / proxmox-lxc)."
+  [cfg b]
+  (let [pve? (pve-backend? cfg)
+        lxc? (= (:backend cfg) "proxmox-lxc")
+        manage-label (if lxc? "Manage Containers" "Manage VMs")
+        create-label (if lxc? "Create LXC Container" "Create Virtual Machine")]
     (loop []
       (println)
       (println "── Admin ──")
       (when-not pve?
         (println (format "(backend: %s — ZFS admin is PVE-only and hidden)"
                          (:backend cfg))))
-      (let [items (cond-> []
+      (let [items (cond-> [manage-label create-label]
                     pve? (conj "ZFS admin")
                     true (conj "Quit"))
             pick (choose-or-back "" items)]
         (cond
-          (= pick "ZFS admin") (do (zfs-admin cfg) (recur))
-          (= pick "Quit") nil)))))
+          (= pick manage-label) (do (manage-machines b cfg) (recur))
+          (= pick create-label) (do (prompt-and-create-machine! cfg) (recur))
+          (= pick "ZFS admin")  (do (zfs-admin cfg) (recur))
+          (= pick "Quit")       nil)))))

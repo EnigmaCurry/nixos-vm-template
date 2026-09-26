@@ -36,6 +36,11 @@
 (defn- raw-define [cfg name]
   (proc/run! (virsh cfg ["define" (str (:libvirt-dir cfg) "/" name ".xml")])))
 
+(defn- raw-autostart! [cfg name enabled?]
+  (proc/run-ok? (virsh cfg (if enabled?
+                             ["autostart" name]
+                             ["autostart" "--disable" name]))))
+
 (def ^:private default-net-xml
   "<network>
   <name>default</name>
@@ -156,7 +161,7 @@
 
   (define [_ cfg name]
     (println (format "Defining VM in libvirt: %s" name))
-    (proc/run! (virsh cfg ["define" (str (:libvirt-dir cfg) "/" name ".xml")]))
+    (raw-define cfg name)
     (println (format "VM defined. Start with: just start %s" name)))
 
   (undefine [_ cfg name] (undefine! cfg name))
@@ -173,7 +178,10 @@
         (proc/run-ok? (virsh cfg ["net-start" "default"]))
         (proc/run-ok? (virsh cfg ["net-autostart" "default"]))))
     (println (format "Starting VM: %s" name))
-    (proc/run! (virsh cfg ["start" name])))
+    (proc/run! (virsh cfg ["start" name]))
+    (raw-autostart! cfg name true))
+
+  (set-autostart [_ cfg name enabled?] (raw-autostart! cfg name enabled?))
 
   (stop [_ cfg name]
     (println (format "Stopping VM: %s" name))
