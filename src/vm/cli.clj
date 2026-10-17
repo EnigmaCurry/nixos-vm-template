@@ -15,7 +15,8 @@
             [vm.backend :as b]
             [vm.backend.libvirt :as lv]
             [vm.backend.proxmox :as px]
-            [vm.backend.lxc :as lxc]))
+            [vm.backend.lxc :as lxc]
+            [vm.backend.pve-common :as pc]))
 
 (defn- mk-backend [cfg]
   (case (:backend cfg)
@@ -137,6 +138,21 @@
         (println (format "PVE version: %s" (if (str/blank? ver) "unknown" ver))))
       (do (println "Warning: Proxmox tools (pvesh) not found on remote host.")
           (println "This may not be a Proxmox VE node.")))
+    (println)
+    ;; The node name goes into every /nodes/<node>/... API path. A name the host
+    ;; doesn't answer to makes PVE proxy the call to a "remote" node over ssh,
+    ;; failing later with "proxy handler failed: Host key verification failed".
+    (let [declared (not-empty (str/trim (or (:pve-node cfg) "")))
+          known (pc/node-names cfg)]
+      (cond
+        (and declared (seq known) (not (some #{declared} known)))
+        (do (println (format "PVE node: '%s' (from PVE_NODE) is NOT a node on this host." declared))
+            (println (format "  Known nodes: %s" (str/join ", " known)))
+            (println "  Fix PVE_NODE in your .env file (or unset it to auto-detect).")
+            (System/exit 1))
+
+        declared (println (format "PVE node: %s (from PVE_NODE)" declared))
+        :else (println (format "PVE node: %s (auto-detected)" (pc/detect-node! cfg)))))
     (println)
     (println "Connection test passed.")))
 

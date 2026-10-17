@@ -597,7 +597,7 @@
                                                    pve-host cmd))))
                         ;; Test connection and detect node name
                         pve-node-detected (try
-                                           (let [n (pve-ssh "hostname")]
+                                           (let [n (pve-ssh "hostname -s")]
                                              (println "OK")
                                              n)
                                            (catch Exception _

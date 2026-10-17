@@ -12,7 +12,10 @@
             [vm.identity :as identity]
             [vm.mutable :as mutable]
             [vm.wizard :as wizard]
-            [vm.backend :as b]))
+            [vm.backend :as b]
+            ;; Only for node-name resolution, which is identical for both PVE
+            ;; backends; the ssh/rsync helpers below stay local to this ns.
+            [vm.backend.pve-common :as pc]))
 
 ;; ─── ssh / rsync helpers ─────────────────────────────────────────────────────
 
@@ -169,7 +172,7 @@
 
 (defn- sync-firewall! [cfg name]
   (let [vmid (get-vmid cfg name)
-        node (:pve-node cfg)
+        node (pc/node cfg)
         md (machine/machine-dir cfg name)]
     (println (format "Configuring Proxmox firewall for VM '%s' (VMID: %s)..." name vmid))
     (pve-ssh! cfg (format "pvesh set /nodes/%s/qemu/%s/firewall/options --enable 1 --policy_in DROP --policy_out ACCEPT" node vmid))
@@ -236,7 +239,7 @@
   Returns [] on any failure or non-proxmox setup."
   [cfg]
   (try
-    (let [node (:pve-node cfg)
+    (let [node (pc/node cfg)
           out (pve-ssh cfg (format "pvesh get /nodes/%s/hardware/pci --pci-class-blacklist \"\" --output-format json" node))
           all (json/parse-string out true)
           ;; PVE ids come as "0000:BB:SS.F". Group siblings by "BB:SS".
@@ -876,7 +879,7 @@
                                   (filter #(str/starts-with? % "unused")) first)
                              (str/replace #"^unused[0-9]*: " ""))]
         (when-not (str/blank? old-disk)
-          (pve-ssh-soft cfg (format "pvesh delete /nodes/%s/storage/%s/content/%s" (:pve-node cfg) (:pve-storage cfg) old-disk))))
+          (pve-ssh-soft cfg (format "pvesh delete /nodes/%s/storage/%s/content/%s" (pc/node cfg) (:pve-storage cfg) old-disk))))
       (println "Importing new boot disk...")
       (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
       (let [new-disk (some-> (->> (str/split-lines (pve-ssh cfg (format "qm config %s" vmid)))
@@ -986,7 +989,7 @@
   (validate! cfg)
   (b/validate-machine! cfg name (format "The VM must be created first with 'BACKEND=proxmox just create %s'" name))
   (let [vmid (get-vmid cfg name)
-        node (:pve-node cfg)]
+        node (pc/node cfg)]
     (if (str/blank? backup-file)
       (do
         (println (format "Available backups on Proxmox for VMID %s:" vmid))
@@ -1035,7 +1038,7 @@
       (do
         (println (format "Backups on Proxmox storage '%s' (managed VMs only):" (:pve-backup-storage cfg)))
         (let [backups (try (pve-ssh cfg (format "pvesh get /nodes/%s/storage/%s/content --content backup --output-format json"
-                                                (:pve-node cfg) (:pve-backup-storage cfg)))
+                                                (pc/node cfg) (:pve-backup-storage cfg)))
                            (catch Exception _ "[]"))
               parsed (try (json/parse-string backups true) (catch Exception _ []))
               ids (set vmids)

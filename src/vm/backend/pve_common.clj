@@ -75,6 +75,76 @@
 (defn ssh-host [cfg] (:pve-host cfg))
 (defn ssh-prefix [cfg] (ssh-base cfg))
 
+;; ─── node name ───────────────────────────────────────────────────────────────
+;; The node in a `/nodes/<node>/...` API path must be the node's own name as PVE
+;; knows it (what `ls /etc/pve/nodes` shows) — not the ssh target. Any other
+;; spelling of the same box (an ssh_config alias, an IP, a second DNS name) makes
+;; the API treat it as a *remote* node and proxy the request there over ssh,
+;; which dies as:
+;;
+;;     proxy handler failed: Host key verification failed
+;;
+;; So when PVE_NODE is unset, ask the host its name rather than guessing from
+;; PVE_HOST (which is what this used to do).
+
+(def ^:private node-cache (atom {}))
+
+(defn- host-node-names
+  "[short-hostname node-names] as the host reports them, in one ssh round-trip.
+  node-names is empty if /etc/pve/nodes is unreadable (not a PVE host)."
+  [cfg]
+  (let [out (pve-ssh cfg "hostname -s; echo ---; ls /etc/pve/nodes 2>/dev/null || true")
+        [h names] (str/split out #"---" 2)]
+    [(str/trim (or h ""))
+     (->> (str/split-lines (or names ""))
+          (map str/trim)
+          (remove str/blank?)
+          vec)]))
+
+(defn detect-node!
+  "Ask the host which PVE node it is. Exits with a pointer at PVE_NODE if the
+  host is a cluster member whose hostname isn't one of the node names."
+  [cfg]
+  (let [[short-host names] (host-node-names cfg)]
+    (cond
+      (some #{short-host} names) short-host
+      (= 1 (count names)) (first names)
+      (seq names)
+      (do (println (format "Error: cannot tell which Proxmox node '%s' is." (:pve-host cfg)))
+          (println (format "  Its hostname is '%s', but /etc/pve/nodes holds: %s"
+                           short-host (str/join ", " names)))
+          (println "  Set PVE_NODE to the right one in your .env file.")
+          (System/exit 1))
+      :else short-host)))
+
+(defn node
+  "The Proxmox node name to use in API paths. PVE_NODE wins when set; otherwise
+  it is detected from the host, once per process per host."
+  [cfg]
+  (validate! cfg)
+  (if-let [declared (not-empty (str/trim (or (:pve-node cfg) "")))]
+    (do
+      ;; A node name is a bare DNS label — dots are impossible, so an FQDN or IP
+      ;; in PVE_NODE is certainly wrong, and would ssh-proxy rather than fail
+      ;; honestly.
+      (when (str/includes? declared ".")
+        (println (format "Error: PVE_NODE='%s' is not a node name." declared))
+        (println "  Use the node's bare name (as in `ls /etc/pve/nodes`), not an FQDN or IP.")
+        (System/exit 1))
+      declared)
+    (let [k (:pve-host cfg)]
+      (or (get @node-cache k)
+          (let [n (detect-node! cfg)]
+            (binding [*out* *err*]
+              (println (format "Detected PVE node: %s (set PVE_NODE to pin it)" n)))
+            (swap! node-cache assoc k n)
+            n)))))
+
+(defn node-names
+  "Node names known to the host, or [] if they can't be read."
+  [cfg]
+  (second (host-node-names cfg)))
+
 ;; ─── vmid ────────────────────────────────────────────────────────────────────
 
 (defn vmid-file [cfg name] (str (machine/machine-dir cfg name) "/vmid"))
@@ -143,9 +213,9 @@
   \"qemu\" or \"lxc\" (the pvesh resource path differs)."
   [cfg name guest-type]
   (let [vmid (get-vmid cfg name)
-        node (:pve-node cfg)
+        nodename (node cfg)
         md (machine/machine-dir cfg name)
-        base (format "/nodes/%s/%s/%s/firewall" node guest-type vmid)]
+        base (format "/nodes/%s/%s/%s/firewall" nodename guest-type vmid)]
     (println (format "Configuring Proxmox firewall for '%s' (VMID: %s)..." name vmid))
     (pve-ssh! cfg (format "pvesh set %s/options --enable 1 --policy_in DROP --policy_out ACCEPT" base))
     (let [existing (try (pve-ssh cfg (format "pvesh get %s/rules --output-format json" base))

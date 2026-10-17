@@ -10,7 +10,9 @@
             [vm.prompt :as prompt]
             [vm.machine :as machine]
             [vm.profile :as profile]
-            [vm.net :as net]))
+            [vm.net :as net]
+            ;; Leaf ns (ssh helpers only) — safe to require without a cycle.
+            [vm.backend.pve-common :as pc]))
 
 (defn- pve-ssh [cfg cmd]
   (try (proc/capture (concat (:ssh cfg) ["-o" "BatchMode=yes" "-o" "StrictHostKeyChecking=accept-new"
@@ -23,8 +25,11 @@
   HDMI audio function. Returns [{:id :label :group} ...] sorted by id.
   Returns [] on any failure (no PVE, no lspci output, network error)."
   [cfg]
-  (let [out (pve-ssh cfg (format "pvesh get /nodes/%s/hardware/pci --pci-class-blacklist \"\" --output-format json"
-                                 (:pve-node cfg)))]
+  (let [node (try (pc/node cfg) (catch Exception _ nil))
+        out (if (str/blank? node)
+              ""
+              (pve-ssh cfg (format "pvesh get /nodes/%s/hardware/pci --pci-class-blacklist \"\" --output-format json"
+                                   node)))]
     (if (str/blank? out)
       []
       (try
@@ -545,7 +550,7 @@ done 2>/dev/null"]
             (let [devs (pve-list-display-pci cfg)]
               (cond
                 (empty? devs)
-                (do (println (str "  No display-class PCI devices found on " (or (:pve-node cfg) "PVE")
+                (do (println (str "  No display-class PCI devices found on " (or (not-empty (:pve-node cfg)) "PVE")
                                   " (or query failed)."))
                     (println (format "  Edit %s/pci_devices by hand after creation." md))
                     nil)

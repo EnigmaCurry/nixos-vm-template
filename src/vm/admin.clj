@@ -656,7 +656,7 @@
   (let [pools (zpool-list cfg)]
     (if (empty? pools)
       (do (println (format "No ZFS pools found on %s (or the host has no ZFS)."
-                           (or (:pve-node cfg) "the PVE node")))
+                           (or (not-empty (:pve-node cfg)) "the PVE node")))
           (choose-or-back "" [BACK]))
       (let [sanoid? (sanoid-installed? cfg)
             consumers (lxc-consumers cfg)]

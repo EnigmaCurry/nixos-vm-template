@@ -35,6 +35,12 @@ Ask the user (as plain text prompts, not multiple choice):
 - **PVE_STORAGE** - Storage for VM disks (default: local)
 - **PVE_BRIDGE** - Network bridge (default: vmbr0)
 
+Then detect the node name and write it as `PVE_NODE` (do not ask for it):
+
+```bash
+ssh <PVE_HOST> hostname -s
+```
+
 Explain that they should configure their SSH connection in `~/.ssh/config`:
 ```
 Host pve
@@ -56,6 +62,8 @@ Same SSH setup as proxmox. Ask the user (plain text prompts):
 - **PVE_STORAGE** - CT-capable rootfs storage (a `zfspool` or `dir` storage, e.g. `local-zfs` or a pool name like `rust`; NOT a bare ZFS pool path). Check with `ssh <host> pvesm status`.
 - **PVE_BRIDGE** - Network bridge (default: vmbr0)
 
+Detect `PVE_NODE` the same way (`ssh <PVE_HOST> hostname -s`) and write it.
+
 Notes specific to this backend:
 - LXC is **mutable-only** (read-write rootfs; `nixos-rebuild` runs inside). There is no immutable/semi-mutable mode.
 - The `nas` profile (NFS + Samba) is LXC-only and runs the container **privileged** with an apparmor-unconfined override (for kernel NFS).
@@ -65,6 +73,7 @@ Example `.env`:
 ```bash
 BACKEND=proxmox-lxc
 PVE_HOST=pve
+PVE_NODE=pve1
 PVE_STORAGE=local-zfs
 PVE_BRIDGE=vmbr0
 PVE_BACKUP_STORAGE=local
@@ -83,6 +92,7 @@ Example `.env` for proxmox:
 ```bash
 BACKEND=proxmox
 PVE_HOST=pve
+PVE_NODE=pve1
 PVE_STORAGE=local-lvm
 PVE_BRIDGE=vmbr0
 PVE_BACKUP_STORAGE=local
@@ -116,7 +126,7 @@ If the test passes, tell the user the setup is complete and they can now use `ju
 |----------|---------|-------------|
 | `BACKEND` | - | Set to `proxmox` |
 | `PVE_HOST` | (required) | SSH config host name (or hostname/IP) |
-| `PVE_NODE` | `$PVE_HOST` | Proxmox node name (for clusters) |
+| `PVE_NODE` | auto-detected | Proxmox node name — the node's own name (`ls /etc/pve/nodes`), not an ssh alias or IP. Detected from the host when unset; `just test-connection` reports it |
 | `PVE_STORAGE` | `local` | Proxmox storage for VM disks |
 | `PVE_BRIDGE` | `vmbr0` | Network bridge name |
 | `PVE_DISK_FORMAT` | `qcow2` | Disk format (qcow2, raw, vmdk) |
@@ -128,7 +138,7 @@ If the test passes, tell the user the setup is complete and they can now use `ju
 |----------|---------|-------------|
 | `BACKEND` | - | Set to `proxmox-lxc` |
 | `PVE_HOST` | (required) | SSH config host name (or hostname/IP) |
-| `PVE_NODE` | `$PVE_HOST` | Proxmox node name (for clusters) |
+| `PVE_NODE` | auto-detected | Proxmox node name — the node's own name (`ls /etc/pve/nodes`), not an ssh alias or IP. Detected from the host when unset; `just test-connection` reports it |
 | `PVE_STORAGE` | `local` | CT-capable rootfs storage (zfspool/dir; NOT a bare pool path) |
 | `PVE_BRIDGE` | `vmbr0` | Network bridge name |
 | `PVE_BACKUP_STORAGE` | `local` | Proxmox storage for backups |

@@ -44,7 +44,7 @@ Set these in your `.env` file or as environment variables:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `PVE_HOST` | Yes | - | SSH config host name (or hostname/IP). SSH always logs in as `root` — any `user@` prefix is stripped. |
-| `PVE_NODE` | Yes | `$PVE_HOST` | PVE node name (must match Proxmox hostname) |
+| `PVE_NODE` | No | auto-detected | PVE node name — the node's *own* name (what `ls /etc/pve/nodes` shows), not an ssh alias or IP. Detected from the host when unset; set it to pin the node (and to scope the machines dir by node name). |
 | `PVE_STORAGE` | No | `local` | Target storage for VM disks |
 | `PVE_BRIDGE` | No | `vmbr0` | Default network bridge |
 | `PVE_DISK_FORMAT` | No | `auto` | Disk format for import (`auto`, `qcow2`, or `raw`). `auto` detects from the PVE storage type. |

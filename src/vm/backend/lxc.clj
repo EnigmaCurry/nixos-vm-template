@@ -696,7 +696,7 @@
   (pc/validate! cfg)
   (b/validate-machine! cfg name)
   (let [vmid (pc/get-vmid cfg name)
-        node (:pve-node cfg)]
+        node (pc/node cfg)]
     (if (str/blank? backup-file)
       (let [backups (try (pc/pve-ssh cfg (format "pvesh get /nodes/%s/storage/%s/content --content backup --vmid %s --output-format json"
                                                  node (:pve-backup-storage cfg) vmid))
@@ -730,7 +730,7 @@
     (if (empty? vmids)
       (println "No managed containers found.")
       (let [backups (try (pc/pve-ssh cfg (format "pvesh get /nodes/%s/storage/%s/content --content backup --output-format json"
-                                                 (:pve-node cfg) (:pve-backup-storage cfg)))
+                                                 (pc/node cfg) (:pve-backup-storage cfg)))
                          (catch Exception _ "[]"))
             parsed (try (json/parse-string backups true) (catch Exception _ []))
             filtered (filter #(contains? vmids (str (:vmid %))) parsed)]

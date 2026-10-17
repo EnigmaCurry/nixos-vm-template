@@ -124,7 +124,10 @@
 
        "proxmox"
        {:pve-host (pve-ssh-target (env "PVE_HOST" ""))
-        :pve-node (strip-user (env "PVE_NODE" (env "PVE_HOST" "")))
+        ;; Blank when unset: resolved from the host at first use (see
+        ;; vm.backend.pve-common/node). Must NOT fall back to PVE_HOST — an
+        ;; ssh alias / IP there makes the API ssh-proxy to a "remote" node.
+        :pve-node (strip-user (env "PVE_NODE" ""))
         :pve-storage (env "PVE_STORAGE" "local")
         :pve-bridge (env "PVE_BRIDGE" "vmbr0")
         ;; "auto" -> detected at first use from the PVE storage type
@@ -143,7 +146,10 @@
        ;; the rootfs is a tarball and identity is injected via `pct mount`.
        "proxmox-lxc"
        {:pve-host (pve-ssh-target (env "PVE_HOST" ""))
-        :pve-node (strip-user (env "PVE_NODE" (env "PVE_HOST" "")))
+        ;; Blank when unset: resolved from the host at first use (see
+        ;; vm.backend.pve-common/node). Must NOT fall back to PVE_HOST — an
+        ;; ssh alias / IP there makes the API ssh-proxy to a "remote" node.
+        :pve-node (strip-user (env "PVE_NODE" ""))
         ;; rootfs storage for the container — MUST be a CT-capable storage
         ;; (zfspool or dir), e.g. local-zfs / rust; NOT a bare ZFS pool name.
         :pve-storage (env "PVE_STORAGE" "local")
