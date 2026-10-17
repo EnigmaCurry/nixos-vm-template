@@ -35,6 +35,23 @@
   ([msg] (wiz "confirm" msg))
   ([msg default] (wiz "confirm" msg :default default)))
 
+(defn confirm-3way
+  "Yes/no confirmation that tells a cancel (ESC / Ctrl-C) apart from a \"no\" —
+  returns :yes, :no or :cancel. The pod's `confirm` answers nil for both, so
+  this shells out to script-wizard's CLI, where the answer is the exit code:
+  0 = yes, 1 = no, and --cancel-code 2 = cancelled. `default` is :yes or :no.
+  (Same CLI bypass as vm.admin uses for its menus.)"
+  [msg default]
+  (let [dflt (case default :yes "yes" :no "no" nil)
+        argv (cond-> ["confirm" "--cancel-code" "2" (str msg)]
+               dflt (conj dflt))
+        r (apply p/shell {:out :string :err :inherit :in :inherit :continue true}
+                 "script-wizard" argv)]
+    (case (long (:exit r))
+      0 :yes
+      1 :no
+      :cancel)))
+
 (defn choose
   "Single choice from `choices`. Optional `default` value preselects it."
   ([msg choices] (wiz "choose" msg (vec choices)))

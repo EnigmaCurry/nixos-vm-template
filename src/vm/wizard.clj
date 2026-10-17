@@ -402,6 +402,31 @@ done 2>/dev/null"]
             (recur acc')
             (str/join "\n" acc')))))))
 
+(defn- ask-reconfigure
+  "Whether to rewrite an existing machine config: :yes, :no or :cancel.
+  NIXOS_VM_RECONFIGURE answers it non-interactively. Three-way because \"no\"
+  and ESC mean different things here — keep this config vs. stop entirely."
+  []
+  (let [env-reconf (some-> (System/getenv "NIXOS_VM_RECONFIGURE") str/lower-case str/trim)]
+    (cond
+      (contains? #{"yes" "y" "1" "true"} env-reconf) :yes
+      (contains? #{"no"  "n" "0" "false"} env-reconf) :no
+      :else (prompt/confirm-3way "Reconfigure this VM?" :no))))
+
+(defn configure?
+  "Whether `create` should run the config wizard for `name`: true when there is
+  no config yet, otherwise it asks. Answering no is not a cancellation — it
+  keeps the existing config and create goes on to build the VM from it."
+  [cfg name]
+  (let [md (machine/machine-dir cfg name)]
+    (if-not (fs/directory? md)
+      true
+      (do (println (format "Machine config already exists: %s" md))
+          (case (ask-reconfigure)
+            :yes true
+            :no (do (println "Using existing config.") false)
+            (do (println "Cancelled.") (System/exit 1)))))))
+
 (defn config-vm-interactive
   "Interactive machine configuration via script-wizard. Mutates the machine dir.
   from-create? skips the trailing 'just create' hint and lets create reuse config."
@@ -414,17 +439,14 @@ done 2>/dev/null"]
                name0)
         md (machine/machine-dir cfg name)
         reconfigure? (fs/directory? md)]
-    (when reconfigure?
+    ;; Under `create` the caller has already settled this (see configure?) and
+    ;; only calls us when the config is to be written, so this is `just config`
+    ;; only — where declining means abort, nothing left to do.
+    (when (and reconfigure? (not from-create?))
       (println (format "Machine config already exists: %s" md))
-      (let [env-reconf (some-> (System/getenv "NIXOS_VM_RECONFIGURE") str/lower-case str/trim)
-            answer (cond
-                     (contains? #{"yes" "y" "1" "true"} env-reconf) true
-                     (contains? #{"no"  "n" "0" "false"} env-reconf) false
-                     :else (prompt/confirm "Reconfigure this VM?" :no))]
-        (when-not answer
-          (if from-create?
-            (do (println "Using existing config.") (System/exit 0))
-            (do (println "Aborted.") (System/exit 0))))))
+      (when-not (= :yes (ask-reconfigure))
+        (println "Aborted.")
+        (System/exit 0)))
     (let [cur-profile (or (machine/read-field cfg name "profile") "")
           cur-memory (or (machine/read-field cfg name "memory") "")
           cur-vcpus (or (machine/read-field cfg name "vcpus") "")

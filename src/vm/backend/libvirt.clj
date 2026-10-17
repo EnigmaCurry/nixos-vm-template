@@ -306,7 +306,8 @@
     (println (format "Error: VM '%s' is currently running. Destroy it first:" name))
     (println (format "  just destroy %s" name))
     (System/exit 1))
-  (wizard/config-vm-interactive cfg name "" true)
+  (when (wizard/configure? cfg name)
+    (wizard/config-vm-interactive cfg name "" true))
   (finish-create! this cfg name))
 
 (defn create-vm-batch [this cfg name profile memory vcpus var-size network static-ip]
