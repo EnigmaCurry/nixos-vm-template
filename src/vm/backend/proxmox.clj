@@ -13,8 +13,9 @@
             [vm.mutable :as mutable]
             [vm.wizard :as wizard]
             [vm.backend :as b]
-            ;; Only for node-name resolution, which is identical for both PVE
-            ;; backends; the ssh/rsync helpers below stay local to this ns.
+            ;; Only for node-name resolution and net0/interface parsing, which are
+            ;; identical for both PVE backends; the ssh/rsync helpers below stay
+            ;; local to this ns.
             [vm.backend.pve-common :as pc]))
 
 ;; ─── ssh / rsync helpers ─────────────────────────────────────────────────────
@@ -157,6 +158,16 @@
 
 (defn- disk-ref [config virtio]
   (some-> (config-line config virtio) (str/split #",") first))
+
+(defn- agent-ipv4
+  "The interface's first non-loopback IPv4 address, from a guest-agent
+  network-get-interfaces entry."
+  [iface]
+  (->> (:ip-addresses iface)
+       (filter #(= (:ip-address-type %) "ipv4"))
+       (map :ip-address)
+       (remove #(or (str/blank? (str %)) (str/starts-with? (str %) "127.")))
+       first))
 
 (defn- bridge-for [cfg name]
   (let [netcfg (or (machine/read-field cfg name "network") "nat")]
@@ -533,18 +544,25 @@
                       mem (if maxmem (str (quot (parse-long (re-find #"\d+" maxmem)) 1048576)) "-")]
                   (println (format "%-8s %-20s %-10s %s" vmid (or nm "?") (or status "?") mem))))))))))
 
+  ;; The guest agent lists every interface the VM has, including the ones it
+  ;; raised itself (wg0, tailscale, docker), in no particular order — so pick
+  ;; the NIC whose MAC is net0's rather than whichever came first. One ssh
+  ;; round-trip: get-ip runs in polling loops.
   (get-ip [_ cfg name]
     (validate! cfg)
     (let [vmid (get-vmid cfg name)
-          out (try (pve-ssh cfg (format "qm guest cmd %s network-get-interfaces" vmid)) (catch Exception _ ""))]
-      (when-not (str/blank? out)
-        (try
-          (->> (json/parse-string out true)
-               (remove #(= (:name %) "lo"))
-               (mapcat :ip-addresses)
-               (filter #(= (:ip-address-type %) "ipv4"))
-               first :ip-address)
-          (catch Exception _ nil)))))
+          out (try (pve-ssh cfg (format (str "qm config %s 2>/dev/null | grep -E '^net0:' || true; echo ---; "
+                                             "qm guest cmd %s network-get-interfaces 2>/dev/null || true")
+                                        vmid vmid))
+                   (catch Exception _ ""))
+          [conf ifaces] (str/split out #"\n?---\n?" 2)
+          mac (pc/net0-mac conf)
+          parsed (when-not (str/blank? ifaces)
+                   (try (json/parse-string ifaces true) (catch Exception _ nil)))
+          usable (filter agent-ipv4 parsed)]
+      (some agent-ipv4
+            [(some #(when (and mac (= (some-> (:hardware-address %) str/lower-case) mac)) %) usable)
+             (first (remove #(re-matches pc/overlay-iface-re (str (:name %))) usable))])))
 
   (console [_ cfg name]
     (validate! cfg)

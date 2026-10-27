@@ -200,6 +200,27 @@
   (let [netcfg (or (machine/read-field cfg name "network") "nat")]
     (if (str/starts-with? netcfg "bridge:") (subs netcfg 7) (:pve-bridge cfg))))
 
+;; ─── guest addresses ─────────────────────────────────────────────────────────
+;;
+;; A guest can hold several global IPv4 addresses: the NIC the hypervisor gave
+;; it (net0), plus whatever it raises itself — wg0 from the wireguard profile,
+;; tailscale, docker. Nothing orders the interface lists the hypervisor reports,
+;; so "the machine's IP" has to be pinned to net0 (by MAC, or by name for LXC
+;; where pct names the veth) with the self-raised interfaces ruled out.
+;; Otherwise `just ssh <name>` reaches a VM over the LAN on one host and over
+;; the overlay on another, purely by enumeration order.
+
+(def overlay-iface-re
+  "Interface names a guest raises itself — never its net0 address."
+  #"lo|wg\d*|tailscale\d*|docker\d*|br-.*|veth.*|tun\d*|tap\d*|zt.*")
+
+(defn net0-mac
+  "net0's MAC, lower-cased. Covers both spellings: `virtio=<mac>` (qm) and
+  `hwaddr=<mac>` (pct)."
+  [config]
+  (when-let [net0 (config-line (or config "") "net0")]
+    (some-> (re-find #"(?i)[0-9a-f]{2}(?::[0-9a-f]{2}){5}" net0) str/lower-case)))
+
 ;; ─── firewall ────────────────────────────────────────────────────────────────
 
 (defn port-lines [path]

@@ -390,6 +390,48 @@
         (println (format "  Profile: %s, rootfs: %sG on %s" prof (rootfs-gb size) (:pve-storage cfg)))
         (println (format "  Hostname: %s" hostname))))))
 
+;; ─── address lookup ──────────────────────────────────────────────────────────
+;;
+;; `lxc-info -iH` prints a container's addresses unnamed, in kernel
+;; address-dump order, which tracks ifindex — and nothing pins the veth's
+;; ifindex below wg0's, so recreating net0 on a running container (or a
+;; different boot ordering) flips them. Taking the first address there means
+;; `just ssh nas` reaches the LAN address on one host and the wireguard
+;; address on another. /lxc/<vmid>/interfaces instead names every interface
+;; and reports its hwaddr, which pins the answer to net0 regardless of order
+;; (see pve-common/overlay-iface-re). The guest can't be asked directly —
+;; `pct exec <vmid> -- ip` fails on a NixOS rootfs, which has no /usr/bin.
+
+(defn- net0-nic
+  "[name mac] of the container's own NIC, from net0 in `pct config`. pct always
+  writes a name=; eth0 is what create-ct! sets."
+  [conf]
+  [(or (second (re-find #"name=([^,]+)" (or (pc/config-line (or conf "") "net0") ""))) "eth0")
+   (pc/net0-mac conf)])
+
+(defn- iface-addr
+  "The IPv4 address of `nic` (by name, else by hwaddr, else the first
+  non-overlay interface) in an /lxc/<vmid>/interfaces response."
+  [json-str [nic-name nic-mac]]
+  (let [ifaces (when-not (str/blank? json-str)
+                 (try (json/parse-string json-str true) (catch Exception _ nil)))
+        addr #(not-empty (first (str/split (str (:inet %)) #"/")))
+        usable (filter addr ifaces)]
+    (some addr [(some #(when (= (:name %) nic-name) %) usable)
+                (some #(when (and nic-mac (= (some-> (:hwaddr %) str/lower-case) nic-mac)) %) usable)
+                (first (remove #(re-matches pc/overlay-iface-re (str (:name %))) usable))])))
+
+(defn- legacy-addr
+  "Fallback for a PVE without the interfaces endpoint (pre-6.2): unnamed
+  addresses from lxc-info, so an overlay address can still win here."
+  [out]
+  (->> (str/split-lines (or out ""))
+       (map str/trim)
+       (remove str/blank?)
+       (remove #(str/includes? % ":"))
+       (remove #(str/starts-with? % "127."))
+       first))
+
 ;; ─── the record ──────────────────────────────────────────────────────────────
 
 (defrecord Lxc []
@@ -487,13 +529,18 @@
   (get-ip [_ cfg name]
     (pc/validate! cfg)
     (let [vmid (pc/get-vmid cfg name)
-          out (try (pc/pve-ssh cfg (format "lxc-info -n %s -iH 2>/dev/null" vmid)) (catch Exception _ ""))]
-      (->> (str/split-lines out)
-           (map str/trim)
-           (remove str/blank?)
-           (remove #(str/includes? % ":"))
-           (remove #(str/starts-with? % "127."))
-           first)))
+          ;; One round-trip: net0 (which NIC is ours), the named interface list,
+          ;; and the unnamed lxc-info fallback. get-ip runs in polling loops.
+          out (try (pc/pve-ssh
+                    cfg
+                    (format (str "pct config %s 2>/dev/null | grep -E '^net0:' || true; echo ---; "
+                                 "pvesh get /nodes/%s/lxc/%s/interfaces --output-format json 2>/dev/null || true; "
+                                 "echo ---; lxc-info -n %s -iH 2>/dev/null || true")
+                            vmid (pc/node cfg) vmid vmid))
+                   (catch Exception _ ""))
+          [conf ifaces unnamed] (str/split out #"\n?---\n?" 3)]
+      (or (iface-addr ifaces (net0-nic conf))
+          (legacy-addr unnamed))))
 
   (console [_ cfg name]
     (pc/validate! cfg)
