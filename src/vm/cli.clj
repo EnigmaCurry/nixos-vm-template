@@ -167,8 +167,10 @@
 ;; ─── dispatch ────────────────────────────────────────────────────────────────
 
 (defn- run [args]
-  (let [[command & rest] args
-        a (vec rest)
+  ;; NB: not `& rest` — that shadows clojure.core/rest, which the set-profile
+  ;; branch below calls to join the trailing profile args.
+  (let [[command & more] args
+        a (vec more)
         backend (or (System/getenv "BACKEND") "libvirt")
         cfg (config/load-config backend)
         B (delay (mk-backend cfg))]
