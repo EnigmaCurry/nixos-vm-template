@@ -3,6 +3,14 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    # devShell-only pin for libguestfs (guestfish). Current nixpkgs marks
+    # libguestfs `broken = true; # stuck on fuse2`, which makes the whole
+    # devShell refuse to evaluate — and libguestfs-with-appliance is never in
+    # the binary cache (its output exceeds hydra's size limit), so allowing
+    # the broken marker would mean a local appliance build on every machine.
+    # This is the last revision carrying the same version (1.56.2) unmarked.
+    # Drop this input once nixpkgs unbreaks libguestfs.
+    nixpkgs-guestfs.url = "github:NixOS/nixpkgs/e554fab72f81915600f3f449b786fd9af40439a5";
     home-manager = {
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -26,7 +34,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, home-manager, sway-home, nix-flatpak, opencode, script-wizard, ... }@inputs:
+  outputs = { self, nixpkgs, nixpkgs-guestfs, home-manager, sway-home, nix-flatpak, opencode, script-wizard, ... }@inputs:
     let
       lib = nixpkgs.lib;
 
@@ -233,6 +241,7 @@
       devShells = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          guestfsPkgs = nixpkgs-guestfs.legacyPackages.${system};
         in
         {
           default = pkgs.mkShell {
@@ -241,7 +250,7 @@
               babashka  # bb - runs the VM-management CLI (src/vm/)
               qemu
               libvirt
-              libguestfs-with-appliance
+              guestfsPkgs.libguestfs-with-appliance  # pinned: see nixpkgs-guestfs input
               virt-manager
               mkpasswd  # For generating password hashes
               rsync     # proxmox backend: transfers built images to PVE
