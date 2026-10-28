@@ -266,7 +266,9 @@ See [Peer ACL](#peer-acl-wireguardnft) for the full chain reference.
 Every VM with the `wireguard` profile loads an nftables table
 (`inet wireguard`) at boot that governs wg0 traffic on that peer.
 The rules body lives at `machines/<name>/wireguard.nft` and is seeded
-(with every rule commented out) by `just create` alongside `wireguard.conf`.
+(with every rule commented out) by `just create` alongside `wireguard.conf`,
+from [templates/wireguard.nft](templates/wireguard.nft) — read that file for
+the starting point you get.
 
 **Three chains.**
 

@@ -1,0 +1,70 @@
+# WireGuard ACL for wg0 on this VM.  Full reference: WIREGUARD.md
+#
+#   wg-input    wg peers reaching services on this machine
+#   wg-forward  wg peers reaching each other through this machine (hub)
+#
+# Anything not accepted is dropped. wg-input is the only authority for
+# wg-side access — tcp_ports / udp_ports do not apply to wg0.
+# ICMP echo-request to this machine is accepted by the hook chain before
+# wg-input; peer-to-peer ping still needs a wg-forward rule.
+#
+# $laptop, $phone, ... are peer addresses, parsed from `# hostname:` lines
+# in wireguard.conf (characters outside A-Za-z0-9_ become `_`, so peer
+# `mike-xps13` is `$mike_xps13`). Bare IPs and CIDRs work too.
+#
+# These examples use made-up peers. Uncomment and customize as needed.
+# Unknown peer names cause loading to fail, leaving wg0 locked down
+# (check: systemctl status wireguard-nft).
+#
+# `define` must appear before the chains that use it.
+#
+# Apply changes with: just upgrade <name>
+#   (or: just sync-identity <name> + systemctl restart wireguard-nft)
+
+# ── Services ─────────────────────────────────────────────────────────
+
+define ssh_services  = { 22 }       # SSH
+define web_services  = { 80, 443 }  # HTTP, HTTPS
+define file_services = { 445 }      # SMB / Samba
+
+# ── Peer groups ──────────────────────────────────────────────────────
+
+# define admins       = { $laptop, $desktop }
+# define file_clients = { $laptop, $desktop, $phone }
+# define dev_servers  = { $server }
+
+# ── Services on this machine ─────────────────────────────────────────
+
+chain wg-input {
+  # Replies to connections this machine allowed — keep:
+  ct state established,related accept
+
+  # ip saddr $admins       tcp dport $ssh_services accept
+  # ip saddr $file_clients tcp dport $file_services accept
+
+  drop
+}
+
+# ── Peer-to-peer traffic through this hub ────────────────────────────
+# Leave as-is (drop only) unless this machine is a hub.
+
+chain wg-forward {
+  # Replies — keep:
+  ct state established,related accept
+
+  # ip saddr $admins ip daddr $dev_servers icmp type echo-request accept
+  # (IPv6 peers use ip6 saddr / ip6 daddr and icmpv6 type echo-request)
+  # ip saddr $admins ip daddr $dev_servers tcp dport $ssh_services accept
+  # ip saddr $admins ip daddr $dev_servers tcp dport $web_services accept
+
+  drop
+}
+
+# ── Optional NAT prerouting for wg0 ──────────────────────────────────
+# Only installed if this chain is present; unmatched packets fall through
+# unchanged. Filter rules must still allow the rewritten port.
+#
+# chain wg-prerouting {
+#   ip saddr $admins tcp dport 443  redirect to :3923
+#   ip saddr $laptop tcp dport 8080 dnat to $server:80
+# }

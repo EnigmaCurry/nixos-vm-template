@@ -4,6 +4,7 @@
   implementation (existing machines and the .claude skills depend on them)."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
+            [clojure.java.io :as io]
             [vm.proc :as proc]
             [vm.prompt :as prompt]
             [vm.profile :as profile]
@@ -95,6 +96,20 @@
          (remove #(or (str/starts-with? % "#") (str/blank? %)))
          count)
     0))
+
+(defn- seed-template
+  "Read a seed template from templates/<filename>. Templates that are useful
+  to read on their own (and to link to from the docs) live there as real
+  files instead of strings in this namespace — e.g. templates/wireguard.nft.
+  Resolved from the classpath (bb.edn :paths), falling back to the
+  repo-relative path."
+  [filename]
+  (if-let [res (io/resource filename)]
+    (slurp res)
+    (let [f (str "templates/" filename)]
+      (when-not (fs/exists? f)
+        (throw (ex-info (format "missing seed template: %s" f) {:file filename})))
+      (slurp f))))
 
 (def ^:private samba-credentials-template
   "Commented samba_credentials seeded when the samba-mount profile is selected.
@@ -407,82 +422,6 @@
              "#   phone      alice"
              "#   admin      alice"
              "#   guest-pc   bob"
-             ""]))
-
-(def ^:private wireguard-nft-template
-  "Commented wireguard.nft seeded whenever the wireguard profile is selected.
-  Two chains (wg-input, wg-forward) both default-drop until users add rules."
-  (str/join "\n"
-            ["# WireGuard ACL for wg0 on this VM.  Full reference: WIREGUARD.md"
-             "#"
-             "#   wg-input    wg peers reaching services on this machine"
-             "#   wg-forward  wg peers reaching each other through this machine (hub)"
-             "#"
-             "# Anything not accepted is dropped. wg-input is the only authority for"
-             "# wg-side access — tcp_ports / udp_ports do not apply to wg0."
-             "# ICMP echo-request to this machine is accepted by the hook chain before"
-             "# wg-input; peer-to-peer ping still needs a wg-forward rule."
-             "#"
-             "# $laptop, $phone, ... are peer addresses, parsed from `# hostname:` lines"
-             "# in wireguard.conf (characters outside A-Za-z0-9_ become `_`, so peer"
-             "# `mike-xps13` is `$mike_xps13`). Bare IPs and CIDRs work too."
-             "#"
-             "# These examples use made-up peers. Uncomment and customize as needed."
-             "# Unknown peer names cause loading to fail, leaving wg0 locked down"
-             "# (check: systemctl status wireguard-nft)."
-             "#"
-             "# `define` must appear before the chains that use it."
-             "#"
-             "# Apply changes with: just upgrade <name>"
-             "#   (or: just sync-identity <name> + systemctl restart wireguard-nft)"
-             ""
-             "# ── Services ─────────────────────────────────────────────────────────"
-             ""
-             "define ssh_services  = { 22 }       # SSH"
-             "define web_services  = { 80, 443 }  # HTTP, HTTPS"
-             "define file_services = { 445 }      # SMB / Samba"
-             ""
-             "# ── Peer groups ──────────────────────────────────────────────────────"
-             ""
-             "# define admins       = { $laptop, $desktop }"
-             "# define file_clients = { $laptop, $desktop, $phone }"
-             "# define dev_servers  = { $server }"
-             ""
-             "# ── Services on this machine ─────────────────────────────────────────"
-             ""
-             "chain wg-input {"
-             "  # Replies to connections this machine allowed — keep:"
-             "  ct state established,related accept"
-             ""
-             "  # ip saddr $admins       tcp dport $ssh_services accept"
-             "  # ip saddr $file_clients tcp dport $file_services accept"
-             ""
-             "  drop"
-             "}"
-             ""
-             "# ── Peer-to-peer traffic through this hub ────────────────────────────"
-             "# Leave as-is (drop only) unless this machine is a hub."
-             ""
-             "chain wg-forward {"
-             "  # Replies — keep:"
-             "  ct state established,related accept"
-             ""
-             "  # ip saddr $admins ip daddr $dev_servers icmp type echo-request accept"
-             "  # (IPv6 peers use ip6 saddr / ip6 daddr and icmpv6 type echo-request)"
-             "  # ip saddr $admins ip daddr $dev_servers tcp dport $ssh_services accept"
-             "  # ip saddr $admins ip daddr $dev_servers tcp dport $web_services accept"
-             ""
-             "  drop"
-             "}"
-             ""
-             "# ── Optional NAT prerouting for wg0 ──────────────────────────────────"
-             "# Only installed if this chain is present; unmatched packets fall through"
-             "# unchanged. Filter rules must still allow the rewritten port."
-             "#"
-             "# chain wg-prerouting {"
-             "#   ip saddr $admins tcp dport 443  redirect to :3923"
-             "#   ip saddr $laptop tcp dport 8080 dnat to $server:80"
-             "# }"
              ""]))
 
 (defn- wireguard-template
@@ -1032,12 +971,12 @@
           (spit path (wireguard-template name kp))
           (fs/set-posix-file-permissions path "rw-------")
           (println (format "Created: %s/wireguard.conf (public key: %s)" md (:public kp)))))
-      ;; wireguard.nft — peer ACL template (wg-input + wg-forward chains,
-      ;; both default-drop until the user uncomments allow rules). Seeded
-      ;; alongside wireguard.conf; users can still add or delete the file
-      ;; later by hand.
+      ;; wireguard.nft — peer ACL template from templates/wireguard.nft (wg-input
+      ;; + wg-forward chains, both default-drop until the user uncomments allow
+      ;; rules). Seeded alongside wireguard.conf; users can still add or delete
+      ;; the file later by hand.
       (when (and wireguard? (not (fs/exists? (str md "/wireguard.nft"))))
-        (spit (str md "/wireguard.nft") wireguard-nft-template)
+        (spit (str md "/wireguard.nft") (seed-template "wireguard.nft"))
         (println (format "Created: %s/wireguard.nft (rules all commented — edit to allow wg traffic)" md)))
       ;; mounts — LXC host bind mounts. All-commented on first create;
       ;; the wizard overwrites this file when the user picks datasets, and

@@ -96,7 +96,7 @@ The base image remains untouched. Each VM's boot disk stores only the delta from
 ├── flake.nix           # Main flake defining VM image builds
 ├── flake.lock
 ├── Justfile            # Stable user interface; recipes call `bb -m vm.cli ...`
-├── bb.edn              # Babashka project (:paths ["src"])
+├── bb.edn              # Babashka project (:paths ["src" "templates"])
 ├── bootstrap.bb        # Create/manage VMs from pre-built images (no local build)
 ├── src/vm/             # VM-management logic (Babashka/Clojure)
 │   ├── cli.clj         # Entrypoint: parse command, build config, dispatch
@@ -122,6 +122,8 @@ The base image remains untouched. Each VM's boot disk stores only the delta from
 │   ├── overlay-etc.nix # /etc overlayfs configuration
 │   ├── journald.nix    # journald /var/log/journal configuration
 │   └── ...
+├── templates/          # Seed templates copied into machines/<name>/ on create
+│   └── wireguard.nft   # WireGuard peer ACL (nftables) — read via vm.machine/seed-template
 ├── machines/           # Per-VM configurations
 │   └── default/        # Default VM configuration
 │       ├── meta.nix    # Machine metadata (system architecture)
