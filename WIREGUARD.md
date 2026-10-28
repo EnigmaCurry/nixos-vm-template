@@ -266,7 +266,7 @@ See [Peer ACL](#peer-acl-wireguardnft) for the full chain reference.
 Every VM with the `wireguard` profile loads an nftables table
 (`inet wireguard`) at boot that governs wg0 traffic on that peer.
 The rules body lives at `machines/<name>/wireguard.nft` and is seeded
-(all-commented) by `just create` alongside `wireguard.conf`.
+(with every rule commented out) by `just create` alongside `wireguard.conf`.
 
 **Three chains.**
 
@@ -305,6 +305,13 @@ visible in `nft list table inet wireguard`. If two peer names collapse
 to the same identifier (e.g. `mike-xps13` + `mike.xps13`), the
 `nft -f` load fails on the duplicate `define` — rename one peer via
 `just wireguard <hub>` to fix it.
+
+**Grouping.** Group peers and ports with `define` at the top of the file
+(`define admins = { $laptop, $desktop }`, `define ssh_services = { 22 }`)
+or with a named `set` block, then reference them as `$admins` / `@name`
+in rules. Every `define`/`set` must appear **before** the chains that use
+it — otherwise `nft` fails with `unknown identifier` and the fail-closed
+drop-everything table is installed.
 
 **Rule syntax.** Standard nftables expressions (see `man nft`). Reply
 traffic is handled by conntrack — only describe *new* connections to
@@ -442,7 +449,7 @@ paths aren't filtered by this ACL.
 
 Seeds `machines/mynas/wireguard.conf` (fresh keypair, `Address = 10.0.0.2/24`,
 `ListenPort = 51820`, commented `[Peer]` template) plus `udp_ports` (`51820`
-already listed), an all-commented `wireguard.nft` (peer ACL — see
+already listed), a `wireguard.nft` with all rules commented out (peer ACL — see
 [Peer ACL](#peer-acl-wireguardnft)), and the nas identity files.
 
 Note the public key for later:
