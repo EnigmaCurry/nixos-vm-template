@@ -50,6 +50,11 @@ Set these in your `.env` file or as environment variables:
 | `PVE_DISK_FORMAT` | No | `auto` | Disk format for import (`auto`, `qcow2`, or `raw`). `auto` detects from the PVE storage type. |
 | `PVE_BACKUP_STORAGE` | No | `local` | Storage for vzdump backups |
 
+> **Per-machine override:** a machine can use a different storage by putting a
+> one-line `storage` file in its machine config directory (e.g.
+> `machines/<name>/storage` containing `local-zfs`); absent or blank = the
+> global `PVE_STORAGE` above.
+
 Example `.env`:
 
 ```bash

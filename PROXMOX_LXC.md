@@ -69,6 +69,11 @@ PVE_BACKUP_STORAGE=local
 > like `rust` works only if a storage of that name exists (`pvesm status`). This
 > is the most common first-run mistake.
 
+> **Per-machine override:** a machine can use a different storage by putting a
+> one-line `storage` file in its machine config directory (e.g.
+> `machines/<name>/storage` containing `SSD1T`); absent or blank = the global
+> `PVE_STORAGE` above.
+
 ## Quick Start (Proxmox LXC)
 
 Put the backend and your PVE settings in a `.env` once (see
