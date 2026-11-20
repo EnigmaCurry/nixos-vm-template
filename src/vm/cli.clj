@@ -216,7 +216,7 @@
       ;; shared composites
       "destroy"       (b/destroy-vm @B cfg (arg a 0 nil))
       "purge"         (b/purge-vm @B cfg (arg a 0 nil))
-      "recreate"      (b/recreate-vm @B cfg (arg a 0 nil) (arg a 1 "30G") (arg a 2 ""))
+      "recreate"      (b/recreate-vm @B cfg (arg a 0 nil) (arg a 1 "") (arg a 2 ""))
       ;; primitives
       "start"         (b/start @B cfg (arg a 0 nil))
       "stop"          (let [n (arg a 0 nil)]

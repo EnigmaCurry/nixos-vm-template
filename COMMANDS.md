@@ -35,7 +35,7 @@ See [PROFILES.md](PROFILES.md) for the list of available profiles.
 | `just upgrade <name>` | Rebuild image, preserve /var data |
 | `just resize <name>` | Interactively resize memory, vcpus, and /var disk |
 | `just resize-var <name> <size>` | Resize just the /var disk |
-| `just recreate <name> [var_size] [network]` | Fresh start, replace all disks (data lost) |
+| `just recreate <name> [var_size] [network]` | Fresh start, replace all disks (data lost). `var_size` defaults to the machine's `disk_size` (or legacy `var_size`) file, else 30G |
 | `just network-config <name> [network]` | Change network mode (nat or bridge) |
 | `just mutable <name>` | Toggle mutable mode (single read-write disk) |
 | `just passwd <name>` | Set or clear root password for console access |

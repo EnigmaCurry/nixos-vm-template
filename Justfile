@@ -122,7 +122,7 @@ purge name:
     @{{VM_CLI}} purge "{{name}}"
 
 # Recreate a VM from its existing machine config (force stop, replace disks, start)
-recreate name var_size="30G" network="":
+recreate name var_size="" network="":
     @{{VM_CLI}} recreate "{{name}}" "{{var_size}}" "{{network}}"
 
 # Update nix flake.lock
