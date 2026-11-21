@@ -94,6 +94,7 @@
               :host host
               :repo-dir (System/getProperty "user.dir")
               :output-dir output-dir
+              :machines-base machines-base
               :machines-dir machines-dir
               ;; Per-VM disk dir, scoped by backend/host (mirrors machines-dir) so
               ;; a libvirt and a proxmox VM of the same name don't collide on disk.

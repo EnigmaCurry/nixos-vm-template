@@ -11,6 +11,7 @@
             [vm.admin :as admin]
             [vm.wireguard :as wg]
             [vm.acme :as acme]
+            [vm.prune :as prune]
             [vm.proc :as proc]
             [vm.backend :as b]
             [vm.backend.libvirt :as lv]
@@ -183,6 +184,7 @@
       "export"        (profile/export-profile cfg (arg a 0 "core"))
       "list-profiles" (profile/list-profiles cfg)
       "clean"         (profile/clean cfg)
+      "prune-images"  (prune/prune-images cfg (= (arg a 0 "") "--yes"))
       "shell"         (profile/dev-shell cfg)
       ;; configuration
       "config"        (wizard/config-vm-interactive cfg (arg a 0 "") (arg a 1 "") false)

@@ -163,6 +163,7 @@ Note that `upgrade` and `recreate` will delete all snapshots.
 | `just ssh <name>`     | SSH into VM (as user)            |
 | `just ssh admin@<name>` | SSH into VM (as admin, has sudo) |
 | `just clean`          | Remove built images and VM disks |
+| `just prune-images [--yes]` | Delete built images no machine uses (each pins its closure as a GC root); then run `nix-collect-garbage` |
 | `just shell`          | Enter Nix development shell      |
 
 ## Host admin (PVE only)

@@ -236,6 +236,10 @@ backups:
 clean:
     @{{VM_CLI}} clean
 
+# Delete built images that no machine is configured to use (then: nix-collect-garbage)
+prune-images *args:
+    @{{VM_CLI}} prune-images {{args}}
+
 # Enter development shell
 shell:
     @{{VM_CLI}} shell
