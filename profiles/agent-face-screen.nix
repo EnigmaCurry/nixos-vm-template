@@ -145,8 +145,9 @@ in
       export LD_LIBRARY_PATH="${libPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
     '';
 
-    # Hyprland + ffmpeg + the driver stack outgrow the "auto" disk size
-    # (see moonshine-nvidia). Below home-manager's mkForce, so that wins.
-    virtualisation.diskSize = lib.mkOverride 51 16384;
+    # Hyprland + ffmpeg + the driver stack (+ the rust profile, to build
+    # agent-face) outgrow both the "auto" disk size and 16 GiB: a 16 GiB image
+    # failed cptofs with rust added. The qcow2 is sparse, so the headroom is free.
+    virtualisation.diskSize = lib.mkOverride 51 32768;
   };
 }
