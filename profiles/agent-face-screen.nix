@@ -10,8 +10,9 @@
 #   - a discrete NVIDIA GPU passed through, with a monitor on one of its
 #     outputs (unlike sunshine-plasma-nvidia, no virtual display is forced:
 #     check `cat /sys/class/drm/card*-*/status` reads "connected")
-#   - the pipewire profile (agent-face speaks and listens through it)
 #   - the rust profile, to build agent-face on the VM
+# The pipewire profile (agent-face speaks and listens through it) is
+# included by this one.
 #
 # Composes with docker + nvidia (both set the same driver options).
 { config, lib, pkgs, ... }:
@@ -67,14 +68,14 @@ let
   libPath = lib.makeLibraryPath (with pkgs; [ vulkan-loader wayland libxkbcommon ]);
 in
 {
-  config = {
-    assertions = [
-      {
-        assertion = config.services.pipewire.enable;
-        message = "agent-face-screen profile requires the pipewire profile";
-      }
-    ];
+  # The pipewire profile, included rather than asserted: Hyprland's NixOS
+  # module turns services.pipewire.enable on by itself, so an assertion on it
+  # passed without the profile (and without its ALSA routing, rtkit and audio
+  # group, which agent-face's ALSA audio needs). Listing pipewire as well is
+  # harmless: a module imported twice by path is loaded once.
+  imports = [ ./pipewire.nix ];
 
+  config = {
     # ── NVIDIA bare-metal driver stack (as nvidia / sunshine-plasma-nvidia) ──
     nixpkgs.config.allowUnfree = true;
     services.xserver.videoDrivers = [ "nvidia" ];
