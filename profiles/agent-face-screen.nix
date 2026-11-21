@@ -96,6 +96,9 @@ in
     hardware.nvidia.open = true;
     hardware.nvidia.modesetting.enable = true;  # nvidia-drm.modeset=1
 
+    # Run dynamically linked binaries not built for NixOS.
+    programs.nix-ld.enable = true;
+
     # ── Hyprland under UWSM, the regular user logged in at boot ──────────
     programs.hyprland = {
       enable = true;
