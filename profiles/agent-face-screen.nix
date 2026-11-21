@@ -128,10 +128,17 @@ in
     systemd.user.services."agent-face@" = {
       overrideStrategy = "asDropin";
       environment.LD_LIBRARY_PATH = libPath;
+      # NixOS gives every unit it writes a PATH of its own (coreutils, grep,
+      # sed, systemd), and this drop-in would put it over the session's:
+      # agent-face runs fc-match, ffmpeg, pactl, pw-cat, wpctl, grim, curl.
+      environment.PATH = lib.mkForce
+        "/run/wrappers/bin:/etc/profiles/per-user/%u/bin:/run/current-system/sw/bin";
     };
 
     # ── What agent-face needs at run time (docs/new-screen.md) ───────────
     fonts.packages = [ pkgs.liberation_ttf ];
+    # The sans agent-face finds with fc-match, as on the other screens.
+    fonts.fontconfig.defaultFonts.sansSerif = [ "Liberation Sans" ];
     environment.systemPackages = with pkgs; [
       git
       curl
