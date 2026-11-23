@@ -88,9 +88,9 @@
 (defn- resolve-disk-format
   "Return the disk format to use, honoring PVE_DISK_FORMAT unless it's \"auto\"
   (or blank), in which case detect from the storage type. Memoized per storage."
-  [cfg]
+  [cfg name]
   (let [fmt (str/lower-case (or (:pve-disk-format cfg) "auto"))
-        stg (:pve-storage cfg)]
+        stg (machine/storage-of cfg name)]
     (if-not (contains? #{"" "auto"} fmt)
       fmt
       (or (get @storage-type-cache stg)
@@ -290,7 +290,7 @@
                              "--efidisk0 %s:1,efitype=4m,pre-enrolled-keys=0,format=%s "
                              "--serial0 socket --vga serial0 "
                              "--net0 virtio=%s,bridge=%s,firewall=%s")
-                        vmid name vcpus memory (:pve-storage cfg) (resolve-disk-format cfg)
+                        vmid name vcpus memory (machine/storage-of cfg name) (resolve-disk-format cfg name)
                         mac bridge (:pve-firewall cfg))))
 
 ;; ─── NBD mount helper ────────────────────────────────────────────────────────
@@ -364,9 +364,9 @@
               (println "Transferring var disk to Proxmox...")
               (pve-rsync! cfg (str vd "/var.qcow2") (format "%s:%s/%s/var.qcow2" (:pve-host cfg) stg name))
               (println "Importing boot disk...")
-              (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
+              (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (machine/storage-of cfg name) (resolve-disk-format cfg name)))
               (println "Importing var disk...")
-              (pve-ssh! cfg (format "qm importdisk %s %s/%s/var.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
+              (pve-ssh! cfg (format "qm importdisk %s %s/%s/var.qcow2 %s --format %s" vmid stg name (machine/storage-of cfg name) (resolve-disk-format cfg name)))
               (println "Attaching disks and configuring boot...")
               (let [cfg-str (pve-ssh cfg (format "qm config %s" vmid))
                     boot-vol (config-line cfg-str "unused0")
@@ -382,8 +382,8 @@
               (sync-firewall! cfg name)
               (apply-pci-passthrough! cfg name)
               (println (format "Created VM '%s' on Proxmox (VMID: %s)" name vmid))
-              (println (format "  Boot disk imported to %s" (:pve-storage cfg)))
-              (println (format "  Var disk imported to %s (%s)" (:pve-storage cfg) var-size))
+              (println (format "  Boot disk imported to %s" (machine/storage-of cfg name)))
+              (println (format "  Var disk imported to %s (%s)" (machine/storage-of cfg name) var-size))
               (println (format "  Identity: hostname=%s" (machine/read-field cfg name "hostname")))))))))
 
   (create-disks-mutable [_ cfg name disk-size]
@@ -402,7 +402,7 @@
         (println "Transferring disk to Proxmox...")
         (pve-rsync! cfg disk (format "%s:%s/%s/disk.qcow2" (:pve-host cfg) stg name))
         (println "Importing disk...")
-        (pve-ssh! cfg (format "qm importdisk %s %s/%s/disk.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
+        (pve-ssh! cfg (format "qm importdisk %s %s/%s/disk.qcow2 %s --format %s" vmid stg name (machine/storage-of cfg name) (resolve-disk-format cfg name)))
         (println "Attaching disk and configuring boot...")
         (let [disk-vol (config-line (pve-ssh cfg (format "qm config %s" vmid)) "unused0")]
           (when (str/blank? disk-vol)
@@ -415,7 +415,7 @@
         (sync-firewall! cfg name)
         (apply-pci-passthrough! cfg name)
         (println (format "Created mutable VM '%s' on Proxmox (VMID: %s)" name vmid))
-        (println (format "  Disk imported to %s (%s)" (:pve-storage cfg) disk-size))
+        (println (format "  Disk imported to %s (%s)" (machine/storage-of cfg name) disk-size))
         (println (format "  Hostname: %s" (machine/read-field cfg name "hostname")))
         (println)
         (println "NOTE: This is a mutable VM. To rebuild/upgrade from inside the VM:")
@@ -770,7 +770,7 @@
         (pve-rsync! cfg disk (format "%s:%s/%s/disk.qcow2" (:pve-host cfg) stg name))
         (println "Importing disk...")
         (pve-ssh! cfg (format "qm importdisk %s %s/%s/disk.qcow2 %s --format %s"
-                              vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
+                              vmid stg name (machine/storage-of cfg name) (resolve-disk-format cfg name)))
         (println "Attaching disk and configuring boot...")
         (let [disk-vol (config-line (pve-ssh cfg (format "qm config %s" vmid)) "unused0")]
           (when (str/blank? disk-vol)
@@ -781,7 +781,7 @@
 
         ;; 5) Attach the cloud-init seed drive so cloned VMs pick it up on first boot
         (println "Attaching cloud-init drive...")
-        (pve-ssh! cfg (format "qm set %s --ide2 %s:cloudinit" vmid (:pve-storage cfg)))
+        (pve-ssh! cfg (format "qm set %s --ide2 %s:cloudinit" vmid (machine/storage-of cfg name)))
 
         ;; 6) Convert to a PVE template (also marks the disk read-only)
         (println "Converting to PVE template...")
@@ -793,7 +793,7 @@
         (println)
         (println (format "Template '%s' created on Proxmox (VMID: %s)" name vmid))
         (println (format "  Profile: %s" combined))
-        (println (format "  Storage: %s" (:pve-storage cfg)))
+        (println (format "  Storage: %s" (machine/storage-of cfg name)))
         (println (format "  Bridge:  %s" bridge))
         (println (format "  Disk:    %s" disk-size))
         (println)
@@ -829,7 +829,7 @@
             bridge (bridge-for cfg dest)
             mac (machine/read-field cfg dest "mac-address")]
         (println (format "Cloning VM on Proxmox (%s -> %s)..." source-vmid dest-vmid))
-        (pve-ssh! cfg (format "qm clone %s %s --full 1 --name %s --storage %s" source-vmid dest-vmid dest (:pve-storage cfg)))
+        (pve-ssh! cfg (format "qm clone %s %s --full 1 --name %s --storage %s" source-vmid dest-vmid dest (machine/storage-of cfg dest)))
         (pve-ssh! cfg (format "qm set %s --net0 virtio=%s,bridge=%s,firewall=%s" dest-vmid mac bridge (:pve-firewall cfg)))
         (pve-ssh! cfg (format "qm set %s --memory %s --cores %s" dest-vmid memory vcpus))
         (if (machine/mutable? cfg source)
@@ -898,9 +898,9 @@
                                   (filter #(str/starts-with? % "unused")) first)
                              (str/replace #"^unused[0-9]*: " ""))]
         (when-not (str/blank? old-disk)
-          (pve-ssh-soft cfg (format "pvesh delete /nodes/%s/storage/%s/content/%s" (pc/node cfg) (:pve-storage cfg) old-disk))))
+          (pve-ssh-soft cfg (format "pvesh delete /nodes/%s/storage/%s/content/%s" (pc/node cfg) (machine/storage-of cfg name) old-disk))))
       (println "Importing new boot disk...")
-      (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (:pve-storage cfg) (resolve-disk-format cfg)))
+      (pve-ssh! cfg (format "qm importdisk %s %s/%s/boot.qcow2 %s --format %s" vmid stg name (machine/storage-of cfg name) (resolve-disk-format cfg name)))
       (let [new-disk (some-> (->> (str/split-lines (pve-ssh cfg (format "qm config %s" vmid)))
                                   (filter #(str/starts-with? % "unused")) last)
                              (str/replace #"^unused[0-9]*: " ""))]
@@ -1033,7 +1033,7 @@
         (b/force-stop this cfg name)
         (pve-ssh-soft cfg (format "qm destroy %s --destroy-unreferenced-disks 1 --purge 1" vmid))
         (println "Restoring VM from backup...")
-        (pve-ssh! cfg (format "qmrestore %s %s --storage %s" backup-file vmid (:pve-storage cfg)))
+        (pve-ssh! cfg (format "qmrestore %s %s --storage %s" backup-file vmid (machine/storage-of cfg name)))
         (println)
         (println (format "Restore complete. Start VM with: BACKEND=proxmox just start %s" name))))))
 

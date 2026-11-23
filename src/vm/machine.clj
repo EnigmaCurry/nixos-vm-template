@@ -46,6 +46,14 @@
         (semi-mutable? cfg name) "semi-mutable"
         :else "immutable"))
 
+(defn storage-of
+  "The Proxmox storage to use for this machine's disks: the machine's
+  `storage` file when present and non-blank, otherwise the backend's global
+  default (:pve-storage cfg, from PVE_STORAGE). Proxmox backends only."
+  [cfg name]
+  (let [s (read-field cfg name "storage")]
+    (if (str/blank? s) (:pve-storage cfg) s)))
+
 (defn list-machines
   "Return a sorted vector of {:name :profile} for every machine config dir.
   :profile is \"unknown\" when the machine has no profile file."

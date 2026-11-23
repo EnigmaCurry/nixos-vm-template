@@ -376,7 +376,7 @@
                                       "--rootfs %s:%s --net0 name=eth0,bridge=%s,hwaddr=%s,ip=dhcp,firewall=%s "
                                       "--hostname %s")
                                  vmid tmpl (if priv? "0" "1") (:lxc-features cfg) vcpus memory
-                                 (:pve-storage cfg) (rootfs-gb size) bridge mac (:pve-firewall cfg) hostname))
+                                 (machine/storage-of cfg name) (rootfs-gb size) bridge mac (:pve-firewall cfg) hostname))
         (apply-mounts! cfg name vmid)
         (when priv?
           ;; kernel nfsd in a privileged CT needs the apparmor profile relaxed.
@@ -387,7 +387,7 @@
         (pc/sync-firewall! cfg name "lxc")
         (pc/pve-ssh-soft cfg (format "rm -f %s" tmpl))
         (println (format "Created LXC '%s' (VMID: %s)." name vmid))
-        (println (format "  Profile: %s, rootfs: %sG on %s" prof (rootfs-gb size) (:pve-storage cfg)))
+        (println (format "  Profile: %s, rootfs: %sG on %s" prof (rootfs-gb size) (machine/storage-of cfg name)))
         (println (format "  Hostname: %s" hostname))))))
 
 ;; ─── address lookup ──────────────────────────────────────────────────────────
@@ -661,7 +661,7 @@
             bridge (pc/bridge-for cfg dest)
             mac (machine/read-field cfg dest "mac-address")]
         (pc/pve-ssh! cfg (format "pct clone %s %s --full 1 --hostname %s --storage %s"
-                                 source-vmid dest-vmid dest (:pve-storage cfg)))
+                                 source-vmid dest-vmid dest (machine/storage-of cfg dest)))
         (pc/pve-ssh! cfg (format "pct set %s --net0 name=eth0,bridge=%s,hwaddr=%s,ip=dhcp,firewall=%s" dest-vmid bridge mac (:pve-firewall cfg)))
         (pc/pve-ssh! cfg (format "pct set %s --memory %s --cores %s" dest-vmid memory vcpus))
         (println "Wiping SSH host key inherited from source...")
@@ -760,7 +760,7 @@
         (b/confirm-or-abort "Are you sure? [y/N] ")
         (b/force-stop this cfg name)
         (pc/pve-ssh-soft cfg (format "pct destroy %s --purge 1" vmid))
-        (pc/pve-ssh! cfg (format "pct restore %s %s --storage %s" vmid backup-file (:pve-storage cfg)))
+        (pc/pve-ssh! cfg (format "pct restore %s %s --storage %s" vmid backup-file (machine/storage-of cfg name)))
         (println (format "Restore complete. Start with: BACKEND=proxmox-lxc just start %s" name))))))
 
 (defn ssh-vm [cfg input]

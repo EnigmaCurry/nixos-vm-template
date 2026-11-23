@@ -20,6 +20,7 @@ Each VM has a machine config directory at `machines/<name>/` containing:
 - `hosts` - Extra /etc/hosts entries (optional)
 - `vmid` - Proxmox VMID (proxmox backend only)
 - `pci_devices` - Proxmox PCI passthrough (proxmox backend only); one `--hostpciN` spec per line. See [PROXMOX.md](PROXMOX.md#gpu-passthrough).
+- `storage` - Proxmox storage for the VM's disks (proxmox / proxmox-lxc backends only); absent or blank = the global `PVE_STORAGE` default
 
 These files are generated during `just create` and preserved across
 `just upgrade`, `just sync-identity`, and `just recreate`.
