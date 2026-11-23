@@ -122,7 +122,7 @@ purge name:
     @{{VM_CLI}} purge "{{name}}"
 
 # Recreate a VM from its existing machine config (force stop, replace disks, start)
-recreate name var_size="30G" network="":
+recreate name var_size="" network="":
     @{{VM_CLI}} recreate "{{name}}" "{{var_size}}" "{{network}}"
 
 # Update nix flake.lock
@@ -235,6 +235,10 @@ backups:
 # Clean built images and VM disks (keeps machine configs)
 clean:
     @{{VM_CLI}} clean
+
+# Delete built images that no machine is configured to use (then: nix-collect-garbage)
+prune-images *args:
+    @{{VM_CLI}} prune-images {{args}}
 
 # Enter development shell
 shell:

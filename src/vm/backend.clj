@@ -225,7 +225,13 @@
   "Recreate a VM from its existing machine config (fresh disks, preserved config)."
   [b cfg name var-size network]
   (validate-machine! cfg name (format "Use '%s create %s' for new VMs" (just-cmd cfg) name))
-  (let [var-size (machine/normalize-size var-size)
+  ;; A blank var-size means the machine's own: disk_size, then the legacy
+  ;; var_size, as create does (proxmox finish-create!, libvirt).
+  (let [var-size (machine/normalize-size
+                  (or (not-empty (str/trim (str var-size)))
+                      (machine/read-field cfg name "disk_size")
+                      (machine/read-field cfg name "var_size")
+                      "30G"))
         profile (machine/read-field cfg name "profile")]
     (when-not (str/blank? network)
       (net/network-config cfg name network))
@@ -239,6 +245,7 @@
       (println (format "(Machine config in %s/ will be preserved)" (machine/machine-dir cfg name)))
       (println (format "Profile: %s" profile))
       (println (format "Network: %s" current-network))
+      (println (format "Disk (/var): %s" var-size))
       (confirm-or-abort "Are you sure? [y/N] ")
       (println (format "Recreating VM '%s' with profile: %s" name profile))
       ;; Preserve the VMID (proxmox/lxc) across deprovision so recreate reuses the

@@ -47,7 +47,7 @@
 
       # Available composable profiles (mixin-style, no inheritance)
       # core is always implicitly included via coreModules
-      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "samba-mount" "syncthing" "traefik" "semi-mutable" "mutable" ];
+      availableProfiles = [ "core" "docker" "podman" "nvidia" "pipewire" "python" "rust" "dev" "home-manager" "claude" "open-code" "woodpecker" "moonshine-nvidia" "sunshine-plasma-nvidia" "agent-face-screen" "samba-mount" "syncthing" "traefik" "semi-mutable" "mutable" ];
 
       # Common profile combinations (convenience shortcuts)
       # These are pre-defined combinations that users commonly need
